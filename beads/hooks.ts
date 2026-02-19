@@ -2,11 +2,10 @@ import { isToolCallEventType, type ExtensionAPI } from "@mariozechner/pi-coding-
 import {
   buildBeadsPrimeMessage,
   buildObservabilitySummary,
-  buildResumeContext,
+  buildRecoveryContext,
+  formatRecoveryMessage,
   isBrCloseCommand,
   parseBeadsSessionMode,
-  parseBrReadyJson,
-  parseBrShowJson,
   shouldShowContextReminder,
 } from "./lib.ts";
 import type { BeadsState } from "./commands.ts";
@@ -65,25 +64,24 @@ export function registerBeadsHooks(
 
     state.shouldPrime = false;
 
-    let resumeContext: string | undefined;
-    const inProgress = await deps.runBr(["list", "--status", "in_progress", "--sort", "updated_at", "--json"]);
-    if (inProgress.code === 0) {
-      const [firstIssue] = parseBrReadyJson(inProgress.stdout);
-      if (firstIssue) {
-        const showResult = await deps.runBr(["show", firstIssue.id, "--json"]);
-        if (showResult.code === 0) {
-          const detail = parseBrShowJson(showResult.stdout);
-          if (detail) {
-            resumeContext = buildResumeContext(detail);
-          }
-        }
-      }
+    const recovery = await buildRecoveryContext({ runBr: deps.runBr, runGit: deps.runGit });
+
+    if (recovery) {
+      state.currentIssueId = recovery.issue.id;
+
+      return {
+        message: {
+          customType: "beads-prime",
+          content: formatRecoveryMessage(recovery),
+          display: false,
+        },
+      };
     }
 
     return {
       message: {
         customType: "beads-prime",
-        content: buildBeadsPrimeMessage({ beadsEnabled: state.beadsEnabled, resumeContext }),
+        content: buildBeadsPrimeMessage({ beadsEnabled: state.beadsEnabled }),
         display: false,
       },
     };
