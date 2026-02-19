@@ -19,6 +19,7 @@ import {
   parseBrDepListJson,
   formatCheckpointTrail,
   formatRecoveryMessage,
+  parseGitStatusPorcelain,
   DIRTY_TREE_CLOSE_WARNING,
 } from "./lib.ts";
 import type { BrComment } from "./lib.ts";
@@ -511,6 +512,36 @@ test("formatRecoveryMessage truncates uncommitted files to 15", () => {
   assert.match(msg, /file14\.ts/);
   assert.ok(!msg.includes("file15.ts"));
   assert.match(msg, /and 5 more/);
+});
+
+test("parseGitStatusPorcelain parses modified and new files", () => {
+  const output = " M src/parser.ts\n M tests/parser.test.ts\n?? src/new-file.ts\n";
+  const files = parseGitStatusPorcelain(output);
+  assert.deepEqual(files, [
+    "src/parser.ts (M)",
+    "tests/parser.test.ts (M)",
+    "src/new-file.ts (?)",
+  ]);
+});
+
+test("parseGitStatusPorcelain handles staged and unstaged mix", () => {
+  const output = "M  src/staged.ts\nMM src/both.ts\nA  src/added.ts\nD  src/deleted.ts\n";
+  const files = parseGitStatusPorcelain(output);
+  assert.equal(files.length, 4);
+  assert.match(files[0], /staged\.ts/);
+  assert.match(files[3], /deleted\.ts/);
+});
+
+test("parseGitStatusPorcelain returns empty array for clean repo", () => {
+  assert.deepEqual(parseGitStatusPorcelain(""), []);
+  assert.deepEqual(parseGitStatusPorcelain("  \n"), []);
+});
+
+test("parseGitStatusPorcelain handles renamed files", () => {
+  const output = "R  old-name.ts -> new-name.ts\n";
+  const files = parseGitStatusPorcelain(output);
+  assert.equal(files.length, 1);
+  assert.match(files[0], /new-name\.ts/);
 });
 
 test("dirty tree close warning text includes semantic-commit guidance", () => {

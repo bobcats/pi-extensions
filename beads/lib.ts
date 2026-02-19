@@ -269,6 +269,27 @@ export function formatRecoveryMessage(ctx: RecoveryContext): string {
   return lines.join("\n");
 }
 
+export function parseGitStatusPorcelain(output: string): string[] {
+  if (!output.trim()) return [];
+
+  return output
+    .split("\n")
+    .filter((line) => line.length >= 4)
+    .map((line) => {
+      const xy = line.slice(0, 2);
+      let path = line.slice(3);
+
+      const arrowIndex = path.indexOf(" -> ");
+      if (arrowIndex !== -1) {
+        path = path.slice(arrowIndex + 4);
+      }
+
+      const code = xy.trim() || "?";
+      const label = code === "??" ? "?" : code;
+      return `${path} (${label})`;
+    });
+}
+
 export function buildResumeContext(issue: BrShowIssue): string {
   const lastComment = issue.comments?.length ? issue.comments[issue.comments.length - 1]! : null;
   let line = `## Resuming: ${issue.id} — ${issue.title}`;
