@@ -164,6 +164,49 @@ export function parseBrShowJson(json: string): BrShowIssue | null {
   }
 }
 
+export function parseBrDepListJson(json: string): BrIssueSummary[] {
+  try {
+    const parsed = JSON.parse(json) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .map((row) => normalizeIssueRow(row))
+      .filter((issue): issue is BrIssueSummary => issue !== null);
+  } catch {
+    return [];
+  }
+}
+
+function formatRelativeTime(date: Date, now: Date): string {
+  const diffMs = now.getTime() - date.getTime();
+  if (!Number.isFinite(diffMs)) return "unknown";
+  const diffMin = Math.floor(diffMs / 60000);
+  if (diffMin < 1) return "just now";
+  if (diffMin < 60) return `${diffMin}m ago`;
+  const diffHours = Math.floor(diffMin / 60);
+  if (diffHours < 24) return `${diffHours}h ago`;
+  const diffDays = Math.floor(diffHours / 24);
+  return `${diffDays}d ago`;
+}
+
+export function formatCheckpointTrail(
+  comments: BrComment[] | undefined,
+  now: Date,
+): string[] {
+  if (!comments?.length) return [];
+
+  const MAX_COMMENTS = 5;
+  const MAX_TEXT_LENGTH = 200;
+
+  const recent = comments.slice(-MAX_COMMENTS);
+  return recent.map((c) => {
+    const time = formatRelativeTime(new Date(c.created_at), now);
+    const text = c.text.length > MAX_TEXT_LENGTH
+      ? c.text.slice(0, MAX_TEXT_LENGTH - 3) + "..."
+      : c.text;
+    return `- [${time}] ${text}`;
+  });
+}
+
 export function buildResumeContext(issue: BrShowIssue): string {
   const lastComment = issue.comments?.length ? issue.comments[issue.comments.length - 1]! : null;
   let line = `## Resuming: ${issue.id} — ${issue.title}`;

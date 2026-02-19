@@ -16,8 +16,11 @@ import {
   summarizeInProgressIssue,
   formatBeadsModeStatus,
   summarizeBeadsActionResult,
+  parseBrDepListJson,
+  formatCheckpointTrail,
   DIRTY_TREE_CLOSE_WARNING,
 } from "./lib.ts";
+import type { BrComment } from "./lib.ts";
 import * as lib from "./lib.ts";
 
 test("parseBrInfoJson parses mode and issue_count", () => {
@@ -328,6 +331,85 @@ test("buildBeadsPrimeMessage appends resume context when provided", () => {
 
   const without = buildBeadsPrimeMessage();
   assert.ok(!without.includes("Resuming"));
+});
+
+test("parseBrDepListJson parses array of dependency issues", () => {
+  const json = JSON.stringify([
+    { id: "bd-parent", title: "Parent feature", issue_type: "feature", priority: 1, status: "open" },
+  ]);
+  const issues = parseBrDepListJson(json);
+  assert.equal(issues.length, 1);
+  assert.equal(issues[0].id, "bd-parent");
+  assert.equal(issues[0].title, "Parent feature");
+});
+
+test("parseBrDepListJson returns empty array on empty JSON array", () => {
+  assert.deepEqual(parseBrDepListJson("[]"), []);
+});
+
+test("parseBrDepListJson returns empty array on invalid JSON", () => {
+  assert.deepEqual(parseBrDepListJson("not json"), []);
+});
+
+test("parseBrDepListJson returns empty array on non-array JSON", () => {
+  assert.deepEqual(parseBrDepListJson('{"error": "not found"}'), []);
+});
+
+test("formatCheckpointTrail formats last 5 comments with relative time", () => {
+  const now = new Date("2026-02-19T12:00:00Z");
+  const comments: BrComment[] = [
+    { id: 1, issue_id: "bd-1", author: "agent", text: "Started work on parser", created_at: "2026-02-19T10:00:00Z" },
+    { id: 2, issue_id: "bd-1", author: "agent", text: "Tests passing for tokenizer", created_at: "2026-02-19T11:00:00Z" },
+    { id: 3, issue_id: "bd-1", author: "agent", text: "commit: a1b2c3d feat: add bracket tokenizer", created_at: "2026-02-19T11:30:00Z" },
+  ];
+  const trail = formatCheckpointTrail(comments, now);
+  assert.equal(trail.length, 3);
+  assert.match(trail[0], /2h ago/);
+  assert.match(trail[0], /Started work on parser/);
+  assert.match(trail[1], /1h ago/);
+  assert.match(trail[2], /30m ago/);
+});
+
+test("formatCheckpointTrail limits to last 5 comments", () => {
+  const now = new Date("2026-02-19T12:00:00Z");
+  const comments: BrComment[] = Array.from({ length: 8 }, (_, i) => ({
+    id: i + 1,
+    issue_id: "bd-1",
+    author: "agent",
+    text: `Comment ${i + 1}`,
+    created_at: new Date(now.getTime() - (8 - i) * 3600000).toISOString(),
+  }));
+  const trail = formatCheckpointTrail(comments, now);
+  assert.equal(trail.length, 5);
+  assert.match(trail[0], /Comment 4/);
+  assert.match(trail[4], /Comment 8/);
+});
+
+test("formatCheckpointTrail truncates long comment text to 200 chars", () => {
+  const now = new Date("2026-02-19T12:00:00Z");
+  const longText = "x".repeat(300);
+  const comments: BrComment[] = [
+    { id: 1, issue_id: "bd-1", author: "agent", text: longText, created_at: "2026-02-19T11:00:00Z" },
+  ];
+  const trail = formatCheckpointTrail(comments, now);
+  assert.equal(trail.length, 1);
+  assert.ok(trail[0].length <= 220);
+});
+
+test("formatCheckpointTrail returns empty array when no comments", () => {
+  assert.deepEqual(formatCheckpointTrail([], new Date()), []);
+  assert.deepEqual(formatCheckpointTrail(undefined, new Date()), []);
+});
+
+test("formatCheckpointTrail handles malformed dates gracefully", () => {
+  const now = new Date("2026-02-19T12:00:00Z");
+  const comments: BrComment[] = [
+    { id: 1, issue_id: "bd-1", author: "agent", text: "Bad date comment", created_at: "not-a-date" },
+  ];
+  const trail = formatCheckpointTrail(comments, now);
+  assert.equal(trail.length, 1);
+  assert.match(trail[0], /unknown/);
+  assert.match(trail[0], /Bad date comment/);
 });
 
 test("dirty tree close warning text includes semantic-commit guidance", () => {
