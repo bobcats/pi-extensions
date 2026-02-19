@@ -207,6 +207,68 @@ export function formatCheckpointTrail(
   });
 }
 
+export type RecoveryContext = {
+  issue: BrShowIssue;
+  checkpointTrail: string[];
+  parent: BrIssueSummary | null;
+  blockedBy: BrIssueSummary[];
+  uncommittedFiles: string[];
+};
+
+export function formatRecoveryMessage(ctx: RecoveryContext): string {
+  const { issue, checkpointTrail, parent, blockedBy, uncommittedFiles } = ctx;
+
+  const priority = typeof issue.priority === "number" ? `P${issue.priority}` : "P?";
+  const type = issue.type ?? "issue";
+  const status = issue.status ?? "unknown";
+
+  const lines: string[] = [
+    "# Beads Workflow Context",
+    "",
+    "## Core Rules",
+    "- Use beads for ALL task tracking (`br create`, `br ready`, `br close`)",
+    "- Do NOT use TodoWrite, TaskCreate, or markdown task files for tracking",
+    "- Create beads issue BEFORE writing code",
+    "- Mark issue in_progress when starting work",
+    "",
+    "## Essential Commands",
+    "- br ready",
+    "- br list --status in_progress",
+    "- br show <id>",
+    '- br close <id> --reason "Verified: ..."',
+    "",
+    `## Resuming: ${issue.id} — ${issue.title}`,
+    `**Status:** ${status} | **Type:** ${type} | **Priority:** ${priority}`,
+  ];
+
+  if (parent) {
+    const parentType = parent.type ? ` (${parent.type})` : "";
+    lines.push(`**Parent:** ${parent.id} — ${parent.title}${parentType}`);
+  }
+
+  if (blockedBy.length > 0) {
+    const items = blockedBy.map((b) => `${b.id} — ${b.title}`).join(", ");
+    lines.push(`**Unblocks:** ${items}`);
+  }
+
+  if (checkpointTrail.length > 0) {
+    lines.push("", "### Checkpoint Trail");
+    lines.push(...checkpointTrail);
+  }
+
+  if (uncommittedFiles.length > 0) {
+    const MAX_FILES = 15;
+    lines.push("", "### Uncommitted Changes");
+    const shown = uncommittedFiles.slice(0, MAX_FILES);
+    lines.push(shown.join(", "));
+    if (uncommittedFiles.length > MAX_FILES) {
+      lines.push(`...and ${uncommittedFiles.length - MAX_FILES} more`);
+    }
+  }
+
+  return lines.join("\n");
+}
+
 export function buildResumeContext(issue: BrShowIssue): string {
   const lastComment = issue.comments?.length ? issue.comments[issue.comments.length - 1]! : null;
   let line = `## Resuming: ${issue.id} — ${issue.title}`;

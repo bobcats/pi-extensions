@@ -18,6 +18,7 @@ import {
   summarizeBeadsActionResult,
   parseBrDepListJson,
   formatCheckpointTrail,
+  formatRecoveryMessage,
   DIRTY_TREE_CLOSE_WARNING,
 } from "./lib.ts";
 import type { BrComment } from "./lib.ts";
@@ -410,6 +411,106 @@ test("formatCheckpointTrail handles malformed dates gracefully", () => {
   assert.equal(trail.length, 1);
   assert.match(trail[0], /unknown/);
   assert.match(trail[0], /Bad date comment/);
+});
+
+test("formatRecoveryMessage produces full recovery block with all sections", () => {
+  const msg = formatRecoveryMessage({
+    issue: {
+      id: "bd-1",
+      title: "Implement parser",
+      type: "task",
+      priority: 2,
+      status: "in_progress",
+    },
+    checkpointTrail: [
+      "- [2h ago] Started work on parser",
+      "- [1h ago] commit: a1b2c3d feat: add tokenizer",
+    ],
+    parent: { id: "bd-parent", title: "Parser system" },
+    blockedBy: [],
+    uncommittedFiles: ["src/parser.ts (M)", "tests/parser.test.ts (M)"],
+  });
+  assert.match(msg, /# Beads Workflow Context/);
+  assert.match(msg, /Use beads for ALL task tracking/);
+  assert.match(msg, /Resuming: bd-1 — Implement parser/);
+  assert.match(msg, /in_progress.*task.*P2/);
+  assert.match(msg, /Parent:.*bd-parent.*Parser system/);
+  assert.match(msg, /Started work on parser/);
+  assert.match(msg, /src\/parser\.ts/);
+});
+
+test("formatRecoveryMessage omits parent section when no parent", () => {
+  const msg = formatRecoveryMessage({
+    issue: { id: "bd-1", title: "Standalone", type: "task", priority: 2, status: "in_progress" },
+    checkpointTrail: [],
+    parent: null,
+    blockedBy: [],
+    uncommittedFiles: [],
+  });
+  assert.ok(!msg.includes("Parent:"));
+  assert.match(msg, /Resuming: bd-1/);
+});
+
+test("formatRecoveryMessage omits unblocks section when no blockedBy", () => {
+  const msg = formatRecoveryMessage({
+    issue: { id: "bd-1", title: "Test", type: "task", priority: 2, status: "in_progress" },
+    checkpointTrail: [],
+    parent: null,
+    blockedBy: [],
+    uncommittedFiles: [],
+  });
+  assert.ok(!msg.includes("Unblocks:"));
+});
+
+test("formatRecoveryMessage shows unblocks when blockedBy present", () => {
+  const msg = formatRecoveryMessage({
+    issue: { id: "bd-1", title: "Test", type: "task", priority: 2, status: "in_progress" },
+    checkpointTrail: [],
+    parent: null,
+    blockedBy: [
+      { id: "bd-2", title: "Widget renderer" },
+      { id: "bd-3", title: "Widget tests" },
+    ],
+    uncommittedFiles: [],
+  });
+  assert.match(msg, /Unblocks:.*bd-2.*Widget renderer/);
+  assert.match(msg, /bd-3.*Widget tests/);
+});
+
+test("formatRecoveryMessage omits checkpoint trail section when empty", () => {
+  const msg = formatRecoveryMessage({
+    issue: { id: "bd-1", title: "Fresh", type: "task", priority: 2, status: "in_progress" },
+    checkpointTrail: [],
+    parent: null,
+    blockedBy: [],
+    uncommittedFiles: [],
+  });
+  assert.ok(!msg.includes("Checkpoint Trail"));
+});
+
+test("formatRecoveryMessage omits uncommitted section when empty", () => {
+  const msg = formatRecoveryMessage({
+    issue: { id: "bd-1", title: "Clean", type: "task", priority: 2, status: "in_progress" },
+    checkpointTrail: ["- [1h ago] Some work"],
+    parent: null,
+    blockedBy: [],
+    uncommittedFiles: [],
+  });
+  assert.ok(!msg.includes("Uncommitted"));
+});
+
+test("formatRecoveryMessage truncates uncommitted files to 15", () => {
+  const files = Array.from({ length: 20 }, (_, i) => `file${i}.ts (M)`);
+  const msg = formatRecoveryMessage({
+    issue: { id: "bd-1", title: "Many files", type: "task", priority: 2, status: "in_progress" },
+    checkpointTrail: [],
+    parent: null,
+    blockedBy: [],
+    uncommittedFiles: files,
+  });
+  assert.match(msg, /file14\.ts/);
+  assert.ok(!msg.includes("file15.ts"));
+  assert.match(msg, /and 5 more/);
 });
 
 test("dirty tree close warning text includes semantic-commit guidance", () => {
