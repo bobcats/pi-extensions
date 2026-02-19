@@ -82,6 +82,9 @@ export default function beadsExtension(pi: ExtensionAPI) {
     shouldPrime: false,
     contextReminderShown: false,
     cachedModeText: "",
+    currentIssueId: null,
+    editedFiles: new Map(),
+    checkpointState: { lastCheckpointTurn: 0, turnIndex: 0 },
   };
 
   pi.registerFlag("beads-observe", {

@@ -20,6 +20,10 @@ export interface BeadsState {
   shouldPrime: boolean;
   contextReminderShown: boolean;
   cachedModeText: string;
+  // V1: Rich recovery stores
+  currentIssueId: string | null;
+  editedFiles: Map<string, Set<string>>;
+  checkpointState: { lastCheckpointTurn: number; turnIndex: number };
 }
 
 export function registerBeadsCommands(
