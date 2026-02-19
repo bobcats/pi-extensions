@@ -194,6 +194,16 @@ export default function beadsExtension(pi: ExtensionAPI) {
     runBr,
     refreshBeadsStatus,
     maybeNudgeCommitAfterClose,
+    onClaim(issueId: string) {
+      state.currentIssueId = issueId;
+      state.editedFiles.set(issueId, new Set());
+      state.checkpointState = { lastCheckpointTurn: 0, turnIndex: 0 };
+    },
+    onClose(issueId: string) {
+      state.currentIssueId = null;
+      state.editedFiles.delete(issueId);
+      state.checkpointState = { lastCheckpointTurn: 0, turnIndex: 0 };
+    },
   });
 
   registerBeadsCommands(pi, {

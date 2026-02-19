@@ -262,6 +262,8 @@ export function registerBeadsTool(
     runBr(args: string[], timeout?: number): Promise<ExecResult>;
     refreshBeadsStatus(ctx: UiContext): Promise<void>;
     maybeNudgeCommitAfterClose(ctx: NotifyContext): Promise<string | null>;
+    onClaim(issueId: string): void;
+    onClose(issueId: string): void;
   },
 ) {
   pi.registerTool({
@@ -401,7 +403,13 @@ export function registerBeadsTool(
           if (!input.id) {
             return fail("beads claim requires id", { action: input.action, missing: "id" });
           }
-          return runBrForTool(["update", input.id, "--status", "in_progress"]);
+          const claimResult = await runBrForTool(["update", input.id, "--status", "in_progress"]);
+
+          if (!claimResult.isError) {
+            deps.onClaim(input.id);
+          }
+
+          return claimResult;
         }
 
         case "close": {
@@ -409,7 +417,13 @@ export function registerBeadsTool(
             return fail("beads close requires id", { action: input.action, missing: "id" });
           }
           const reason = input.reason?.trim() || "Verified: completed";
-          return runBrForTool(["close", input.id, "--reason", reason]);
+          const closeResult = await runBrForTool(["close", input.id, "--reason", reason]);
+
+          if (!closeResult.isError) {
+            deps.onClose(input.id);
+          }
+
+          return closeResult;
         }
 
         case "comment": {
