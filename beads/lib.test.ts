@@ -1,0 +1,356 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import {
+  parseBrInfoJson,
+  parseBeadsSessionMode,
+  parseBrReadyJson,
+  parseBrShowJson,
+  detectTrackingMode,
+  isBrCloseCommand,
+  shouldShowContextReminder,
+  buildBeadsPrimeMessage,
+  getBeadsModeOffMessage,
+  buildResumeContext,
+  formatIssueCard,
+  formatIssueLabel,
+  summarizeInProgressIssue,
+  formatBeadsModeStatus,
+  summarizeBeadsActionResult,
+  DIRTY_TREE_CLOSE_WARNING,
+} from "./lib.ts";
+import * as lib from "./lib.ts";
+
+test("parseBrInfoJson parses mode and issue_count", () => {
+  const parsed = parseBrInfoJson('{"mode":"sqlite","issue_count":4}');
+  assert.deepEqual(parsed, { mode: "sqlite", issueCount: 4 });
+});
+
+test("parseBrInfoJson returns null on invalid json", () => {
+  assert.equal(parseBrInfoJson("not-json"), null);
+});
+
+test("parseBeadsSessionMode enables beads for initialized projects", () => {
+  assert.deepEqual(parseBeadsSessionMode({ brInfoExitCode: 0 }), {
+    isBeadsProject: true,
+    beadsEnabled: true,
+  });
+});
+
+test("parseBeadsSessionMode disables beads when project is not initialized", () => {
+  assert.deepEqual(parseBeadsSessionMode({ brInfoExitCode: 2 }), {
+    isBeadsProject: false,
+    beadsEnabled: false,
+  });
+});
+
+test("parseBrReadyJson handles br list payload", () => {
+  const issues = parseBrReadyJson('[{"id":"abc","title":"Do thing","type":"task","priority":1,"status":"open"}]');
+  assert.equal(issues.length, 1);
+  assert.equal(issues[0]?.id, "abc");
+});
+
+test("parseBrReadyJson handles issue_type payload from br list --json", () => {
+  const issues = parseBrReadyJson('[{"id":"bd-123","title":"Do thing","issue_type":"feature","priority":1,"status":"in_progress"}]');
+  assert.equal(issues.length, 1);
+  assert.equal(issues[0]?.id, "bd-123");
+  assert.equal(issues[0]?.type, "feature");
+});
+
+test("detectTrackingMode maps check-ignore codes", () => {
+  assert.equal(detectTrackingMode(0), "stealth");
+  assert.equal(detectTrackingMode(1), "git-tracked");
+});
+
+test("isBrCloseCommand only matches literal br close invocation", () => {
+  assert.equal(isBrCloseCommand("br close abc"), true);
+  assert.equal(isBrCloseCommand("echo br close"), false);
+  assert.equal(isBrCloseCommand("bash -lc 'br close abc'"), false);
+});
+
+test("shouldShowContextReminder enforces one-time percentage threshold", () => {
+  assert.equal(
+    shouldShowContextReminder({ usagePercent: 85, thresholdPercent: 85, alreadyShown: false }),
+    true,
+  );
+  assert.equal(
+    shouldShowContextReminder({ usagePercent: 84.9, thresholdPercent: 85, alreadyShown: false }),
+    false,
+  );
+  assert.equal(
+    shouldShowContextReminder({ usagePercent: 92, thresholdPercent: 85, alreadyShown: true }),
+    false,
+  );
+});
+
+test("shouldShowContextReminder suppresses reminders when beads mode is disabled", () => {
+  assert.equal(
+    shouldShowContextReminder({
+      usagePercent: 99,
+      thresholdPercent: 85,
+      alreadyShown: false,
+      beadsEnabled: false,
+    }),
+    false,
+  );
+});
+
+test("shouldShowContextReminder treats unknown usage as not remindable", () => {
+  assert.equal(
+    shouldShowContextReminder({
+      usagePercent: null as unknown as number,
+      thresholdPercent: -1,
+      alreadyShown: false,
+    }),
+    false,
+  );
+});
+
+test("buildBeadsPrimeMessage contains anti-TodoWrite guardrail", () => {
+  const text = buildBeadsPrimeMessage();
+  assert.match(text, /Use beads for ALL task tracking/);
+  assert.match(text, /Do NOT use TodoWrite/);
+});
+
+test("buildBeadsPrimeMessage returns empty text when beads mode is disabled", () => {
+  const text = buildBeadsPrimeMessage({ beadsEnabled: false });
+  assert.equal(text, "");
+});
+
+test("getBeadsModeOffMessage includes command and shortcut guidance", () => {
+  assert.equal(
+    getBeadsModeOffMessage(),
+    "Beads mode is off. Enable with /beads-mode on (or Ctrl+B).",
+  );
+});
+
+test("formatIssueLabel includes id, priority, and title", () => {
+  const label = formatIssueLabel({ id: "abc", title: "Do thing", priority: 1, type: "task", status: "open" });
+  assert.match(label, /abc/);
+  assert.match(label, /P1/);
+  assert.match(label, /Do thing/);
+});
+
+test("summarizeInProgressIssue reports first id with title and overflow count", () => {
+  assert.equal(summarizeInProgressIssue([]), "none");
+  assert.equal(summarizeInProgressIssue([{ id: "bd-1", title: "One" }]), "bd-1 — One");
+  assert.equal(
+    summarizeInProgressIssue([
+      { id: "bd-1", title: "One" },
+      { id: "bd-2", title: "Two" },
+      { id: "bd-3", title: "Three" },
+    ]),
+    "bd-1 — One +2",
+  );
+});
+
+test("formatBeadsModeStatus includes in-progress summary", () => {
+  const status = formatBeadsModeStatus({
+    modeText: "stealth (sqlite)",
+    issueCount: 12,
+    inProgressIssues: [{ id: "bd-1", title: "One" }],
+  });
+  assert.equal(status, "beads: stealth (sqlite) · 12 issue(s) · in-progress: bd-1 — One");
+});
+
+test("formatBeadsModeStatus returns off label when beads mode is disabled", () => {
+  const status = formatBeadsModeStatus({
+    beadsEnabled: false,
+    modeText: "stealth (sqlite)",
+    issueCount: 12,
+    inProgressIssues: [{ id: "bd-1", title: "One" }],
+  });
+  assert.equal(status, "beads: off");
+});
+
+test("formatBeadsModeStatus shows on-without-project label", () => {
+  const status = formatBeadsModeStatus({
+    beadsEnabled: true,
+    isBeadsProject: false,
+    modeText: "stealth (sqlite)",
+    issueCount: 12,
+    inProgressIssues: [{ id: "bd-1", title: "One" }],
+  });
+  assert.equal(status, "beads: on (no project)");
+});
+
+test("summarizeBeadsActionResult handles create output", () => {
+  const summary = summarizeBeadsActionResult(
+    "create",
+    "✓ Created bd-42x: tighten action details typing\n",
+  );
+  assert.equal(summary, "Created bd-42x — tighten action details typing");
+});
+
+test("summarizeBeadsActionResult handles empty ready output", () => {
+  const summary = summarizeBeadsActionResult("ready", "");
+  assert.equal(summary, "No ready issues");
+});
+
+test("summarizeBeadsActionResult handles status stats output", () => {
+  const summary = summarizeBeadsActionResult(
+    "status",
+    [
+      "Total Issues: 13",
+      "Open: 5",
+      "In Progress: 2",
+      "Closed: 6",
+    ].join("\n"),
+  );
+  assert.equal(summary, "13 total, 5 open, 2 in-progress, 6 closed");
+});
+
+test("parseBrShowJson extracts issue with comments", () => {
+  const json = JSON.stringify([{
+    id: "bd-1",
+    title: "Do thing",
+    status: "in_progress",
+    issue_type: "task",
+    priority: 2,
+    comments: [
+      { id: 1, issue_id: "bd-1", author: "alice", text: "Started work", created_at: "2026-01-01T00:00:00Z" },
+      { id: 2, issue_id: "bd-1", author: "alice", text: "Tests passing", created_at: "2026-01-01T01:00:00Z" },
+    ],
+  }]);
+  const issue = parseBrShowJson(json);
+  assert.equal(issue?.id, "bd-1");
+  assert.equal(issue?.comments?.length, 2);
+  assert.equal(issue?.comments?.[1]?.text, "Tests passing");
+});
+
+test("parseBrShowJson drops malformed comment entries", () => {
+  const json = JSON.stringify([{
+    id: "bd-1",
+    title: "Do thing",
+    comments: [
+      { id: 1, issue_id: "bd-1", author: "alice", text: "Valid", created_at: "2026-01-01T00:00:00Z" },
+      { text: "Missing metadata" },
+    ],
+  }]);
+  const issue = parseBrShowJson(json);
+  assert.equal(issue?.comments?.length, 1);
+  assert.equal(issue?.comments?.[0]?.text, "Valid");
+});
+
+test("parseBrShowJson captures description", () => {
+  const json = JSON.stringify([{
+    id: "bd-1",
+    title: "Do thing",
+    description: "Detailed explanation here",
+    status: "open",
+    issue_type: "task",
+    priority: 2,
+  }]);
+  const issue = parseBrShowJson(json);
+  assert.equal(issue?.description, "Detailed explanation here");
+});
+
+test("parseBrShowJson handles issue with no comments", () => {
+  const json = JSON.stringify([{ id: "bd-2", title: "No comments" }]);
+  const issue = parseBrShowJson(json);
+  assert.equal(issue?.id, "bd-2");
+  assert.equal(issue?.comments, undefined);
+});
+
+test("parseBrShowJson returns null on bad input", () => {
+  assert.equal(parseBrShowJson("nope"), null);
+  assert.equal(parseBrShowJson("[]"), null);
+});
+
+test("buildResumeContext includes id, title, and last comment", () => {
+  const ctx = buildResumeContext({
+    id: "bd-1",
+    title: "Fix parser",
+    comments: [
+      { id: 1, issue_id: "bd-1", author: "a", text: "Started", created_at: "2026-01-01T00:00:00Z" },
+      { id: 2, issue_id: "bd-1", author: "a", text: "Tests green", created_at: "2026-01-01T01:00:00Z" },
+    ],
+  });
+  assert.match(ctx, /bd-1/);
+  assert.match(ctx, /Fix parser/);
+  assert.match(ctx, /Tests green/);
+  assert.ok(!ctx.includes("Started"));
+});
+
+test("buildResumeContext works without comments", () => {
+  const ctx = buildResumeContext({ id: "bd-2", title: "No comments" });
+  assert.match(ctx, /bd-2/);
+  assert.match(ctx, /No comments/);
+  assert.ok(!ctx.includes("checkpoint"));
+});
+
+test("formatIssueCard renders full card with description and last comment", () => {
+  const lines = formatIssueCard({
+    id: "bd-1",
+    title: "Fix parser",
+    type: "task",
+    priority: 2,
+    status: "in_progress",
+    description: "Handle unicode filenames",
+    comments: [
+      { id: 1, issue_id: "bd-1", author: "a", text: "Started", created_at: "2026-01-01T00:00:00Z" },
+      { id: 2, issue_id: "bd-1", author: "a", text: "Tests green", created_at: "2026-01-01T01:00:00Z" },
+    ],
+  });
+  assert.equal(lines.length, 3);
+  assert.match(lines[0], /bd-1 — Fix parser.*P2.*in_progress.*task/);
+  assert.match(lines[1], /Handle unicode filenames/);
+  assert.match(lines[2], /Tests green/);
+});
+
+test("formatIssueCard renders minimal card without description or comments", () => {
+  const lines = formatIssueCard({
+    id: "bd-2",
+    title: "Quick fix",
+    type: "bug",
+    priority: 1,
+    status: "open",
+  });
+  assert.equal(lines.length, 1);
+  assert.match(lines[0], /bd-2 — Quick fix.*P1.*open.*bug/);
+});
+
+test("formatIssueCard truncates long description", () => {
+  const longDesc = "x".repeat(200);
+  const lines = formatIssueCard({
+    id: "bd-3",
+    title: "Long",
+    description: longDesc,
+  });
+  assert.equal(lines.length, 2);
+  assert.ok(lines[1].length <= 120);
+  assert.ok(lines[1].endsWith("..."));
+});
+
+test("buildBeadsPrimeMessage appends resume context when provided", () => {
+  const withResume = buildBeadsPrimeMessage({ resumeContext: "## Resuming: bd-1 — Fix parser\nLast checkpoint: Tests green" });
+  assert.match(withResume, /Resuming: bd-1/);
+  assert.match(withResume, /Tests green/);
+
+  const without = buildBeadsPrimeMessage();
+  assert.ok(!without.includes("Resuming"));
+});
+
+test("dirty tree close warning text includes semantic-commit guidance", () => {
+  assert.match(DIRTY_TREE_CLOSE_WARNING, /semantic-commit/);
+});
+
+test("observability helper is exposed for lifecycle diagnostics", () => {
+  assert.equal(typeof (lib as Record<string, unknown>).buildObservabilitySummary, "function");
+});
+
+test("observability helper can suppress noisy events when disabled", () => {
+  const maybeFn = (lib as Record<string, unknown>).buildObservabilitySummary;
+  assert.equal(typeof maybeFn, "function");
+
+  const summary = (maybeFn as (input: {
+    enabled: boolean;
+    eventType: string;
+    toolName?: string;
+  }) => string | null)({
+    enabled: false,
+    eventType: "tool_execution_update",
+    toolName: "beads",
+  });
+
+  assert.equal(summary, null);
+});

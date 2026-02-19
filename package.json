@@ -1,0 +1,16 @@
+{
+  "name": "@bobcats/pi-extensions",
+  "version": "0.1.0",
+  "private": false,
+  "license": "MIT",
+  "keywords": ["pi-package"],
+  "pi": {
+    "extensions": ["./ext-prof/index.ts", "./confirm-rm/index.ts", "./beads/index.ts", "./memory/index.ts"],
+    "skills": [
+      "./beads/skills/beads-code/SKILL.md",
+      "./beads/skills/beads-create/SKILL.md",
+      "./beads/skills/beads-plan/SKILL.md",
+      "./beads/skills/beads-storm/SKILL.md"
+    ]
+  }
+}

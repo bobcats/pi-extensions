@@ -1,0 +1,15 @@
+{
+  "name": "memory-extension",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "tsx --test lib.test.ts index.test.ts"
+  },
+  "devDependencies": {
+    "@mariozechner/pi-ai": "*",
+    "@mariozechner/pi-coding-agent": "*",
+    "@mariozechner/pi-tui": "*",
+    "@sinclair/typebox": "*",
+    "tsx": "^4.20.0"
+  }
+}
