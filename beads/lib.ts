@@ -290,6 +290,55 @@ export function parseGitStatusPorcelain(output: string): string[] {
     });
 }
 
+type ExecResult = {
+  stdout: string;
+  stderr: string;
+  code: number;
+  killed: boolean;
+};
+
+export type RecoveryDeps = {
+  runBr(args: string[], timeout?: number): Promise<ExecResult>;
+  runGit(args: string[], timeout?: number): Promise<ExecResult>;
+};
+
+export async function buildRecoveryContext(deps: RecoveryDeps): Promise<RecoveryContext | null> {
+  const listResult = await deps.runBr(["list", "--status", "in_progress", "--sort", "updated_at", "--json"]);
+  if (listResult.code !== 0) return null;
+
+  const issues = parseBrReadyJson(listResult.stdout);
+  const first = issues[0];
+  if (!first) return null;
+
+  const showResult = await deps.runBr(["show", first.id, "--json"]);
+  const detail = showResult.code === 0 ? parseBrShowJson(showResult.stdout) : null;
+
+  const issue: BrShowIssue = detail ?? { ...first };
+  const comments = detail?.comments;
+
+  const [upResult, downResult] = await Promise.all([
+    deps.runBr(["dep", "list", first.id, "--direction", "up", "--json"]).catch(() => ({ stdout: "[]", stderr: "", code: 1, killed: false })),
+    deps.runBr(["dep", "list", first.id, "--direction", "down", "--json"]).catch(() => ({ stdout: "[]", stderr: "", code: 1, killed: false })),
+  ]);
+
+  const parents = upResult.code === 0 ? parseBrDepListJson(upResult.stdout) : [];
+  const blockedBy = downResult.code === 0 ? parseBrDepListJson(downResult.stdout) : [];
+  const parent = parents[0] ?? null;
+
+  const gitResult = await deps.runGit(["status", "--porcelain"]);
+  const uncommittedFiles = gitResult.code === 0 ? parseGitStatusPorcelain(gitResult.stdout) : [];
+
+  const checkpointTrail = formatCheckpointTrail(comments, new Date());
+
+  return {
+    issue,
+    checkpointTrail,
+    parent,
+    blockedBy,
+    uncommittedFiles,
+  };
+}
+
 export function buildResumeContext(issue: BrShowIssue): string {
   const lastComment = issue.comments?.length ? issue.comments[issue.comments.length - 1]! : null;
   let line = `## Resuming: ${issue.id} — ${issue.title}`;

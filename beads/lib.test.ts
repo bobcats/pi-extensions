@@ -20,6 +20,7 @@ import {
   formatCheckpointTrail,
   formatRecoveryMessage,
   parseGitStatusPorcelain,
+  buildRecoveryContext,
   DIRTY_TREE_CLOSE_WARNING,
 } from "./lib.ts";
 import type { BrComment } from "./lib.ts";
@@ -542,6 +543,109 @@ test("parseGitStatusPorcelain handles renamed files", () => {
   const files = parseGitStatusPorcelain(output);
   assert.equal(files.length, 1);
   assert.match(files[0], /new-name\.ts/);
+});
+
+function mockRunner(responses: Record<string, { stdout: string; code: number }>) {
+  return async (args: string[]): Promise<{ stdout: string; stderr: string; code: number; killed: boolean }> => {
+    const key = args.join(" ");
+    const match = Object.entries(responses).find(([pattern]) => key.includes(pattern));
+    if (match) {
+      return { stdout: match[1].stdout, stderr: "", code: match[1].code, killed: false };
+    }
+    return { stdout: "", stderr: "not found", code: 1, killed: false };
+  };
+}
+
+test("buildRecoveryContext returns null when no in-progress issue", async () => {
+  const result = await buildRecoveryContext({
+    runBr: mockRunner({
+      "list --status in_progress": { stdout: "[]", code: 0 },
+    }),
+    runGit: mockRunner({}),
+  });
+  assert.equal(result, null);
+});
+
+test("buildRecoveryContext returns null when br list fails", async () => {
+  const result = await buildRecoveryContext({
+    runBr: mockRunner({
+      "list --status in_progress": { stdout: "", code: 1 },
+    }),
+    runGit: mockRunner({}),
+  });
+  assert.equal(result, null);
+});
+
+test("buildRecoveryContext assembles full context from br show + deps + git status", async () => {
+  const issue = {
+    id: "bd-1",
+    title: "Fix parser",
+    status: "in_progress",
+    issue_type: "task",
+    priority: 2,
+    comments: [
+      { id: 1, issue_id: "bd-1", author: "agent", text: "Started work", created_at: "2026-02-19T10:00:00Z" },
+    ],
+  };
+
+  const result = await buildRecoveryContext({
+    runBr: mockRunner({
+      "list --status in_progress": { stdout: JSON.stringify([issue]), code: 0 },
+      "show bd-1 --json": { stdout: JSON.stringify([issue]), code: 0 },
+      "dep list bd-1 --direction up": { stdout: JSON.stringify([{ id: "bd-parent", title: "Parent" }]), code: 0 },
+      "dep list bd-1 --direction down": { stdout: "[]", code: 0 },
+    }),
+    runGit: mockRunner({
+      "status --porcelain": { stdout: " M src/parser.ts\n", code: 0 },
+    }),
+  });
+
+  assert.ok(result !== null);
+  assert.equal(result!.issue.id, "bd-1");
+  assert.equal(result!.parent?.id, "bd-parent");
+  assert.deepEqual(result!.blockedBy, []);
+  assert.ok(result!.checkpointTrail.length > 0);
+  assert.ok(result!.uncommittedFiles.length > 0);
+});
+
+test("buildRecoveryContext handles missing deps gracefully", async () => {
+  const issue = { id: "bd-1", title: "Test", status: "in_progress", issue_type: "task", priority: 2 };
+
+  const result = await buildRecoveryContext({
+    runBr: mockRunner({
+      "list --status in_progress": { stdout: JSON.stringify([issue]), code: 0 },
+      "show bd-1 --json": { stdout: JSON.stringify([issue]), code: 0 },
+      "dep list bd-1 --direction up": { stdout: "", code: 1 },
+      "dep list bd-1 --direction down": { stdout: "", code: 1 },
+    }),
+    runGit: mockRunner({
+      "status --porcelain": { stdout: "", code: 0 },
+    }),
+  });
+
+  assert.ok(result !== null);
+  assert.equal(result!.parent, null);
+  assert.deepEqual(result!.blockedBy, []);
+  assert.deepEqual(result!.uncommittedFiles, []);
+});
+
+test("buildRecoveryContext handles git status failure gracefully", async () => {
+  const issue = { id: "bd-1", title: "Test", status: "in_progress", issue_type: "task", priority: 2 };
+
+  const result = await buildRecoveryContext({
+    runBr: mockRunner({
+      "list --status in_progress": { stdout: JSON.stringify([issue]), code: 0 },
+      "show bd-1 --json": { stdout: JSON.stringify([issue]), code: 0 },
+      "dep list bd-1 --direction up": { stdout: "[]", code: 0 },
+      "dep list bd-1 --direction down": { stdout: "[]", code: 0 },
+    }),
+    runGit: mockRunner({
+      "status --porcelain": { stdout: "", code: 1 },
+    }),
+  });
+
+  assert.ok(result !== null);
+  assert.deepEqual(result!.uncommittedFiles, []);
 });
 
 test("dirty tree close warning text includes semantic-commit guidance", () => {
