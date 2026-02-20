@@ -1,11 +1,20 @@
-import { isToolCallEventType, type ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import {
+  isToolCallEventType,
+  isBashToolResult,
+  isWriteToolResult,
+  isEditToolResult,
+  type ExtensionAPI,
+} from "@mariozechner/pi-coding-agent";
 import {
   buildBeadsPrimeMessage,
   buildObservabilitySummary,
   buildRecoveryContext,
+  extractEditedFilePath,
   formatRecoveryMessage,
   isBrCloseCommand,
+  isGitCommitCommand,
   parseBeadsSessionMode,
+  parseGitCommitOutput,
   shouldShowContextReminder,
 } from "./lib.ts";
 import type { BeadsState } from "./commands.ts";
@@ -111,6 +120,44 @@ export function registerBeadsHooks(
         block: true,
         reason: "Cannot run `br close` with uncommitted changes. Commit/stash first, then close the issue.",
       };
+    }
+  });
+
+  pi.on("tool_result", async (event) => {
+    if (!state.beadsEnabled || !state.currentIssueId) return;
+
+    // V2: Commit-to-issue linking
+    if (isBashToolResult(event) && !event.isError) {
+      const command = typeof event.input.command === "string" ? event.input.command : "";
+
+      if (isGitCommitCommand(command)) {
+        const text = event.content.find((c) => c.type === "text");
+        const stdout = text && "text" in text ? text.text : "";
+        const parsed = parseGitCommitOutput(stdout);
+
+        if (parsed) {
+          deps.runBr(["comments", "add", state.currentIssueId, `commit: ${parsed.hash} ${parsed.message}`], 5000).catch(() => {});
+          state.checkpointState.lastCheckpointTurn = state.checkpointState.turnIndex;
+        }
+      }
+
+      // Detect manual br comments add via bash — reset checkpoint counter
+      if (/^\s*br\s+comments\s+add\b/.test(command)) {
+        state.checkpointState.lastCheckpointTurn = state.checkpointState.turnIndex;
+      }
+    }
+
+    // V3: File tracking
+    if (isWriteToolResult(event) || isEditToolResult(event)) {
+      const path = extractEditedFilePath(event.toolName, event.input);
+      if (path && state.currentIssueId) {
+        let files = state.editedFiles.get(state.currentIssueId);
+        if (!files) {
+          files = new Set();
+          state.editedFiles.set(state.currentIssueId, files);
+        }
+        files.add(path);
+      }
     }
   });
 
