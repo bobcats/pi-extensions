@@ -3,17 +3,20 @@ import { Text } from "@mariozechner/pi-tui";
 import { type Static, Type } from "@sinclair/typebox";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import {
+  formatEnrichedReadyOutput,
   formatFileListComment,
   formatIssueCard,
   formatIssueLabel,
   getBeadsModeOffMessage,
   isRecord,
+  parseBrDepListJson,
   parseBrReadyJson,
   parseBrShowJson,
   summarizeBeadsActionResult,
   type BeadsAction,
   type BrIssueSummary,
   type BrShowIssue,
+  type EnrichedReadyIssue,
 } from "./lib.ts";
 
 const beadsToolSchema = Type.Object({
@@ -356,9 +359,30 @@ export function registerBeadsTool(
           }
 
           const issues = parseBrReadyJson(result.stdout);
-          const text = issues.length
-            ? issues.map((issue) => formatIssueLabel(issue)).join("\n")
-            : "No ready issues.";
+
+          // V7: Enrich first 5 issues with dep info
+          const MAX_ENRICH = 5;
+          const toEnrich = issues.slice(0, MAX_ENRICH);
+          const enriched: EnrichedReadyIssue[] = await Promise.all(
+            toEnrich.map(async (issue) => {
+              const [upResult, downResult] = await Promise.all([
+                deps.runBr(["dep", "list", issue.id, "--direction", "up", "--json"], 5000).catch(() => ({ stdout: "[]", stderr: "", code: 1, killed: false })),
+                deps.runBr(["dep", "list", issue.id, "--direction", "down", "--json"], 5000).catch(() => ({ stdout: "[]", stderr: "", code: 1, killed: false })),
+              ]);
+
+              const parents = upResult.code === 0 ? parseBrDepListJson(upResult.stdout) : [];
+              const unblocks = downResult.code === 0 ? parseBrDepListJson(downResult.stdout) : [];
+
+              return { issue, parent: parents[0] ?? null, unblocks };
+            }),
+          );
+
+          // Append remaining issues without enrichment
+          for (let i = MAX_ENRICH; i < issues.length; i++) {
+            enriched.push({ issue: issues[i], parent: null, unblocks: [] });
+          }
+
+          const text = formatEnrichedReadyOutput(enriched);
 
           return {
             content: [{ type: "text" as const, text }],
