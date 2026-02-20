@@ -269,6 +269,60 @@ export function formatRecoveryMessage(ctx: RecoveryContext): string {
   return lines.join("\n");
 }
 
+export function buildCheckpointSummary(opts: {
+  editedFiles: Set<string>;
+  turnsSinceCheckpoint: number;
+}): string {
+  const lines = [`Auto-checkpoint (pre-compaction): ${opts.turnsSinceCheckpoint} turns since last checkpoint.`];
+
+  if (opts.editedFiles.size > 0) {
+    const MAX = 20;
+    const sorted = [...opts.editedFiles].sort();
+    const shown = sorted.slice(0, MAX);
+    let fileList = `Files: ${shown.join(", ")}`;
+    if (sorted.length > MAX) {
+      fileList += ` ...and ${sorted.length - MAX} more`;
+    }
+    lines.push(fileList);
+  }
+
+  return lines.join("\n");
+}
+
+export function buildContinueMessage(closedId: string): string {
+  return [
+    `Issue ${closedId} closed.`,
+    `Check for next ready work: run \`br ready --sort priority\` to pick the next issue.`,
+    `If no ready issues remain, summarize what was accomplished and ask the user what's next.`,
+  ].join("\n");
+}
+
+export type EnrichedReadyIssue = {
+  issue: BrIssueSummary;
+  parent: BrIssueSummary | null;
+  unblocks: BrIssueSummary[];
+};
+
+export function formatEnrichedReadyOutput(issues: EnrichedReadyIssue[]): string {
+  if (issues.length === 0) return "No ready issues.";
+
+  return issues.map((entry) => {
+    const { issue, parent, unblocks } = entry;
+    const lines = [formatIssueLabel(issue)];
+
+    if (parent) {
+      lines.push(`  ↳ parent: ${parent.id} ${parent.title}`);
+    }
+
+    if (unblocks.length > 0) {
+      const items = unblocks.map((u) => `${u.id} ${u.title}`).join(", ");
+      lines.push(`  ↳ unblocks: ${items}`);
+    }
+
+    return lines.join("\n");
+  }).join("\n");
+}
+
 export function extractEditedFilePath(toolName: string, input: Record<string, unknown>): string | null {
   if (toolName === "write" || toolName === "edit") {
     return typeof input.path === "string" ? input.path : null;
