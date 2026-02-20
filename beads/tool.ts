@@ -3,6 +3,7 @@ import { Text } from "@mariozechner/pi-tui";
 import { type Static, Type } from "@sinclair/typebox";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import {
+  formatFileListComment,
   formatIssueCard,
   formatIssueLabel,
   getBeadsModeOffMessage,
@@ -264,6 +265,8 @@ export function registerBeadsTool(
     maybeNudgeCommitAfterClose(ctx: NotifyContext): Promise<string | null>;
     onClaim(issueId: string): void;
     onClose(issueId: string): void;
+    getEditedFiles(issueId: string): Set<string> | undefined;
+    onCheckpoint(): void;
   },
 ) {
   pi.registerTool({
@@ -416,6 +419,13 @@ export function registerBeadsTool(
           if (!input.id) {
             return fail("beads close requires id", { action: input.action, missing: "id" });
           }
+
+          // V3: Flush file list as comment before closing
+          const fileListComment = formatFileListComment(deps.getEditedFiles(input.id));
+          if (fileListComment) {
+            await deps.runBr(["comments", "add", input.id, fileListComment], 5000).catch(() => {});
+          }
+
           const reason = input.reason?.trim() || "Verified: completed";
           const closeResult = await runBrForTool(["close", input.id, "--reason", reason]);
 
@@ -444,6 +454,9 @@ export function registerBeadsTool(
               exitCode: commentResult.code,
             });
           }
+          // V6: Comment counts as checkpoint
+          deps.onCheckpoint();
+
           return {
             content: [{ type: "text" as const, text: commentResult.stdout || "OK" }],
             details: {

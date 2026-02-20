@@ -204,6 +204,12 @@ export default function beadsExtension(pi: ExtensionAPI) {
       state.editedFiles.delete(issueId);
       state.checkpointState = { lastCheckpointTurn: 0, turnIndex: 0 };
     },
+    getEditedFiles(issueId: string) {
+      return state.editedFiles.get(issueId);
+    },
+    onCheckpoint() {
+      state.checkpointState.lastCheckpointTurn = state.checkpointState.turnIndex;
+    },
   });
 
   registerBeadsCommands(pi, {
