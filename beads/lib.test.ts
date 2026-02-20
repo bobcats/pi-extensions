@@ -23,6 +23,8 @@ import {
   buildRecoveryContext,
   isGitCommitCommand,
   parseGitCommitOutput,
+  extractEditedFilePath,
+  formatFileListComment,
   DIRTY_TREE_CLOSE_WARNING,
 } from "./lib.ts";
 import type { BrComment } from "./lib.ts";
@@ -696,6 +698,47 @@ test("parseGitCommitOutput handles amend output", () => {
   const output = "[main f1e2d3c] feat: updated message\n Date: Thu Feb 19 12:00:00 2026 -0800\n 1 file changed\n";
   const result = parseGitCommitOutput(output);
   assert.deepEqual(result, { hash: "f1e2d3c", message: "feat: updated message" });
+});
+
+test("extractEditedFilePath returns path for write tool", () => {
+  assert.equal(extractEditedFilePath("write", { path: "src/parser.ts" }), "src/parser.ts");
+});
+
+test("extractEditedFilePath returns path for edit tool", () => {
+  assert.equal(extractEditedFilePath("edit", { path: "src/lib.ts", oldText: "foo", newText: "bar" }), "src/lib.ts");
+});
+
+test("extractEditedFilePath returns null for other tools", () => {
+  assert.equal(extractEditedFilePath("bash", { command: "echo hi" }), null);
+  assert.equal(extractEditedFilePath("read", { path: "src/lib.ts" }), null);
+});
+
+test("extractEditedFilePath returns null when path is not a string", () => {
+  assert.equal(extractEditedFilePath("write", {}), null);
+  assert.equal(extractEditedFilePath("write", { path: 123 }), null);
+});
+
+test("formatFileListComment formats file set into comment", () => {
+  const files = new Set(["src/parser.ts", "src/types.ts", "tests/parser.test.ts"]);
+  const comment = formatFileListComment(files);
+  assert.match(comment!, /Files modified:/);
+  assert.match(comment!, /src\/parser\.ts/);
+  assert.match(comment!, /src\/types\.ts/);
+  assert.match(comment!, /tests\/parser\.test\.ts/);
+});
+
+test("formatFileListComment returns null for empty set", () => {
+  assert.equal(formatFileListComment(new Set()), null);
+  assert.equal(formatFileListComment(undefined), null);
+});
+
+test("formatFileListComment truncates to 30 files", () => {
+  const files = new Set(Array.from({ length: 40 }, (_, i) => `file${String(i).padStart(2, "0")}.ts`));
+  const comment = formatFileListComment(files);
+  assert.ok(comment !== null);
+  assert.match(comment!, /and 10 more/);
+  assert.match(comment!, /file29\.ts/);
+  assert.ok(!comment!.includes("file30.ts"));
 });
 
 test("dirty tree close warning text includes semantic-commit guidance", () => {
