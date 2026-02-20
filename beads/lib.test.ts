@@ -25,6 +25,8 @@ import {
   parseGitCommitOutput,
   extractEditedFilePath,
   formatFileListComment,
+  shouldNudgeCheckpoint,
+  buildCheckpointNudgeMessage,
   DIRTY_TREE_CLOSE_WARNING,
 } from "./lib.ts";
 import type { BrComment } from "./lib.ts";
@@ -739,6 +741,32 @@ test("formatFileListComment truncates to 30 files", () => {
   assert.match(comment!, /and 10 more/);
   assert.match(comment!, /file29\.ts/);
   assert.ok(!comment!.includes("file30.ts"));
+});
+
+test("shouldNudgeCheckpoint returns true when threshold reached", () => {
+  assert.equal(shouldNudgeCheckpoint({ turnIndex: 8, lastCheckpointTurn: 0, threshold: 8 }), true);
+  assert.equal(shouldNudgeCheckpoint({ turnIndex: 10, lastCheckpointTurn: 0, threshold: 8 }), true);
+});
+
+test("shouldNudgeCheckpoint returns false below threshold", () => {
+  assert.equal(shouldNudgeCheckpoint({ turnIndex: 7, lastCheckpointTurn: 0, threshold: 8 }), false);
+  assert.equal(shouldNudgeCheckpoint({ turnIndex: 3, lastCheckpointTurn: 0, threshold: 8 }), false);
+});
+
+test("shouldNudgeCheckpoint respects lastCheckpointTurn offset", () => {
+  assert.equal(shouldNudgeCheckpoint({ turnIndex: 12, lastCheckpointTurn: 5, threshold: 8 }), false);
+  assert.equal(shouldNudgeCheckpoint({ turnIndex: 13, lastCheckpointTurn: 5, threshold: 8 }), true);
+});
+
+test("shouldNudgeCheckpoint returns false when no issue is active", () => {
+  assert.equal(shouldNudgeCheckpoint({ turnIndex: 10, lastCheckpointTurn: 0, threshold: 8, hasActiveIssue: false }), false);
+});
+
+test("buildCheckpointNudgeMessage includes issue id and command hint", () => {
+  const msg = buildCheckpointNudgeMessage("bd-1", 8);
+  assert.match(msg, /bd-1/);
+  assert.match(msg, /checkpoint/i);
+  assert.match(msg, /br comments add/);
 });
 
 test("dirty tree close warning text includes semantic-commit guidance", () => {
