@@ -7,6 +7,7 @@ import {
 } from "@mariozechner/pi-coding-agent";
 import {
   buildBeadsPrimeMessage,
+  buildCheckpointNudgeMessage,
   buildObservabilitySummary,
   buildRecoveryContext,
   extractEditedFilePath,
@@ -15,6 +16,7 @@ import {
   isGitCommitCommand,
   parseBeadsSessionMode,
   parseGitCommitOutput,
+  shouldNudgeCheckpoint,
   shouldShowContextReminder,
 } from "./lib.ts";
 import type { BeadsState } from "./commands.ts";
@@ -192,6 +194,36 @@ export function registerBeadsHooks(
   pi.on("turn_end", async (_event, ctx) => {
     if (!state.beadsEnabled) {
       return;
+    }
+
+    // V6: Increment turn counter and check checkpoint nudge
+    state.checkpointState.turnIndex++;
+
+    if (
+      state.currentIssueId &&
+      shouldNudgeCheckpoint({
+        turnIndex: state.checkpointState.turnIndex,
+        lastCheckpointTurn: state.checkpointState.lastCheckpointTurn,
+        threshold: 8,
+        hasActiveIssue: true,
+      })
+    ) {
+      const turnsSince = state.checkpointState.turnIndex - state.checkpointState.lastCheckpointTurn;
+      const nudgeText = buildCheckpointNudgeMessage(state.currentIssueId, turnsSince);
+
+      deps.commandOut(ctx, "Consider checkpointing your progress to the beads issue.", "info");
+
+      pi.sendMessage(
+        {
+          customType: "beads-checkpoint-nudge",
+          content: nudgeText,
+          display: false,
+        },
+        { deliverAs: "nextTurn" },
+      );
+
+      // Reset to avoid nagging every turn after threshold
+      state.checkpointState.lastCheckpointTurn = state.checkpointState.turnIndex;
     }
 
     const usage = ctx.getContextUsage();
