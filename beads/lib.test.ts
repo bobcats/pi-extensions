@@ -27,6 +27,9 @@ import {
   formatFileListComment,
   shouldNudgeCheckpoint,
   buildCheckpointNudgeMessage,
+  buildCheckpointSummary,
+  buildContinueMessage,
+  formatEnrichedReadyOutput,
   DIRTY_TREE_CLOSE_WARNING,
 } from "./lib.ts";
 import type { BrComment } from "./lib.ts";
@@ -767,6 +770,98 @@ test("buildCheckpointNudgeMessage includes issue id and command hint", () => {
   assert.match(msg, /bd-1/);
   assert.match(msg, /checkpoint/i);
   assert.match(msg, /br comments add/);
+});
+
+test("buildCheckpointSummary formats summary with files and turns", () => {
+  const summary = buildCheckpointSummary({
+    editedFiles: new Set(["src/parser.ts", "tests/parser.test.ts"]),
+    turnsSinceCheckpoint: 5,
+  });
+  assert.match(summary, /Auto-checkpoint/);
+  assert.match(summary, /src\/parser\.ts/);
+  assert.match(summary, /5 turns/);
+});
+
+test("buildCheckpointSummary handles empty files", () => {
+  const summary = buildCheckpointSummary({
+    editedFiles: new Set(),
+    turnsSinceCheckpoint: 3,
+  });
+  assert.match(summary, /Auto-checkpoint/);
+  assert.match(summary, /3 turns/);
+  assert.ok(!summary.includes("Files"));
+});
+
+test("buildCheckpointSummary truncates file list to 20", () => {
+  const files = new Set(Array.from({ length: 25 }, (_, i) => `file${String(i).padStart(2, "0")}.ts`));
+  const summary = buildCheckpointSummary({
+    editedFiles: files,
+    turnsSinceCheckpoint: 10,
+  });
+  assert.match(summary, /and 5 more/);
+});
+
+test("buildContinueMessage includes closed id and ready command", () => {
+  const msg = buildContinueMessage("bd-123");
+  assert.match(msg, /bd-123/);
+  assert.match(msg, /closed/);
+  assert.match(msg, /br ready/);
+});
+
+test("buildContinueMessage includes fallback guidance", () => {
+  const msg = buildContinueMessage("bd-456");
+  assert.match(msg, /no ready issues/i);
+});
+
+test("formatEnrichedReadyOutput renders issues with parent and unblocks", () => {
+  const output = formatEnrichedReadyOutput([
+    {
+      issue: { id: "bd-1", title: "Parser", type: "task", priority: 2, status: "open" },
+      parent: { id: "bd-p", title: "Widget system", type: "feature", priority: 1, status: "open" },
+      unblocks: [
+        { id: "bd-2", title: "Renderer", type: "task", priority: 2, status: "open" },
+      ],
+    },
+  ]);
+  assert.match(output, /bd-1/);
+  assert.match(output, /Parser/);
+  assert.match(output, /↳ parent:.*bd-p.*Widget system/);
+  assert.match(output, /↳ unblocks:.*bd-2.*Renderer/);
+});
+
+test("formatEnrichedReadyOutput omits parent/unblocks when empty", () => {
+  const output = formatEnrichedReadyOutput([
+    {
+      issue: { id: "bd-1", title: "Standalone", type: "task", priority: 2, status: "open" },
+      parent: null,
+      unblocks: [],
+    },
+  ]);
+  assert.match(output, /bd-1/);
+  assert.ok(!output.includes("parent:"));
+  assert.ok(!output.includes("unblocks:"));
+});
+
+test("formatEnrichedReadyOutput handles multiple issues", () => {
+  const output = formatEnrichedReadyOutput([
+    {
+      issue: { id: "bd-1", title: "First", type: "task", priority: 1, status: "open" },
+      parent: null,
+      unblocks: [],
+    },
+    {
+      issue: { id: "bd-2", title: "Second", type: "task", priority: 2, status: "open" },
+      parent: { id: "bd-p", title: "Parent", type: "feature", priority: 1, status: "open" },
+      unblocks: [],
+    },
+  ]);
+  assert.match(output, /bd-1.*First/);
+  assert.match(output, /bd-2.*Second/);
+});
+
+test("formatEnrichedReadyOutput returns empty message for no issues", () => {
+  const output = formatEnrichedReadyOutput([]);
+  assert.match(output, /No ready issues/);
 });
 
 test("dirty tree close warning text includes semantic-commit guidance", () => {
