@@ -8,6 +8,7 @@ import {
 import {
   buildBeadsPrimeMessage,
   buildCheckpointNudgeMessage,
+  buildCheckpointSummary,
   buildObservabilitySummary,
   buildRecoveryContext,
   extractEditedFilePath,
@@ -65,6 +66,18 @@ export function registerBeadsHooks(
   pi.on("session_before_compact", async () => {
     if (state.beadsEnabled) {
       state.shouldPrime = true;
+
+      // V4: Auto-checkpoint before compaction
+      if (state.currentIssueId) {
+        const files = state.editedFiles.get(state.currentIssueId) ?? new Set();
+        const turnsSince = state.checkpointState.turnIndex - state.checkpointState.lastCheckpointTurn;
+
+        if (turnsSince > 0 || files.size > 0) {
+          const summary = buildCheckpointSummary({ editedFiles: files, turnsSinceCheckpoint: turnsSince });
+          deps.runBr(["comments", "add", state.currentIssueId, summary], 3000).catch(() => {});
+          state.checkpointState.lastCheckpointTurn = state.checkpointState.turnIndex;
+        }
+      }
     }
   });
 
