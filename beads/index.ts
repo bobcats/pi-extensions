@@ -1,5 +1,6 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import {
+  buildContinueMessage,
   DIRTY_TREE_CLOSE_WARNING,
   detectTrackingMode,
   formatBeadsModeStatus,
@@ -209,6 +210,17 @@ export default function beadsExtension(pi: ExtensionAPI) {
     },
     onCheckpoint() {
       state.checkpointState.lastCheckpointTurn = state.checkpointState.turnIndex;
+    },
+    sendContinueMessage(closedId: string) {
+      const msg = buildContinueMessage(closedId);
+      pi.sendMessage(
+        {
+          customType: "beads-auto-continue",
+          content: msg,
+          display: false,
+        },
+        { deliverAs: "followUp", triggerTurn: true },
+      );
     },
   });
 

@@ -267,6 +267,7 @@ export function registerBeadsTool(
     onClose(issueId: string): void;
     getEditedFiles(issueId: string): Set<string> | undefined;
     onCheckpoint(): void;
+    sendContinueMessage(closedId: string): void;
   },
 ) {
   pi.registerTool({
@@ -431,6 +432,7 @@ export function registerBeadsTool(
 
           if (!closeResult.isError) {
             deps.onClose(input.id);
+            deps.sendContinueMessage(input.id);
           }
 
           return closeResult;
