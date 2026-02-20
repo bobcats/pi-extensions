@@ -370,8 +370,10 @@ export function registerBeadsTool(
                 deps.runBr(["dep", "list", issue.id, "--direction", "down", "--json"], 5000).catch(() => ({ stdout: "[]", stderr: "", code: 1, killed: false })),
               ]);
 
-              const parents = upResult.code === 0 ? parseBrDepListJson(upResult.stdout) : [];
-              const unblocks = downResult.code === 0 ? parseBrDepListJson(downResult.stdout) : [];
+              // up = dependents (things that depend on this issue)
+              // down = dependencies (things this issue depends on)
+              const unblocks = upResult.code === 0 ? parseBrDepListJson(upResult.stdout, "issue_id") : [];
+              const parents = downResult.code === 0 ? parseBrDepListJson(downResult.stdout, "depends_on_id") : [];
 
               return { issue, parent: parents[0] ?? null, unblocks };
             }),

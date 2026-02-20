@@ -164,12 +164,26 @@ export function parseBrShowJson(json: string): BrShowIssue | null {
   }
 }
 
-export function parseBrDepListJson(json: string): BrIssueSummary[] {
+export function parseBrDepListJson(json: string, idField?: "issue_id" | "depends_on_id"): BrIssueSummary[] {
   try {
     const parsed = JSON.parse(json) as unknown;
     if (!Array.isArray(parsed)) return [];
     return parsed
-      .map((row) => normalizeIssueRow(row))
+      .map((row) => {
+        if (idField && isRecord(row)) {
+          const id = typeof row[idField] === "string" ? (row[idField] as string) : null;
+          if (!id) return null;
+          const title = typeof row.title === "string" && row.title.trim() ? row.title : "(untitled issue)";
+          return {
+            id,
+            title,
+            type: typeof row.type === "string" ? row.type : typeof row.issue_type === "string" ? row.issue_type : undefined,
+            priority: typeof row.priority === "number" ? row.priority : undefined,
+            status: typeof row.status === "string" ? row.status : undefined,
+          } as BrIssueSummary;
+        }
+        return normalizeIssueRow(row);
+      })
       .filter((issue): issue is BrIssueSummary => issue !== null);
   } catch {
     return [];
@@ -423,8 +437,10 @@ export async function buildRecoveryContext(deps: RecoveryDeps): Promise<Recovery
     deps.runBr(["dep", "list", first.id, "--direction", "down", "--json"]).catch(() => ({ stdout: "[]", stderr: "", code: 1, killed: false })),
   ]);
 
-  const parents = upResult.code === 0 ? parseBrDepListJson(upResult.stdout) : [];
-  const blockedBy = downResult.code === 0 ? parseBrDepListJson(downResult.stdout) : [];
+  // up = dependents (things that depend on this issue)
+  // down = dependencies (things this issue depends on)
+  const blockedBy = upResult.code === 0 ? parseBrDepListJson(upResult.stdout, "issue_id") : [];
+  const parents = downResult.code === 0 ? parseBrDepListJson(downResult.stdout, "depends_on_id") : [];
   const parent = parents[0] ?? null;
 
   const gitResult = await deps.runGit(["status", "--porcelain"]);

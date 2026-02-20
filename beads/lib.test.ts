@@ -367,6 +367,26 @@ test("parseBrDepListJson returns empty array on non-array JSON", () => {
   assert.deepEqual(parseBrDepListJson('{"error": "not found"}'), []);
 });
 
+test("parseBrDepListJson extracts issue_id from real dep list output", () => {
+  const json = JSON.stringify([
+    { issue_id: "bd-shd", depends_on_id: "bd-3xi", type: "blocks", title: "Child issue", status: "open", priority: 2 },
+  ]);
+  const issues = parseBrDepListJson(json, "issue_id");
+  assert.equal(issues.length, 1);
+  assert.equal(issues[0].id, "bd-shd");
+  assert.equal(issues[0].title, "Child issue");
+});
+
+test("parseBrDepListJson extracts depends_on_id from real dep list output", () => {
+  const json = JSON.stringify([
+    { issue_id: "bd-shd", depends_on_id: "bd-3xi", type: "blocks", title: "Parent issue", status: "open", priority: 2 },
+  ]);
+  const issues = parseBrDepListJson(json, "depends_on_id");
+  assert.equal(issues.length, 1);
+  assert.equal(issues[0].id, "bd-3xi");
+  assert.equal(issues[0].title, "Parent issue");
+});
+
 test("formatCheckpointTrail formats last 5 comments with relative time", () => {
   const now = new Date("2026-02-19T12:00:00Z");
   const comments: BrComment[] = [
@@ -601,8 +621,8 @@ test("buildRecoveryContext assembles full context from br show + deps + git stat
     runBr: mockRunner({
       "list --status in_progress": { stdout: JSON.stringify([issue]), code: 0 },
       "show bd-1 --json": { stdout: JSON.stringify([issue]), code: 0 },
-      "dep list bd-1 --direction up": { stdout: JSON.stringify([{ id: "bd-parent", title: "Parent" }]), code: 0 },
-      "dep list bd-1 --direction down": { stdout: "[]", code: 0 },
+      "dep list bd-1 --direction up": { stdout: "[]", code: 0 },
+      "dep list bd-1 --direction down": { stdout: JSON.stringify([{ issue_id: "bd-1", depends_on_id: "bd-parent", type: "blocks", title: "Parent", status: "open", priority: 1 }]), code: 0 },
     }),
     runGit: mockRunner({
       "status --porcelain": { stdout: " M src/parser.ts\n", code: 0 },
