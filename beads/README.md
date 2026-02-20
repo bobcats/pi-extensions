@@ -128,12 +128,6 @@ The extension handles runtime mechanics; skills handle reasoning.
 
 **Single source of truth:** Beads issues and comments. In-memory stores (`editedFiles`, `checkpointState`, `currentIssueId`) are write buffers flushed to beads at checkpoint moments. Recovery reads from beads only.
 
-Design docs in `docs/shaping/`:
-- `frame.md` — problem statement and appetite
-- `shaping.md` — requirements, shapes, fit check
-- `breadboard.md` — affordance tables and scenario traces
-- `slices.md` — 7 vertical slices with dependency graph
-
 ## Testing
 
 ```bash
