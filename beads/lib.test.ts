@@ -21,6 +21,8 @@ import {
   formatRecoveryMessage,
   parseGitStatusPorcelain,
   buildRecoveryContext,
+  isGitCommitCommand,
+  parseGitCommitOutput,
   DIRTY_TREE_CLOSE_WARNING,
 } from "./lib.ts";
 import type { BrComment } from "./lib.ts";
@@ -646,6 +648,54 @@ test("buildRecoveryContext handles git status failure gracefully", async () => {
 
   assert.ok(result !== null);
   assert.deepEqual(result!.uncommittedFiles, []);
+});
+
+test("isGitCommitCommand matches git commit variants", () => {
+  assert.equal(isGitCommitCommand("git commit -m 'feat: add parser'"), true);
+  assert.equal(isGitCommitCommand("git commit -am 'fix: typo'"), true);
+  assert.equal(isGitCommitCommand("  git commit --amend"), true);
+  assert.equal(isGitCommitCommand("git commit"), true);
+});
+
+test("isGitCommitCommand rejects non-commit git commands", () => {
+  assert.equal(isGitCommitCommand("git add ."), false);
+  assert.equal(isGitCommitCommand("git push"), false);
+  assert.equal(isGitCommitCommand("git log --oneline"), false);
+  assert.equal(isGitCommitCommand("echo git commit"), false);
+  assert.equal(isGitCommitCommand("# git commit -m 'nope'"), false);
+});
+
+test("isGitCommitCommand rejects piped commands starting with non-commit", () => {
+  assert.equal(isGitCommitCommand("git add . && git commit -m 'test'"), false);
+});
+
+test("parseGitCommitOutput extracts hash and message from standard output", () => {
+  const output = "[main a1b2c3d] feat: add parser\n 2 files changed, 15 insertions(+)\n";
+  const result = parseGitCommitOutput(output);
+  assert.deepEqual(result, { hash: "a1b2c3d", message: "feat: add parser" });
+});
+
+test("parseGitCommitOutput handles branch with slashes", () => {
+  const output = "[feat/beads-v1 e4f5a6b] fix: handle edge case\n 1 file changed\n";
+  const result = parseGitCommitOutput(output);
+  assert.deepEqual(result, { hash: "e4f5a6b", message: "fix: handle edge case" });
+});
+
+test("parseGitCommitOutput handles detached HEAD", () => {
+  const output = "[detached HEAD abc1234] wip: experiment\n";
+  const result = parseGitCommitOutput(output);
+  assert.deepEqual(result, { hash: "abc1234", message: "wip: experiment" });
+});
+
+test("parseGitCommitOutput returns null on non-commit output", () => {
+  assert.equal(parseGitCommitOutput("On branch main\nnothing to commit"), null);
+  assert.equal(parseGitCommitOutput(""), null);
+});
+
+test("parseGitCommitOutput handles amend output", () => {
+  const output = "[main f1e2d3c] feat: updated message\n Date: Thu Feb 19 12:00:00 2026 -0800\n 1 file changed\n";
+  const result = parseGitCommitOutput(output);
+  assert.deepEqual(result, { hash: "f1e2d3c", message: "feat: updated message" });
 });
 
 test("dirty tree close warning text includes semantic-commit guidance", () => {
