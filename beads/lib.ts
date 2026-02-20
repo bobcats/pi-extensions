@@ -269,6 +269,54 @@ export function formatRecoveryMessage(ctx: RecoveryContext): string {
   return lines.join("\n");
 }
 
+export function extractEditedFilePath(toolName: string, input: Record<string, unknown>): string | null {
+  if (toolName === "write" || toolName === "edit") {
+    return typeof input.path === "string" ? input.path : null;
+  }
+  return null;
+}
+
+export function formatFileListComment(files: Set<string> | undefined): string | null {
+  if (!files?.size) return null;
+
+  const MAX_FILES = 30;
+  const sorted = [...files].sort();
+  const shown = sorted.slice(0, MAX_FILES);
+  let comment = `Files modified: ${shown.join(", ")}`;
+  if (sorted.length > MAX_FILES) {
+    comment += ` ...and ${sorted.length - MAX_FILES} more`;
+  }
+  return comment;
+}
+
+export function shouldNudgeCheckpoint(opts: {
+  turnIndex: number;
+  lastCheckpointTurn: number;
+  threshold: number;
+  hasActiveIssue?: boolean;
+}): boolean {
+  if (opts.hasActiveIssue === false) return false;
+  return opts.turnIndex - opts.lastCheckpointTurn >= opts.threshold;
+}
+
+export function buildCheckpointNudgeMessage(issueId: string, turnsSinceCheckpoint: number): string {
+  return [
+    `You've been working for ${turnsSinceCheckpoint} turns without checkpointing progress to ${issueId}.`,
+    `Consider running: beads comment (id: "${issueId}", comment: "Checkpoint: <brief summary of progress>")`,
+    `Or via CLI: br comments add ${issueId} "Checkpoint: <summary>"`,
+  ].join("\n");
+}
+
+export function isGitCommitCommand(command: string): boolean {
+  return /^\s*git\s+commit\b/.test(command);
+}
+
+export function parseGitCommitOutput(stdout: string): { hash: string; message: string } | null {
+  const match = stdout.match(/^\[[^\]]+\s+([a-f0-9]+)\]\s+(.+)/m);
+  if (!match) return null;
+  return { hash: match[1], message: match[2] };
+}
+
 export function parseGitStatusPorcelain(output: string): string[] {
   if (!output.trim()) return [];
 
