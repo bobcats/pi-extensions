@@ -7,38 +7,12 @@ import {
   parseBrInfoJson,
   parseBrReadyJson,
   type ExecResult,
+  extractErrorSummary,
   type UiContext,
 } from "./lib.ts";
 import { registerBeadsTool } from "./tool.ts";
 import { registerBeadsCommands, type BeadsState } from "./commands.ts";
 import { registerBeadsHooks } from "./hooks.ts";
-
-function extractErrorSummary(output: unknown): string | null {
-  if (typeof output !== "string") return null;
-  const trimmed = output.trim();
-  if (!trimmed) return null;
-
-  try {
-    const parsed = JSON.parse(trimmed) as { error?: { message?: unknown; hint?: unknown } };
-    if (parsed?.error && typeof parsed.error === "object") {
-      const message = typeof parsed.error.message === "string" ? parsed.error.message.trim() : "";
-      const hint = typeof parsed.error.hint === "string" ? parsed.error.hint.trim() : "";
-
-      if (message && hint) return `${message} (${hint})`;
-      if (message) return message;
-      if (hint) return hint;
-    }
-  } catch {
-    // fall through to first non-empty line
-  }
-
-  const firstLine = trimmed
-    .split("\n")
-    .map((line) => line.trim())
-    .find((line) => line.length > 0);
-
-  return firstLine ?? null;
-}
 
 function toExecError(error: unknown): ExecResult {
   return {

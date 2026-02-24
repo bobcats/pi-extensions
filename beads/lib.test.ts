@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  extractErrorSummary,
   parseBrInfoJson,
   parseBeadsSessionMode,
   parseBrReadyJson,
@@ -907,4 +908,37 @@ test("observability helper can suppress noisy events when disabled", () => {
   });
 
   assert.equal(summary, null);
+});
+
+test("extractErrorSummary extracts message and hint from JSON error", () => {
+  const json = JSON.stringify({ error: { message: "Not found", hint: "Check the ID" } });
+
+  const result = extractErrorSummary(json);
+
+  assert.equal(result, "Not found (Check the ID)");
+});
+
+test("extractErrorSummary extracts message-only from JSON error", () => {
+  const json = JSON.stringify({ error: { message: "Server error" } });
+
+  const result = extractErrorSummary(json);
+
+  assert.equal(result, "Server error");
+});
+
+test("extractErrorSummary falls back to first non-empty line", () => {
+  const result = extractErrorSummary("\n  something went wrong\n  details here");
+
+  assert.equal(result, "something went wrong");
+});
+
+test("extractErrorSummary returns null for non-string input", () => {
+  assert.equal(extractErrorSummary(42), null);
+  assert.equal(extractErrorSummary(null), null);
+  assert.equal(extractErrorSummary(undefined), null);
+});
+
+test("extractErrorSummary returns null for empty string", () => {
+  assert.equal(extractErrorSummary(""), null);
+  assert.equal(extractErrorSummary("   "), null);
 });
