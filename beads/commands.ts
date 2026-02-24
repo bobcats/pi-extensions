@@ -24,6 +24,7 @@ export interface BeadsState {
   currentIssueId: string | null;
   editedFiles: Map<string, Set<string>>;
   checkpointState: { lastCheckpointTurn: number; turnIndex: number };
+  autoContinuePending: boolean;
 }
 
 export function registerBeadsCommands(

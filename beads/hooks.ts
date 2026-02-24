@@ -82,6 +82,8 @@ export function registerBeadsHooks(
   });
 
   pi.on("before_agent_start", async () => {
+    state.autoContinuePending = false;
+
     if (!state.beadsEnabled || !state.shouldPrime) {
       return;
     }

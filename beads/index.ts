@@ -86,6 +86,7 @@ export default function beadsExtension(pi: ExtensionAPI) {
     currentIssueId: null,
     editedFiles: new Map(),
     checkpointState: { lastCheckpointTurn: 0, turnIndex: 0 },
+    autoContinuePending: false,
   };
 
   pi.registerFlag("beads-observe", {
@@ -212,6 +213,8 @@ export default function beadsExtension(pi: ExtensionAPI) {
       state.checkpointState.lastCheckpointTurn = state.checkpointState.turnIndex;
     },
     sendContinueMessage(closedId: string) {
+      if (state.autoContinuePending) return;
+      state.autoContinuePending = true;
       const msg = buildContinueMessage(closedId);
       pi.sendMessage(
         {
