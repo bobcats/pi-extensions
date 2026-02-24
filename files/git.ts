@@ -99,10 +99,14 @@ export const getGitFiles = async (
 	exec: ExecFn,
 	gitRoot: string,
 ): Promise<{ tracked: Set<string>; files: Array<{ canonicalPath: string; isDirectory: boolean }> }> => {
+	const [trackedResult, untrackedResult] = await Promise.all([
+		exec("git", ["ls-files", "-z"], { cwd: gitRoot }),
+		exec("git", ["ls-files", "-z", "--others", "--exclude-standard"], { cwd: gitRoot }),
+	]);
+
 	const tracked = new Set<string>();
 	const files: Array<{ canonicalPath: string; isDirectory: boolean }> = [];
 
-	const trackedResult = await exec("git", ["ls-files", "-z"], { cwd: gitRoot });
 	if (trackedResult.code === 0 && trackedResult.stdout) {
 		for (const relativePath of splitNullSeparated(trackedResult.stdout)) {
 			const resolvedPath = path.resolve(gitRoot, relativePath);
@@ -113,7 +117,6 @@ export const getGitFiles = async (
 		}
 	}
 
-	const untrackedResult = await exec("git", ["ls-files", "-z", "--others", "--exclude-standard"], { cwd: gitRoot });
 	if (untrackedResult.code === 0 && untrackedResult.stdout) {
 		for (const relativePath of splitNullSeparated(untrackedResult.stdout)) {
 			const resolvedPath = path.resolve(gitRoot, relativePath);

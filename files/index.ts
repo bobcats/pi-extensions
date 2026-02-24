@@ -223,15 +223,13 @@ const buildFileEntries = async (pi: ExtensionAPI, ctx: ExtensionContext): Promis
 	const entries = ctx.sessionManager.getBranch();
 	const sessionChanges = collectSessionFileChanges(entries, ctx.cwd);
 	const gitRoot = await getGitRoot(pi, ctx.cwd);
-	const statusMap = gitRoot ? await getGitStatusMap(pi, gitRoot) : new Map<string, GitStatusEntry>();
 
-	let trackedSet = new Set<string>();
-	let gitFiles: Array<{ canonicalPath: string; isDirectory: boolean }> = [];
-	if (gitRoot) {
-		const gitListing = await getGitFiles(pi, gitRoot);
-		trackedSet = gitListing.tracked;
-		gitFiles = gitListing.files;
-	}
+	const [statusMap, gitListing] = await Promise.all([
+		gitRoot ? getGitStatusMap(pi, gitRoot) : Promise.resolve(new Map<string, GitStatusEntry>()),
+		gitRoot ? getGitFiles(pi, gitRoot) : Promise.resolve({ tracked: new Set<string>(), files: [] as Array<{ canonicalPath: string; isDirectory: boolean }> }),
+	]);
+	const trackedSet = gitListing.tracked;
+	const gitFiles = gitListing.files;
 
 	const fileMap = new Map<string, FileEntry>();
 
