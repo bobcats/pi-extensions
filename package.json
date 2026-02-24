@@ -5,7 +5,7 @@
   "license": "MIT",
   "keywords": ["pi-package"],
   "pi": {
-    "extensions": ["./ext-prof/index.ts", "./confirm-rm/index.ts", "./beads/index.ts", "./memory/index.ts", "./notify/index.ts", "./context/index.ts", "./files/index.ts"],
+    "extensions": ["./ext-prof/index.ts", "./confirm-rm/index.ts", "./beads/index.ts", "./memory/index.ts", "./notify/index.ts", "./context/index.ts", "./files/index.ts", "./session-breakdown/index.ts"],
     "skills": [
       "./beads/skills/beads-code/SKILL.md",
       "./beads/skills/beads-create/SKILL.md",
