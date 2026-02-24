@@ -25,9 +25,17 @@ import os from "node:os";
 import path from "node:path";
 import fs from "node:fs/promises";
 import { createReadStream, type Dirent } from "node:fs";
+import { extractCostTotal, formatUsd } from "../shared/lib.ts";
+import {
+	extractTokensTotal,
+	formatCount,
+	type ModelKey,
+	modelKeyFromParts,
+	mondayIndex,
+	parseSessionStartFromFilename,
+	toLocalDayKey,
+} from "./lib.ts";
 import readline from "node:readline";
-
-type ModelKey = string; // `${provider}/${model}`
 
 interface ParsedSession {
 	filePath: string;
@@ -169,21 +177,6 @@ function bold(text: string): string {
 	return `\x1b[1m${text}\x1b[0m`;
 }
 
-function formatCount(n: number): string {
-	if (!Number.isFinite(n) || n === 0) return "0";
-	if (n >= 1_000_000_000) return `${(n / 1_000_000_000).toFixed(1)}B`;
-	if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-	if (n >= 10_000) return `${(n / 1_000).toFixed(1)}K`;
-	return n.toLocaleString("en-US");
-}
-
-function formatUsd(cost: number): string {
-	if (!Number.isFinite(cost)) return "$0.00";
-	if (cost >= 1) return `$${cost.toFixed(2)}`;
-	if (cost >= 0.1) return `$${cost.toFixed(3)}`;
-	return `$${cost.toFixed(4)}`;
-}
-
 function padRight(s: string, n: number): string {
 	const delta = n - s.length;
 	return delta > 0 ? s + " ".repeat(delta) : s;
@@ -192,13 +185,6 @@ function padRight(s: string, n: number): string {
 function padLeft(s: string, n: number): string {
 	const delta = n - s.length;
 	return delta > 0 ? " ".repeat(delta) + s : s;
-}
-
-function toLocalDayKey(d: Date): string {
-	const yyyy = d.getFullYear();
-	const mm = String(d.getMonth() + 1).padStart(2, "0");
-	const dd = String(d.getDate()).padStart(2, "0");
-	return `${yyyy}-${mm}-${dd}`;
 }
 
 function localMidnight(d: Date): Date {
@@ -218,29 +204,6 @@ function countDaysInclusiveLocal(start: Date, end: Date): number {
 	return n;
 }
 
-function mondayIndex(date: Date): number {
-	// Mon=0 .. Sun=6
-	return (date.getDay() + 6) % 7;
-}
-
-function modelKeyFromParts(provider?: unknown, model?: unknown): ModelKey | null {
-	const p = typeof provider === "string" ? provider.trim() : "";
-	const m = typeof model === "string" ? model.trim() : "";
-	if (!p && !m) return null;
-	if (!p) return m;
-	if (!m) return p;
-	return `${p}/${m}`;
-}
-
-function parseSessionStartFromFilename(name: string): Date | null {
-	// Example: 2026-02-02T21-52-28-774Z_<uuid>.jsonl
-	const m = name.match(/^(\d{4}-\d{2}-\d{2})T(\d{2})-(\d{2})-(\d{2})-(\d{3})Z_/);
-	if (!m) return null;
-	const iso = `${m[1]}T${m[2]}:${m[3]}:${m[4]}.${m[5]}Z`;
-	const d = new Date(iso);
-	return Number.isFinite(d.getTime()) ? d : null;
-}
-
 function extractProviderModelAndUsage(obj: any): { provider?: any; model?: any; modelId?: any; usage?: any } {
 	// Session format varies across versions.
 	// - Newer: { provider, model, usage } on the message wrapper
@@ -252,73 +215,6 @@ function extractProviderModelAndUsage(obj: any): { provider?: any; model?: any; 
 		modelId: obj?.modelId ?? msg?.modelId,
 		usage: obj?.usage ?? msg?.usage,
 	};
-}
-
-function extractCostTotal(usage: any): number {
-	if (!usage) return 0;
-	const c = usage?.cost;
-	if (typeof c === "number") return Number.isFinite(c) ? c : 0;
-	if (typeof c === "string") {
-		const n = Number(c);
-		return Number.isFinite(n) ? n : 0;
-	}
-	const t = c?.total;
-	if (typeof t === "number") return Number.isFinite(t) ? t : 0;
-	if (typeof t === "string") {
-		const n = Number(t);
-		return Number.isFinite(n) ? n : 0;
-	}
-	return 0;
-}
-
-function extractTokensTotal(usage: any): number {
-	// Usage format varies across providers and pi versions.
-	// We try a few common shapes:
-	// - { totalTokens }
-	// - { total_tokens }
-	// - { promptTokens, completionTokens }
-	// - { prompt_tokens, completion_tokens }
-	// - { input_tokens, output_tokens }
-	// - { inputTokens, outputTokens }
-	// - { tokens: number | { total } }
-	if (!usage) return 0;
-
-	const readNum = (v: any): number => {
-		if (typeof v === "number") return Number.isFinite(v) ? v : 0;
-		if (typeof v === "string") {
-			const n = Number(v);
-			return Number.isFinite(n) ? n : 0;
-		}
-		return 0;
-	};
-
-	let total = 0;
-	// direct totals
-	total =
-		readNum(usage?.totalTokens) ||
-		readNum(usage?.total_tokens) ||
-		readNum(usage?.tokens) ||
-		readNum(usage?.tokenCount) ||
-		readNum(usage?.token_count);
-	if (total > 0) return total;
-
-	// nested tokens object
-	total = readNum(usage?.tokens?.total) || readNum(usage?.tokens?.totalTokens) || readNum(usage?.tokens?.total_tokens);
-	if (total > 0) return total;
-
-	// sum of parts
-	const a =
-		readNum(usage?.promptTokens) ||
-		readNum(usage?.prompt_tokens) ||
-		readNum(usage?.inputTokens) ||
-		readNum(usage?.input_tokens);
-	const b =
-		readNum(usage?.completionTokens) ||
-		readNum(usage?.completion_tokens) ||
-		readNum(usage?.outputTokens) ||
-		readNum(usage?.output_tokens);
-	const sum = a + b;
-	return sum > 0 ? sum : 0;
 }
 
 async function walkSessionFiles(

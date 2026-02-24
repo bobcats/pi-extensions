@@ -21,8 +21,22 @@ import {
 } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import type { ExtensionAPI, ExtensionContext, SessionEntry } from "@mariozechner/pi-coding-agent";
+import {
+	type ContentBlock,
+	extractFileReferencesFromText,
+	extractPathsFromToolArgs,
+	formatDisplayPath,
+	normalizeReferencePath,
+} from "./lib.ts";
+import {
+	type GitStatusEntry,
+	getGitFiles,
+	getGitRoot,
+	getGitStatusMap,
+	toCanonicalPath,
+	toCanonicalPathMaybeMissing,
+} from "./git.ts";
 import { DynamicBorder } from "@mariozechner/pi-coding-agent";
 import {
 	Container,
@@ -36,12 +50,6 @@ import {
 	Text,
 	type TUI,
 } from "@mariozechner/pi-tui";
-
-type ContentBlock = {
-	type?: string;
-	text?: string;
-	arguments?: Record<string, unknown>;
-};
 
 type FileReference = {
 	path: string;
@@ -64,12 +72,6 @@ type FileEntry = {
 	lastTimestamp: number;
 };
 
-type GitStatusEntry = {
-	status: string;
-	exists: boolean;
-	isDirectory: boolean;
-};
-
 type FileToolName = "write" | "edit";
 
 type SessionFileChange = {
@@ -77,60 +79,7 @@ type SessionFileChange = {
 	lastTimestamp: number;
 };
 
-const FILE_TAG_REGEX = /<file\s+name=["']([^"']+)["']>/g;
-const FILE_URL_REGEX = /file:\/\/[^\s"'<>]+/g;
-const PATH_REGEX = /(?:^|[\s"'`([{<])((?:~|\/)[^\s"'`<>)}\]]+)/g;
-
 const MAX_EDIT_BYTES = 40 * 1024 * 1024;
-
-const extractFileReferencesFromText = (text: string): string[] => {
-	const refs: string[] = [];
-
-	for (const match of text.matchAll(FILE_TAG_REGEX)) {
-		refs.push(match[1]);
-	}
-
-	for (const match of text.matchAll(FILE_URL_REGEX)) {
-		refs.push(match[0]);
-	}
-
-	for (const match of text.matchAll(PATH_REGEX)) {
-		refs.push(match[1]);
-	}
-
-	return refs;
-};
-
-const extractPathsFromToolArgs = (args: unknown): string[] => {
-	if (!args || typeof args !== "object") {
-		return [];
-	}
-
-	const refs: string[] = [];
-	const record = args as Record<string, unknown>;
-	const directKeys = ["path", "file", "filePath", "filepath", "fileName", "filename"] as const;
-	const listKeys = ["paths", "files", "filePaths"] as const;
-
-	for (const key of directKeys) {
-		const value = record[key];
-		if (typeof value === "string") {
-			refs.push(value);
-		}
-	}
-
-	for (const key of listKeys) {
-		const value = record[key];
-		if (Array.isArray(value)) {
-			for (const item of value) {
-				if (typeof item === "string") {
-					refs.push(item);
-				}
-			}
-		}
-	}
-
-	return refs;
-};
 
 const extractFileReferencesFromContent = (content: unknown): string[] => {
 	if (typeof content === "string") {
@@ -173,82 +122,6 @@ const extractFileReferencesFromEntry = (entry: SessionEntry): string[] => {
 	return [];
 };
 
-const sanitizeReference = (raw: string): string => {
-	let value = raw.trim();
-	value = value.replace(/^["'`(<\[]+/, "");
-	value = value.replace(/[>"'`,;).\]]+$/, "");
-	value = value.replace(/[.,;:]+$/, "");
-	return value;
-};
-
-const isCommentLikeReference = (value: string): boolean => value.startsWith("//");
-
-const stripLineSuffix = (value: string): string => {
-	let result = value.replace(/#L\d+(C\d+)?$/i, "");
-	const lastSeparator = Math.max(result.lastIndexOf("/"), result.lastIndexOf("\\"));
-	const segmentStart = lastSeparator >= 0 ? lastSeparator + 1 : 0;
-	const segment = result.slice(segmentStart);
-	const colonIndex = segment.indexOf(":");
-	if (colonIndex >= 0 && /\d/.test(segment[colonIndex + 1] ?? "")) {
-		result = result.slice(0, segmentStart + colonIndex);
-		return result;
-	}
-
-	const lastColon = result.lastIndexOf(":");
-	if (lastColon > lastSeparator) {
-		const suffix = result.slice(lastColon + 1);
-		if (/^\d+(?::\d+)?$/.test(suffix)) {
-			result = result.slice(0, lastColon);
-		}
-	}
-	return result;
-};
-
-const normalizeReferencePath = (raw: string, cwd: string): string | null => {
-	let candidate = sanitizeReference(raw);
-	if (!candidate || isCommentLikeReference(candidate)) {
-		return null;
-	}
-
-	if (candidate.startsWith("file://")) {
-		try {
-			candidate = fileURLToPath(candidate);
-		} catch {
-			return null;
-		}
-	}
-
-	candidate = stripLineSuffix(candidate);
-	if (!candidate || isCommentLikeReference(candidate)) {
-		return null;
-	}
-
-	if (candidate.startsWith("~")) {
-		candidate = path.join(os.homedir(), candidate.slice(1));
-	}
-
-	if (!path.isAbsolute(candidate)) {
-		candidate = path.resolve(cwd, candidate);
-	}
-
-	candidate = path.normalize(candidate);
-	const root = path.parse(candidate).root;
-	if (candidate.length > root.length) {
-		candidate = candidate.replace(/[\\/]+$/, "");
-	}
-
-	return candidate;
-};
-
-const formatDisplayPath = (absolutePath: string, cwd: string): string => {
-	const normalizedCwd = path.resolve(cwd);
-	if (absolutePath.startsWith(normalizedCwd + path.sep)) {
-		return path.relative(normalizedCwd, absolutePath);
-	}
-
-	return absolutePath;
-};
-
 const collectRecentFileReferences = (entries: SessionEntry[], cwd: string, limit: number): FileReference[] => {
 	const results: FileReference[] = [];
 	const seen = new Set<string>();
@@ -286,37 +159,6 @@ const collectRecentFileReferences = (entries: SessionEntry[], cwd: string, limit
 const findLatestFileReference = (entries: SessionEntry[], cwd: string): FileReference | null => {
 	const refs = collectRecentFileReferences(entries, cwd, 100);
 	return refs.find((ref) => ref.exists) ?? null;
-};
-
-const toCanonicalPath = (inputPath: string): { canonicalPath: string; isDirectory: boolean } | null => {
-	if (!existsSync(inputPath)) {
-		return null;
-	}
-
-	try {
-		const canonicalPath = realpathSync(inputPath);
-		const stats = statSync(canonicalPath);
-		return { canonicalPath, isDirectory: stats.isDirectory() };
-	} catch {
-		return null;
-	}
-};
-
-const toCanonicalPathMaybeMissing = (
-	inputPath: string,
-): { canonicalPath: string; isDirectory: boolean; exists: boolean } | null => {
-	const resolvedPath = path.resolve(inputPath);
-	if (!existsSync(resolvedPath)) {
-		return { canonicalPath: path.normalize(resolvedPath), isDirectory: false, exists: false };
-	}
-
-	try {
-		const canonicalPath = realpathSync(resolvedPath);
-		const stats = statSync(canonicalPath);
-		return { canonicalPath, isDirectory: stats.isDirectory(), exists: true };
-	} catch {
-		return { canonicalPath: path.normalize(resolvedPath), isDirectory: false, exists: true };
-	}
 };
 
 const collectSessionFileChanges = (entries: SessionEntry[], cwd: string): Map<string, SessionFileChange> => {
@@ -375,82 +217,6 @@ const collectSessionFileChanges = (entries: SessionEntry[], cwd: string): Map<st
 	}
 
 	return fileMap;
-};
-
-const splitNullSeparated = (value: string): string[] => value.split("\0").filter(Boolean);
-
-const getGitRoot = async (pi: ExtensionAPI, cwd: string): Promise<string | null> => {
-	const result = await pi.exec("git", ["rev-parse", "--show-toplevel"], { cwd });
-	if (result.code !== 0) {
-		return null;
-	}
-
-	const root = result.stdout.trim();
-	return root ? root : null;
-};
-
-const getGitStatusMap = async (pi: ExtensionAPI, cwd: string): Promise<Map<string, GitStatusEntry>> => {
-	const statusMap = new Map<string, GitStatusEntry>();
-	const statusResult = await pi.exec("git", ["status", "--porcelain=1", "-z"], { cwd });
-	if (statusResult.code !== 0 || !statusResult.stdout) {
-		return statusMap;
-	}
-
-	const entries = splitNullSeparated(statusResult.stdout);
-	for (let i = 0; i < entries.length; i += 1) {
-		const entry = entries[i];
-		if (!entry || entry.length < 4) continue;
-		const status = entry.slice(0, 2);
-		const statusLabel = status.replace(/\s/g, "") || status.trim();
-		let filePath = entry.slice(3);
-		if ((status.startsWith("R") || status.startsWith("C")) && entries[i + 1]) {
-			filePath = entries[i + 1];
-			i += 1;
-		}
-		if (!filePath) continue;
-
-		const resolved = path.isAbsolute(filePath) ? filePath : path.resolve(cwd, filePath);
-		const canonical = toCanonicalPathMaybeMissing(resolved);
-		if (!canonical) continue;
-		statusMap.set(canonical.canonicalPath, {
-			status: statusLabel,
-			exists: canonical.exists,
-			isDirectory: canonical.isDirectory,
-		});
-	}
-
-	return statusMap;
-};
-
-const getGitFiles = async (
-	pi: ExtensionAPI,
-	gitRoot: string,
-): Promise<{ tracked: Set<string>; files: Array<{ canonicalPath: string; isDirectory: boolean }> }> => {
-	const tracked = new Set<string>();
-	const files: Array<{ canonicalPath: string; isDirectory: boolean }> = [];
-
-	const trackedResult = await pi.exec("git", ["ls-files", "-z"], { cwd: gitRoot });
-	if (trackedResult.code === 0 && trackedResult.stdout) {
-		for (const relativePath of splitNullSeparated(trackedResult.stdout)) {
-			const resolvedPath = path.resolve(gitRoot, relativePath);
-			const canonical = toCanonicalPath(resolvedPath);
-			if (!canonical) continue;
-			tracked.add(canonical.canonicalPath);
-			files.push(canonical);
-		}
-	}
-
-	const untrackedResult = await pi.exec("git", ["ls-files", "-z", "--others", "--exclude-standard"], { cwd: gitRoot });
-	if (untrackedResult.code === 0 && untrackedResult.stdout) {
-		for (const relativePath of splitNullSeparated(untrackedResult.stdout)) {
-			const resolvedPath = path.resolve(gitRoot, relativePath);
-			const canonical = toCanonicalPath(resolvedPath);
-			if (!canonical) continue;
-			files.push(canonical);
-		}
-	}
-
-	return { tracked, files };
 };
 
 const buildFileEntries = async (pi: ExtensionAPI, ctx: ExtensionContext): Promise<{ files: FileEntry[]; gitRoot: string | null }> => {

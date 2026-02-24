@@ -16,55 +16,8 @@ import os from "node:os";
 import path from "node:path";
 import fs from "node:fs/promises";
 import { existsSync } from "node:fs";
-
-function formatUsd(cost: number): string {
-	if (!Number.isFinite(cost) || cost <= 0) return "$0.00";
-	if (cost >= 1) return `$${cost.toFixed(2)}`;
-	if (cost >= 0.1) return `$${cost.toFixed(3)}`;
-	return `$${cost.toFixed(4)}`;
-}
-
-function estimateTokens(text: string): number {
-	// Deliberately fuzzy (good enough for “how big-ish is this”).
-	return Math.max(0, Math.ceil(text.length / 4));
-}
-
-function normalizeReadPath(inputPath: string, cwd: string): string {
-	// Similar to pi's resolveToCwd/resolveReadPath, but simplified.
-	let p = inputPath;
-	if (p.startsWith("@")) p = p.slice(1);
-	if (p === "~") p = os.homedir();
-	else if (p.startsWith("~/")) p = path.join(os.homedir(), p.slice(2));
-	if (!path.isAbsolute(p)) p = path.resolve(cwd, p);
-	return path.resolve(p);
-}
-
-function getAgentDir(): string {
-	// Mirrors pi's behavior reasonably well.
-	const envCandidates = ["PI_CODING_AGENT_DIR", "TAU_CODING_AGENT_DIR"];
-	let envDir: string | undefined;
-	for (const k of envCandidates) {
-		if (process.env[k]) {
-			envDir = process.env[k];
-			break;
-		}
-	}
-	if (!envDir) {
-		for (const [k, v] of Object.entries(process.env)) {
-			if (k.endsWith("_CODING_AGENT_DIR") && v) {
-				envDir = v;
-				break;
-			}
-		}
-	}
-
-	if (envDir) {
-		if (envDir === "~") return os.homedir();
-		if (envDir.startsWith("~/")) return path.join(os.homedir(), envDir.slice(2));
-		return envDir;
-	}
-	return path.join(os.homedir(), ".pi", "agent");
-}
+import { formatUsd } from "../shared/lib.ts";
+import { estimateTokens, getAgentDir, normalizeReadPath, shortenPath, sumSessionUsage } from "./lib.ts";
 
 async function readFileIfExists(filePath: string): Promise<{ path: string; content: string; bytes: number } | null> {
 	if (!existsSync(filePath)) return null;
@@ -151,68 +104,6 @@ function getLoadedSkillsFromSession(ctx: ExtensionContext): Set<string> {
 		if (data?.name) out.add(data.name);
 	}
 	return out;
-}
-
-function extractCostTotal(usage: any): number {
-	if (!usage) return 0;
-	const c = usage?.cost;
-	if (typeof c === "number") return Number.isFinite(c) ? c : 0;
-	if (typeof c === "string") {
-		const n = Number(c);
-		return Number.isFinite(n) ? n : 0;
-	}
-	const t = c?.total;
-	if (typeof t === "number") return Number.isFinite(t) ? t : 0;
-	if (typeof t === "string") {
-		const n = Number(t);
-		return Number.isFinite(n) ? n : 0;
-	}
-	return 0;
-}
-
-function sumSessionUsage(ctx: ExtensionCommandContext): {
-	input: number;
-	output: number;
-	cacheRead: number;
-	cacheWrite: number;
-	totalTokens: number;
-	totalCost: number;
-} {
-	let input = 0;
-	let output = 0;
-	let cacheRead = 0;
-	let cacheWrite = 0;
-	let totalCost = 0;
-
-	for (const entry of ctx.sessionManager.getEntries()) {
-		if ((entry as any)?.type !== "message") continue;
-		const msg = (entry as any)?.message;
-		if (!msg || msg.role !== "assistant") continue;
-		const usage = msg.usage;
-		if (!usage) continue;
-		input += Number(usage.inputTokens ?? 0) || 0;
-		output += Number(usage.outputTokens ?? 0) || 0;
-		cacheRead += Number(usage.cacheRead ?? 0) || 0;
-		cacheWrite += Number(usage.cacheWrite ?? 0) || 0;
-		totalCost += extractCostTotal(usage);
-	}
-
-	return {
-		input,
-		output,
-		cacheRead,
-		cacheWrite,
-		totalTokens: input + output + cacheRead + cacheWrite,
-		totalCost,
-	};
-}
-
-function shortenPath(p: string, cwd: string): string {
-	const rp = path.resolve(p);
-	const rc = path.resolve(cwd);
-	if (rp === rc) return ".";
-	if (rp.startsWith(rc + path.sep)) return "./" + rp.slice(rc.length + 1);
-	return rp;
 }
 
 function renderUsageBar(
