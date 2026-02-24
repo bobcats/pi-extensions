@@ -8,6 +8,7 @@ import {
   parseBrReadyJson,
   type ExecResult,
   extractErrorSummary,
+  type NotifyContext,
   type UiContext,
 } from "./lib.ts";
 import { registerBeadsTool } from "./tool.ts";
@@ -32,7 +33,7 @@ function summarizeExecFailure(result: ExecResult): string {
 }
 
 function commandOut(
-  ctx: { hasUI: boolean; ui: { notify: (message: string, level: "info" | "warning" | "error") => void } },
+  ctx: NotifyContext,
   message: string,
   level: "info" | "warning" | "error" = "info",
 ) {
@@ -131,10 +132,7 @@ export default function beadsExtension(pi: ExtensionAPI) {
     );
   };
 
-  const maybeNudgeCommitAfterClose = async (ctx: {
-    hasUI: boolean;
-    ui: { notify: (message: string, level: "info" | "warning" | "error") => void };
-  }): Promise<string | null> => {
+  const maybeNudgeCommitAfterClose = async (ctx: NotifyContext): Promise<string | null> => {
     const status = await runGit(["status", "--porcelain"]);
     if (status.code !== 0) {
       return null;
