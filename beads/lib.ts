@@ -487,15 +487,6 @@ export async function buildRecoveryContext(deps: RecoveryDeps): Promise<Recovery
   };
 }
 
-export function buildResumeContext(issue: BrShowIssue): string {
-  const lastComment = issue.comments?.length ? issue.comments[issue.comments.length - 1]! : null;
-  let line = `## Resuming: ${issue.id} — ${issue.title}`;
-  if (lastComment) {
-    line += `\nLast checkpoint: ${lastComment.text}`;
-  }
-  return line;
-}
-
 export function formatIssueCard(issue: BrShowIssue): string[] {
   const priority = typeof issue.priority === "number" ? `P${issue.priority}` : "P?";
   const status = issue.status ?? "unknown";

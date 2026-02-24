@@ -11,7 +11,6 @@ import {
   shouldShowContextReminder,
   buildBeadsPrimeMessage,
   getBeadsModeOffMessage,
-  buildResumeContext,
   formatIssueCard,
   formatIssueLabel,
   summarizeInProgressIssue,
@@ -270,28 +269,6 @@ test("parseBrShowJson handles issue with no comments", () => {
 test("parseBrShowJson returns null on bad input", () => {
   assert.equal(parseBrShowJson("nope"), null);
   assert.equal(parseBrShowJson("[]"), null);
-});
-
-test("buildResumeContext includes id, title, and last comment", () => {
-  const ctx = buildResumeContext({
-    id: "bd-1",
-    title: "Fix parser",
-    comments: [
-      { id: 1, issue_id: "bd-1", author: "a", text: "Started", created_at: "2026-01-01T00:00:00Z" },
-      { id: 2, issue_id: "bd-1", author: "a", text: "Tests green", created_at: "2026-01-01T01:00:00Z" },
-    ],
-  });
-  assert.match(ctx, /bd-1/);
-  assert.match(ctx, /Fix parser/);
-  assert.match(ctx, /Tests green/);
-  assert.ok(!ctx.includes("Started"));
-});
-
-test("buildResumeContext works without comments", () => {
-  const ctx = buildResumeContext({ id: "bd-2", title: "No comments" });
-  assert.match(ctx, /bd-2/);
-  assert.match(ctx, /No comments/);
-  assert.ok(!ctx.includes("checkpoint"));
 });
 
 test("formatIssueCard renders full card with description and last comment", () => {
