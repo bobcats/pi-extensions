@@ -443,7 +443,7 @@ export function extractErrorSummary(output: unknown): string | null {
   return firstLine ?? null;
 }
 
-export type RecoveryDeps = {
+type RecoveryDeps = {
   runBr(args: string[], timeout?: number): Promise<ExecResult>;
   runGit(args: string[], timeout?: number): Promise<ExecResult>;
 };
