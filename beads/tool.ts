@@ -17,6 +17,7 @@ import {
   type BrIssueSummary,
   type BrShowIssue,
   type EnrichedReadyIssue,
+  type ExecResult,
 } from "./lib.ts";
 
 const beadsToolSchema = Type.Object({
@@ -31,13 +32,6 @@ const beadsToolSchema = Type.Object({
 });
 
 type BeadsToolInput = Static<typeof beadsToolSchema>;
-
-type ExecResult = {
-  stdout: string;
-  stderr: string;
-  code: number;
-  killed: boolean;
-};
 
 type DisabledToolDetails = {
   action: BeadsAction;

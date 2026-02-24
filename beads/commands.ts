@@ -2,14 +2,8 @@ import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import {
   formatIssueLabel,
   parseBrReadyJson,
+  type ExecResult,
 } from "./lib.ts";
-
-type ExecResult = {
-  stdout: string;
-  stderr: string;
-  code: number;
-  killed: boolean;
-};
 
 type UiContext = { ui: { setStatus: (key: string, value?: string) => void } };
 type NotifyContext = { hasUI: boolean; ui: { notify: (message: string, level: "info" | "warning" | "error") => void } };

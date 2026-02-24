@@ -406,7 +406,7 @@ export function parseGitStatusPorcelain(output: string): string[] {
     });
 }
 
-type ExecResult = {
+export type ExecResult = {
   stdout: string;
   stderr: string;
   code: number;

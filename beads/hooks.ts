@@ -19,15 +19,9 @@ import {
   parseGitCommitOutput,
   shouldNudgeCheckpoint,
   shouldShowContextReminder,
+  type ExecResult,
 } from "./lib.ts";
 import type { BeadsState } from "./commands.ts";
-
-type ExecResult = {
-  stdout: string;
-  stderr: string;
-  code: number;
-  killed: boolean;
-};
 
 type UiContext = { ui: { setStatus: (key: string, value?: string) => void } };
 type NotifyContext = { hasUI: boolean; ui: { notify: (message: string, level: "info" | "warning" | "error") => void } };

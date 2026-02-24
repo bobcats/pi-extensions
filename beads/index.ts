@@ -6,17 +6,11 @@ import {
   formatBeadsModeStatus,
   parseBrInfoJson,
   parseBrReadyJson,
+  type ExecResult,
 } from "./lib.ts";
 import { registerBeadsTool } from "./tool.ts";
 import { registerBeadsCommands, type BeadsState } from "./commands.ts";
 import { registerBeadsHooks } from "./hooks.ts";
-
-type ExecResult = {
-  stdout: string;
-  stderr: string;
-  code: number;
-  killed: boolean;
-};
 
 function extractErrorSummary(output: unknown): string | null {
   if (typeof output !== "string") return null;
