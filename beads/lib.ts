@@ -413,6 +413,9 @@ export type ExecResult = {
   killed: boolean;
 };
 
+export type UiContext = { ui: { setStatus: (key: string, value?: string) => void } };
+export type NotifyContext = { hasUI: boolean; ui: { notify: (message: string, level: "info" | "warning" | "error") => void } };
+
 export type RecoveryDeps = {
   runBr(args: string[], timeout?: number): Promise<ExecResult>;
   runGit(args: string[], timeout?: number): Promise<ExecResult>;

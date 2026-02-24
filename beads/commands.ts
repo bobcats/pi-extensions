@@ -3,10 +3,9 @@ import {
   formatIssueLabel,
   parseBrReadyJson,
   type ExecResult,
+  type UiContext,
+  type NotifyContext,
 } from "./lib.ts";
-
-type UiContext = { ui: { setStatus: (key: string, value?: string) => void } };
-type NotifyContext = { hasUI: boolean; ui: { notify: (message: string, level: "info" | "warning" | "error") => void } };
 
 export interface BeadsState {
   isBeadsProject: boolean;

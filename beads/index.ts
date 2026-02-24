@@ -7,6 +7,7 @@ import {
   parseBrInfoJson,
   parseBrReadyJson,
   type ExecResult,
+  type UiContext,
 } from "./lib.ts";
 import { registerBeadsTool } from "./tool.ts";
 import { registerBeadsCommands, type BeadsState } from "./commands.ts";
@@ -69,8 +70,6 @@ function commandOut(
 }
 
 export default function beadsExtension(pi: ExtensionAPI) {
-  type UiContext = { ui: { setStatus: (key: string, value?: string) => void } };
-
   const state: BeadsState = {
     isBeadsProject: false,
     beadsEnabled: false,

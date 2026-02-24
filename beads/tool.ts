@@ -18,6 +18,8 @@ import {
   type BrShowIssue,
   type EnrichedReadyIssue,
   type ExecResult,
+  type UiContext,
+  type NotifyContext,
 } from "./lib.ts";
 
 const beadsToolSchema = Type.Object({
@@ -250,8 +252,7 @@ function parseBeadsToolDetails(details: unknown): BeadsToolDetails | null {
   return null;
 }
 
-type UiContext = { ui: { setStatus: (key: string, value?: string) => void } };
-type NotifyContext = { hasUI: boolean; ui: { notify: (message: string, level: "info" | "warning" | "error") => void } };
+
 
 export function registerBeadsTool(
   pi: ExtensionAPI,

@@ -20,11 +20,10 @@ import {
   shouldNudgeCheckpoint,
   shouldShowContextReminder,
   type ExecResult,
+  type UiContext,
+  type NotifyContext,
 } from "./lib.ts";
 import type { BeadsState } from "./commands.ts";
-
-type UiContext = { ui: { setStatus: (key: string, value?: string) => void } };
-type NotifyContext = { hasUI: boolean; ui: { notify: (message: string, level: "info" | "warning" | "error") => void } };
 
 export function registerBeadsHooks(
   pi: ExtensionAPI,
