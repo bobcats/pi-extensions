@@ -2,8 +2,7 @@
  * Files Extension
  *
  * /files command lists files in the current git tree (plus session-referenced files)
- * and offers quick actions like reveal, open, edit, or diff.
- * /diff is kept as an alias to the same picker.
+ * and offers quick actions like reveal, open, edit.
  *
  * Forked from: https://github.com/mitsuhiko/agent-stuff/blob/main/pi-extensions/files.ts
  * Original author: Armin Ronacher (mitsuhiko)
