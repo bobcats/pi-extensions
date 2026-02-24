@@ -201,9 +201,11 @@ export function registerBeadsCommands(
   pi.registerCommand("beads-status", {
     description: "Show beads stats, blocked issues, and in-progress issues",
     handler: async (_args, ctx) => {
-      const stats = await deps.runBr(["stats"]);
-      const blocked = await deps.runBr(["blocked"]);
-      const inProgress = await deps.runBr(["list", "--status", "in_progress"]);
+      const [stats, blocked, inProgress] = await Promise.all([
+        deps.runBr(["stats"]),
+        deps.runBr(["blocked"]),
+        deps.runBr(["list", "--status", "in_progress"]),
+      ]);
 
       const lines: string[] = [];
 
