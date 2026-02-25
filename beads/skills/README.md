@@ -11,16 +11,17 @@ Skills shipped alongside the beads extension.
 
 ## Invocation mode
 
-All beads skills are configured with:
+Beads skills support normal model invocation and can also be run explicitly.
 
-```yaml
-disable-model-invocation: true
-```
+Manual invocation remains available via `/skill:beads-*` commands.
 
-That makes them manual-only:
+### Workflow intent
 
-- hidden from automatic model invocation
-- available via explicit `/skill:beads-*` commands
+The intended sequence is:
+
+1. `beads-storm` — shape feature scope and create epic/features
+2. `beads-plan` — decompose features into executable tasks + plan docs
+3. `beads-code` — implement leaf tasks with TDD and verification
 
 ## Shared references
 

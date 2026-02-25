@@ -1,7 +1,6 @@
 ---
 name: beads-storm
 description: Brainstorm a feature area and decompose it into beads issues with hierarchy and dependencies.
-disable-model-invocation: true
 ---
 
 # Beads Storm
@@ -12,6 +11,26 @@ Explore the problem space through collaborative dialogue, converge on a design, 
 
 - [CLI basics](../shared/cli-basics.md)
 - [Workflow boundary](../shared/workflow-boundary.md)
+
+## Activation
+
+Use this skill when:
+- The user asks for a new feature, capability, workflow, or product behavior
+- Requirements are still unclear
+- No beads epic/feature structure exists yet
+
+**Announce at start:** "I'm using the beads-storm skill to shape this idea before planning or implementation."
+
+## Iron Laws (Hard Gates)
+
+1. **NO implementation during storm.** Do not edit production code, tests, or config to implement behavior.
+2. **NO source-file edits in this phase.** Storm output is beads issue structure, not code changes.
+3. **NO skipping alternatives.** Explore 2-3 approaches before committing.
+4. **NO handoff to coding until epic + user-story features exist.**
+
+If asked to implement during storm, respond:
+
+**"I can't implement code in `@beads-storm`. This phase only defines the epic/features. Next step is `@beads-plan`, then `@beads-code`."**
 
 ## Philosophy
 
@@ -117,7 +136,17 @@ br dep tree <epic-id>
 br count --by-type
 ```
 
-**"Epic and features are ready. Run `@beads-plan` to break these into implementation tasks."**
+Then stop and hand off:
+
+**"Epic and features are ready. Run `@beads-plan` to break these into implementation tasks. I will not implement code in storm mode."**
+
+## Stop Conditions
+
+Stop and ask the user before proceeding when:
+- The goal or success criteria are still ambiguous
+- You cannot express features as user stories
+- A requirement conflict appears between must-haves
+- The user requests implementation work in this phase
 
 ## Output
 
@@ -134,4 +163,4 @@ Storm produces:
 - **Incremental validation** — present in sections, check each
 - **YAGNI ruthlessly** — cut what isn't essential
 - **Features are user stories** — not technical tasks
-- **Output is beads, not docs** — epic + features with acceptance criteria
+- **Output is beads, not code** — epic + features with acceptance criteria
