@@ -132,7 +132,10 @@ export default function beadsExtension(pi: ExtensionAPI) {
     );
   };
 
-  const maybeNudgeCommitAfterClose = async (ctx: NotifyContext): Promise<string | null> => {
+  const maybeNudgeCommitAfterClose = async (
+    ctx: NotifyContext,
+    options?: { queueModelReminder?: boolean },
+  ): Promise<string | null> => {
     const status = await runGit(["status", "--porcelain"]);
     if (status.code !== 0) {
       return null;
@@ -144,14 +147,16 @@ export default function beadsExtension(pi: ExtensionAPI) {
 
     commandOut(ctx, DIRTY_TREE_CLOSE_WARNING, "warning");
 
-    pi.sendMessage(
-      {
-        customType: "beads-dirty-tree-warning",
-        content: DIRTY_TREE_CLOSE_WARNING,
-        display: false,
-      },
-      { deliverAs: "nextTurn" },
-    );
+    if (options?.queueModelReminder !== false) {
+      pi.sendMessage(
+        {
+          customType: "beads-dirty-tree-warning",
+          content: DIRTY_TREE_CLOSE_WARNING,
+          display: false,
+        },
+        { deliverAs: "nextTurn" },
+      );
+    }
 
     return DIRTY_TREE_CLOSE_WARNING;
   };

@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import beadsExtension from "./index.ts";
+import { DIRTY_TREE_CLOSE_WARNING } from "./lib.ts";
 
 type SendCall = { message: Record<string, unknown>; options: Record<string, unknown> };
 type HookHandler = (...args: any[]) => Promise<any>;
@@ -148,6 +149,59 @@ test("second close coalesces auto-continue (no duplicate message)", async () => 
 
   const continues = h.sent.filter((s) => s.message.customType === "beads-auto-continue");
   assert.equal(continues.length, 1, "only one auto-continue should be sent");
+});
+
+test("tool close with dirty tree warns in output but does not queue duplicate model reminder", async () => {
+  const h = buildHarness({
+    execOverride: async (_cmd: string, args: string[]) => {
+      if (args[0] === "info") {
+        return { stdout: JSON.stringify({ mode: "file", issue_count: 1 }), stderr: "", code: 0, killed: false };
+      }
+      if (args[0] === "status" && args[1] === "--porcelain") {
+        return { stdout: " M beads/index.ts", stderr: "", code: 0, killed: false };
+      }
+      if (args[0] === "close") return { stdout: "Closed bd-test", stderr: "", code: 0, killed: false };
+      if (args[0] === "update") return { stdout: "Updated bd-test", stderr: "", code: 0, killed: false };
+      return { stdout: "[]", stderr: "", code: 0, killed: false };
+    },
+  });
+
+  await h.enableBeads();
+  await h.claimTool("bd-aaa");
+  const result = await h.closeTool("bd-aaa");
+
+  const dirtyWarnings = h.sent.filter((s) => s.message.customType === "beads-dirty-tree-warning");
+  assert.equal(dirtyWarnings.length, 0, "tool close should not queue duplicate dirty-tree model warning");
+
+  const text = result.content.find((c: { type: string; text?: string }) => c.type === "text")?.text ?? "";
+  assert.match(text, /Closed bd-test/);
+  assert.match(text, new RegExp(DIRTY_TREE_CLOSE_WARNING.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+});
+
+test("command close with dirty tree still queues model reminder", async () => {
+  const h = buildHarness({
+    execOverride: async (_cmd: string, args: string[]) => {
+      if (args[0] === "info") {
+        return { stdout: JSON.stringify({ mode: "file", issue_count: 1 }), stderr: "", code: 0, killed: false };
+      }
+      if (args[0] === "status" && args[1] === "--porcelain") {
+        return { stdout: " M beads/index.ts", stderr: "", code: 0, killed: false };
+      }
+      if (args[0] === "close") return { stdout: "Closed bd-test", stderr: "", code: 0, killed: false };
+      return { stdout: "[]", stderr: "", code: 0, killed: false };
+    },
+  });
+
+  await h.enableBeads();
+
+  const cmd = h.commands.get("beads-close");
+  assert.ok(cmd, "beads-close command should be registered");
+
+  await cmd.handler("bd-aaa", h.ctx);
+
+  const dirtyWarnings = h.sent.filter((s) => s.message.customType === "beads-dirty-tree-warning");
+  assert.equal(dirtyWarnings.length, 1, "command close should queue dirty-tree model warning");
+  assert.equal(dirtyWarnings[0].options.deliverAs, "nextTurn");
 });
 
 test("beads-status runs stats, blocked, and in_progress queries concurrently", async () => {

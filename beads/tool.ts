@@ -234,7 +234,10 @@ export function registerBeadsTool(
     isEnabled(): boolean;
     runBr(args: string[], timeout?: number): Promise<ExecResult>;
     refreshBeadsStatus(ctx: UiContext): Promise<void>;
-    maybeNudgeCommitAfterClose(ctx: NotifyContext): Promise<string | null>;
+    maybeNudgeCommitAfterClose(
+      ctx: NotifyContext,
+      options?: { queueModelReminder?: boolean },
+    ): Promise<string | null>;
     onClaim(issueId: string): void;
     onClose(issueId: string): void;
     getEditedFiles(issueId: string): Set<string> | undefined;
@@ -293,7 +296,8 @@ export function registerBeadsTool(
 
         let closeWarning: string | null = null;
         if (input.action === "close") {
-          closeWarning = await deps.maybeNudgeCommitAfterClose(ctx);
+          // Warning is already in tool output for model; avoid duplicate queued reminder.
+          closeWarning = await deps.maybeNudgeCommitAfterClose(ctx, { queueModelReminder: false });
         }
 
         const outputText = closeWarning

@@ -28,7 +28,10 @@ export function registerBeadsCommands(
     commandOut(ctx: NotifyContext, message: string, level?: "info" | "warning" | "error"): void;
     summarizeExecFailure(result: ExecResult): string;
     refreshBeadsStatus(ctx: UiContext): Promise<void>;
-    maybeNudgeCommitAfterClose(ctx: NotifyContext): Promise<string | null>;
+    maybeNudgeCommitAfterClose(
+      ctx: NotifyContext,
+      options?: { queueModelReminder?: boolean },
+    ): Promise<string | null>;
   },
 ) {
   const { state } = deps;
