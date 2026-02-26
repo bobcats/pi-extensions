@@ -297,6 +297,8 @@ As you work, consult your memory files to build on previous experience.
 - Solutions to recurring problems and debugging insights
 - Only things that generalize — if a lesson only applies to one file or one narrow situation, it's not worth recording
 
+**Quality gate:** Before saving any memory, check each entry against the criteria below. If it doesn't clearly generalize beyond the current session, don't save it.
+
 **What NOT to save:**
 - Session-specific context (current task details, in-progress work, temporary state)
 - Information that might be incomplete — verify before writing
