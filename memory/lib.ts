@@ -270,19 +270,34 @@ export function buildWriteInstructions(
 ): string {
   return `### Updating Memories
 
-When you notice a pattern worth preserving across sessions — user preferences, project conventions, recurring decisions, useful context — save it to the memory files using the write or edit tool.
+As you work, consult your memory files to build on previous experience.
 
 **Memory locations:**
 - Global: ${globalDir}/MEMORY.md (applies to all projects)
 - Project: ${projectDir}/MEMORY.md (specific to this project)
 
-**What to save:** Only things that would save time or prevent mistakes in future sessions. Preferences, conventions, gotchas, patterns, and decisions worth remembering. Routine work isn't worth saving.
+**How to save memories:**
+- Organize memory semantically by topic, not chronologically
+- Use the write and edit tools to update your memory files
+- MEMORY.md is always loaded into your context — keep it under ${MEMORY_INDEX_LIMIT} lines as a concise index
+- Create separate topic files (e.g., debugging.md, api-design.md) for detailed notes and link to them from MEMORY.md
+- Update or remove memories that turn out to be wrong or outdated
+- Do not write duplicate memories — check existing memory before writing new entries
+- Prefer project memory for project-specific things, global for universal preferences
 
-**Quality bar:** Concise and actionable — not session logs. A future agent reading this cold should understand why it matters.
+**What to save:**
+- Stable patterns and conventions confirmed across multiple interactions
+- Key architectural decisions, important file paths, and project structure
+- User preferences for workflow, tools, and communication style
+- Solutions to recurring problems and debugging insights
 
-**Guidelines:**
-- Keep MEMORY.md as a concise index (max ${MEMORY_INDEX_LIMIT} lines)
-- Move detailed content into topic files (e.g., testing.md, api-design.md) in the same directory
-- Don't duplicate — read existing memory before writing, update entries rather than adding near-duplicates
-- Prefer project memory for project-specific things, global for universal preferences`;
+**What NOT to save:**
+- Session-specific context (current task details, in-progress work, temporary state)
+- Information that might be incomplete — verify before writing
+- Anything that duplicates or contradicts existing project instructions
+- Speculative or unverified conclusions from reading a single file
+
+**Explicit user requests:**
+- When the user asks you to remember something across sessions (e.g., "always use bun", "never auto-commit"), save it immediately — no need to wait for multiple interactions
+- When the user asks to forget or stop remembering something, find and remove the relevant entries from your memory files`;
 }
