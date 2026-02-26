@@ -206,14 +206,44 @@ test("buildWriteInstructions includes both directory paths", () => {
   assert.match(text, /\/project\/\.pi\/memories/);
 });
 
-test("buildWriteInstructions includes guidance on when to save", () => {
+test("buildWriteInstructions includes active read nudge", () => {
   const text = buildWriteInstructions("/g", "/p");
-  assert.match(text, /pattern/i);
+  assert.match(text, /consult your memory/i);
 });
 
-test("buildWriteInstructions includes MEMORY.md as index guidance", () => {
+test("buildWriteInstructions includes what to save section", () => {
   const text = buildWriteInstructions("/g", "/p");
-  assert.match(text, /index/i);
+  assert.match(text, /what to save/i);
+  assert.match(text, /pattern/i);
+  assert.match(text, /architectural decisions/i);
+  assert.match(text, /preferences/i);
+  assert.match(text, /debugging/i);
+});
+
+test("buildWriteInstructions includes what NOT to save section", () => {
+  const text = buildWriteInstructions("/g", "/p");
+  assert.match(text, /what not to save/i);
+  assert.match(text, /session-specific/i);
+  assert.match(text, /incomplete/i);
+  assert.match(text, /speculative/i);
+});
+
+test("buildWriteInstructions includes explicit user request handling", () => {
+  const text = buildWriteInstructions("/g", "/p");
+  assert.match(text, /remember/i);
+  assert.match(text, /forget/i);
+});
+
+test("buildWriteInstructions includes semantic organization guidance", () => {
+  const text = buildWriteInstructions("/g", "/p");
+  assert.match(text, /semantic/i);
+  assert.match(text, /topic/i);
+});
+
+test("buildWriteInstructions includes MEMORY.md index and topic file guidance", () => {
+  const text = buildWriteInstructions("/g", "/p");
+  assert.match(text, /MEMORY\.md/);
+  assert.match(text, /200/);
   assert.match(text, /topic/i);
 });
 
