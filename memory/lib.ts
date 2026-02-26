@@ -285,11 +285,17 @@ As you work, consult your memory files to build on previous experience.
 - Do not write duplicate memories — check existing memory before writing new entries
 - Prefer project memory for project-specific things, global for universal preferences
 
+**When to save:**
+- After completing a feature, fixing a tricky bug, or resolving a debugging session
+- When you discover a pattern, convention, or gotcha that would generalize beyond the current task
+- When the user corrects you or expresses a preference
+
 **What to save:**
 - Stable patterns and conventions confirmed across multiple interactions
 - Key architectural decisions, important file paths, and project structure
 - User preferences for workflow, tools, and communication style
 - Solutions to recurring problems and debugging insights
+- Only things that generalize — if a lesson only applies to one file or one narrow situation, it's not worth recording
 
 **What NOT to save:**
 - Session-specific context (current task details, in-progress work, temporary state)
