@@ -1,25 +1,30 @@
-import { isToolCallEventType, type ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import {
+  isToolCallEventType,
+  isBashToolResult,
+  isWriteToolResult,
+  isEditToolResult,
+  type ExtensionAPI,
+} from "@mariozechner/pi-coding-agent";
 import {
   buildBeadsPrimeMessage,
+  buildCheckpointNudgeMessage,
+  buildCheckpointSummary,
   buildObservabilitySummary,
-  buildResumeContext,
+  buildRecoveryContext,
+  extractEditedFilePath,
+  formatRecoveryMessage,
   isBrCloseCommand,
+  isBrCommand,
+  isGitCommitCommand,
   parseBeadsSessionMode,
-  parseBrReadyJson,
-  parseBrShowJson,
+  parseGitCommitOutput,
+  shouldNudgeCheckpoint,
   shouldShowContextReminder,
+  type ExecResult,
+  type UiContext,
+  type NotifyContext,
 } from "./lib.ts";
 import type { BeadsState } from "./commands.ts";
-
-type ExecResult = {
-  stdout: string;
-  stderr: string;
-  code: number;
-  killed: boolean;
-};
-
-type UiContext = { ui: { setStatus: (key: string, value?: string) => void } };
-type NotifyContext = { hasUI: boolean; ui: { notify: (message: string, level: "info" | "warning" | "error") => void } };
 
 export function registerBeadsHooks(
   pi: ExtensionAPI,
@@ -55,35 +60,48 @@ export function registerBeadsHooks(
   pi.on("session_before_compact", async () => {
     if (state.beadsEnabled) {
       state.shouldPrime = true;
+
+      // V4: Auto-checkpoint before compaction
+      if (state.currentIssueId) {
+        const files = state.editedFiles.get(state.currentIssueId) ?? new Set();
+        const turnsSince = state.checkpointState.turnIndex - state.checkpointState.lastCheckpointTurn;
+
+        if (turnsSince > 0 || files.size > 0) {
+          const summary = buildCheckpointSummary({ editedFiles: files, turnsSinceCheckpoint: turnsSince });
+          deps.runBr(["comments", "add", state.currentIssueId, summary], 3000).catch(() => {});
+          state.checkpointState.lastCheckpointTurn = state.checkpointState.turnIndex;
+        }
+      }
     }
   });
 
   pi.on("before_agent_start", async () => {
+    state.autoContinuePending = false;
+
     if (!state.beadsEnabled || !state.shouldPrime) {
       return;
     }
 
     state.shouldPrime = false;
 
-    let resumeContext: string | undefined;
-    const inProgress = await deps.runBr(["list", "--status", "in_progress", "--sort", "updated_at", "--json"]);
-    if (inProgress.code === 0) {
-      const [firstIssue] = parseBrReadyJson(inProgress.stdout);
-      if (firstIssue) {
-        const showResult = await deps.runBr(["show", firstIssue.id, "--json"]);
-        if (showResult.code === 0) {
-          const detail = parseBrShowJson(showResult.stdout);
-          if (detail) {
-            resumeContext = buildResumeContext(detail);
-          }
-        }
-      }
+    const recovery = await buildRecoveryContext({ runBr: deps.runBr, runGit: deps.runGit });
+
+    if (recovery) {
+      state.currentIssueId = recovery.issue.id;
+
+      return {
+        message: {
+          customType: "beads-prime",
+          content: formatRecoveryMessage(recovery),
+          display: false,
+        },
+      };
     }
 
     return {
       message: {
         customType: "beads-prime",
-        content: buildBeadsPrimeMessage({ beadsEnabled: state.beadsEnabled, resumeContext }),
+        content: buildBeadsPrimeMessage({ beadsEnabled: state.beadsEnabled }),
         display: false,
       },
     };
@@ -113,6 +131,55 @@ export function registerBeadsHooks(
         block: true,
         reason: "Cannot run `br close` with uncommitted changes. Commit/stash first, then close the issue.",
       };
+    }
+  });
+
+  pi.on("tool_result", async (event, ctx) => {
+    if (!state.beadsEnabled) return;
+
+    // Refresh status when any successful raw br command runs via bash.
+    if (isBashToolResult(event) && !event.isError) {
+      const command = typeof event.input.command === "string" ? event.input.command : "";
+
+      if (isBrCommand(command)) {
+        await deps.refreshBeadsStatus(ctx);
+      }
+
+      if (!state.currentIssueId) return;
+
+      // V2: Commit-to-issue linking
+      if (isGitCommitCommand(command)) {
+        const text = event.content.find((c) => c.type === "text");
+        const stdout = text && "text" in text ? text.text : "";
+        const parsed = parseGitCommitOutput(stdout);
+
+        if (parsed) {
+          deps.runBr(["comments", "add", state.currentIssueId, `commit: ${parsed.hash} ${parsed.message}`], 5000).catch(() => {});
+          state.checkpointState.lastCheckpointTurn = state.checkpointState.turnIndex;
+        }
+      }
+
+      // Detect manual br comments add via bash — reset checkpoint counter
+      if (/^\s*br\s+comments\s+add\b/.test(command)) {
+        state.checkpointState.lastCheckpointTurn = state.checkpointState.turnIndex;
+      }
+
+      return;
+    }
+
+    if (!state.currentIssueId) return;
+
+    // V3: File tracking
+    if (isWriteToolResult(event) || isEditToolResult(event)) {
+      const path = extractEditedFilePath(event.toolName, event.input);
+      if (path && state.currentIssueId) {
+        let files = state.editedFiles.get(state.currentIssueId);
+        if (!files) {
+          files = new Set();
+          state.editedFiles.set(state.currentIssueId, files);
+        }
+        files.add(path);
+      }
     }
   });
 
@@ -147,6 +214,36 @@ export function registerBeadsHooks(
   pi.on("turn_end", async (_event, ctx) => {
     if (!state.beadsEnabled) {
       return;
+    }
+
+    // V6: Increment turn counter and check checkpoint nudge
+    state.checkpointState.turnIndex++;
+
+    if (
+      state.currentIssueId &&
+      shouldNudgeCheckpoint({
+        turnIndex: state.checkpointState.turnIndex,
+        lastCheckpointTurn: state.checkpointState.lastCheckpointTurn,
+        threshold: 8,
+        hasActiveIssue: true,
+      })
+    ) {
+      const turnsSince = state.checkpointState.turnIndex - state.checkpointState.lastCheckpointTurn;
+      const nudgeText = buildCheckpointNudgeMessage(state.currentIssueId, turnsSince);
+
+      deps.commandOut(ctx, "Consider checkpointing your progress to the beads issue.", "info");
+
+      pi.sendMessage(
+        {
+          customType: "beads-checkpoint-nudge",
+          content: nudgeText,
+          display: false,
+        },
+        { deliverAs: "nextTurn" },
+      );
+
+      // Reset to avoid nagging every turn after threshold
+      state.checkpointState.lastCheckpointTurn = state.checkpointState.turnIndex;
     }
 
     const usage = ctx.getContextUsage();

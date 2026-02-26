@@ -1,7 +1,6 @@
 ---
 name: beads-create
 description: Create and maintain beads issues with correct `br` CLI commands, flags, and dependency wiring.
-disable-model-invocation: true
 ---
 
 # beads-create
@@ -19,6 +18,16 @@ Write well-structured issues and execute beads CLI commands to create them.
 - About to run `br create`
 - Updating issue fields with `br update`
 - Linking hierarchy/dependencies with `br dep add`
+
+## Workflow Gates
+
+1. **Feature creation belongs to storm.** If feature scope is unclear, route to `@beads-storm` first.
+2. **Task decomposition belongs to plan.** If creating implementation tasks for a feature, use `@beads-plan` structure.
+3. **No implementation here.** `@beads-create` only creates/updates/wires issues.
+
+If asked to code during this phase, respond:
+
+**"I can't implement code in `@beads-create`; this skill only manages issue structure. Use `@beads-code` after planning is complete."**
 
 ## Issue Quality
 

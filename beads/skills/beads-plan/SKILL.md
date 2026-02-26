@@ -1,7 +1,6 @@
 ---
 name: beads-plan
 description: Write implementation plans mapped to beads issue structure with tasks as plan steps.
-disable-model-invocation: true
 ---
 
 # Beads Plan
@@ -15,6 +14,26 @@ Break down an existing epic's features into a structured task hierarchy. Create 
 - [Verification and close standards](../shared/verification-close.md)
 - [Workflow boundary](../shared/workflow-boundary.md)
 
+## Activation
+
+Use this skill when:
+- An epic/features already exist and need execution-ready task breakdown
+- The user asks for implementation planning, sequencing, or decomposition
+- `@beads-storm` output exists but `@beads-code` would be premature
+
+**Announce at start:** "I'm using the beads-plan skill to create execution-ready tasks before coding."
+
+## Iron Laws (Hard Gates)
+
+1. **NO implementation during planning.** Do not edit production code/tests to implement behavior.
+2. **NO source-file implementation edits in this phase.** Planning outputs beads tasks + plan docs only.
+3. **NO `@beads-code` handoff until entry and exit gates pass.**
+4. **NO vague tasks.** Every task must be specific, testable, and small.
+
+If asked to implement during planning, respond:
+
+**"I can't implement code in `@beads-plan`. This phase creates tasks/dependencies/plan docs. After gates pass, run `@beads-code`."**
+
 ## Philosophy
 
 **Granular is better.** Many tasks prevent the "one-shotting" failure mode where agents declare victory after implementing a few things.
@@ -23,11 +42,23 @@ Break down an existing epic's features into a structured task hierarchy. Create 
 
 **Tests come first.** Task structure reflects test-first thinking: write-test tasks block implementation tasks.
 
-## Prerequisites
+## Entry Gate (Required Before Planning)
 
-Run `@beads-storm` first to create the epic and features. If no epic exists:
+Run:
 
-**"No epic found. Run `@beads-storm` first to explore the idea and define features."**
+```bash
+br list --type epic --status open
+br list --type feature --status open
+```
+
+Planning can proceed only if all checks pass:
+- [ ] At least one open epic exists
+- [ ] Target epic has feature children
+- [ ] Features have clear acceptance criteria (add/update if missing)
+
+If gate fails, stop and say:
+
+**"No plan-ready epic/features found. Run `@beads-storm` first to define epic and user-story features."**
 
 ## The Process
 
@@ -181,7 +212,27 @@ br ready --sort priority
 br count --by-type
 ```
 
-**"Plan saved. Run `@beads-code` to start implementation."**
+Then stop and hand off:
+
+**"Plan saved. Run `@beads-code` to start implementation. I will not implement code in planning mode."**
+
+## Exit Gate (Required Before Handoff)
+
+Do not hand off to `@beads-code` until all are true:
+- [ ] Every plan task maps to a beads task ID
+- [ ] Test tasks block implementation tasks (TDD encoded)
+- [ ] Every feature has verification subtasks
+- [ ] Blocking dependencies reflect implementation order
+- [ ] Plan file saved with bite-sized steps, exact paths, exact commands
+- [ ] Tasks updated with plan references/acceptance criteria
+
+## Stop Conditions
+
+Stop and ask the user before proceeding when:
+- Epic/features are missing or unclear
+- Acceptance criteria are ambiguous or untestable
+- Dependency ordering cannot be justified
+- Scope expands beyond the validated storm output
 
 ## Dependency Types Reference
 
@@ -191,12 +242,3 @@ br count --by-type
 | `blocks` | Sequencing (B waits for A) | Blocked hidden from ready | Work order matters |
 | `related` | Association (A and B connected) | No blocking | Cross-cutting concerns |
 | `discovered-from` | Traceability (found B while on A) | No blocking | Tracking bug origins |
-
-## Verification
-
-- [ ] Every plan task maps to a beads task ID
-- [ ] Test tasks block implementation tasks (TDD encoded)
-- [ ] Every feature has verification subtasks
-- [ ] Blocking dependencies reflect implementation order
-- [ ] Plan has bite-sized steps with exact file paths and commands
-- [ ] Tasks updated with plan reference in notes

@@ -3,16 +3,24 @@ import { Text } from "@mariozechner/pi-tui";
 import { type Static, Type } from "@sinclair/typebox";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import {
+  formatEnrichedReadyOutput,
+  formatFileListComment,
   formatIssueCard,
   formatIssueLabel,
   getBeadsModeOffMessage,
   isRecord,
+  parseBrDepListJson,
   parseBrReadyJson,
   parseBrShowJson,
   summarizeBeadsActionResult,
   type BeadsAction,
   type BrIssueSummary,
   type BrShowIssue,
+  type EnrichedReadyIssue,
+  extractErrorSummary,
+  type ExecResult,
+  type UiContext,
+  type NotifyContext,
 } from "./lib.ts";
 
 const beadsToolSchema = Type.Object({
@@ -27,13 +35,6 @@ const beadsToolSchema = Type.Object({
 });
 
 type BeadsToolInput = Static<typeof beadsToolSchema>;
-
-type ExecResult = {
-  stdout: string;
-  stderr: string;
-  code: number;
-  killed: boolean;
-};
 
 type DisabledToolDetails = {
   action: BeadsAction;
@@ -93,33 +94,6 @@ type BeadsToolDetails =
   | ShowToolDetails
   | CommentToolDetails
   | CreateToolDetails;
-
-function extractErrorSummary(output: unknown): string | null {
-  if (typeof output !== "string") return null;
-  const trimmed = output.trim();
-  if (!trimmed) return null;
-
-  try {
-    const parsed = JSON.parse(trimmed) as { error?: { message?: unknown; hint?: unknown } };
-    if (parsed?.error && typeof parsed.error === "object") {
-      const message = typeof parsed.error.message === "string" ? parsed.error.message.trim() : "";
-      const hint = typeof parsed.error.hint === "string" ? parsed.error.hint.trim() : "";
-
-      if (message && hint) return `${message} (${hint})`;
-      if (message) return message;
-      if (hint) return hint;
-    }
-  } catch {
-    // fall through to first non-empty line
-  }
-
-  const firstLine = trimmed
-    .split("\n")
-    .map((line) => line.trim())
-    .find((line) => line.length > 0);
-
-  return firstLine ?? null;
-}
 
 function isBeadsAction(value: unknown): value is BeadsAction {
   return (
@@ -252,8 +226,7 @@ function parseBeadsToolDetails(details: unknown): BeadsToolDetails | null {
   return null;
 }
 
-type UiContext = { ui: { setStatus: (key: string, value?: string) => void } };
-type NotifyContext = { hasUI: boolean; ui: { notify: (message: string, level: "info" | "warning" | "error") => void } };
+
 
 export function registerBeadsTool(
   pi: ExtensionAPI,
@@ -261,7 +234,15 @@ export function registerBeadsTool(
     isEnabled(): boolean;
     runBr(args: string[], timeout?: number): Promise<ExecResult>;
     refreshBeadsStatus(ctx: UiContext): Promise<void>;
-    maybeNudgeCommitAfterClose(ctx: NotifyContext): Promise<string | null>;
+    maybeNudgeCommitAfterClose(
+      ctx: NotifyContext,
+      options?: { queueModelReminder?: boolean },
+    ): Promise<string | null>;
+    onClaim(issueId: string): void;
+    onClose(issueId: string): void;
+    getEditedFiles(issueId: string): Set<string> | undefined;
+    onCheckpoint(): void;
+    sendContinueMessage(closedId: string): void;
   },
 ) {
   pi.registerTool({
@@ -315,7 +296,8 @@ export function registerBeadsTool(
 
         let closeWarning: string | null = null;
         if (input.action === "close") {
-          closeWarning = await deps.maybeNudgeCommitAfterClose(ctx);
+          // Warning is already in tool output for model; avoid duplicate queued reminder.
+          closeWarning = await deps.maybeNudgeCommitAfterClose(ctx, { queueModelReminder: false });
         }
 
         const outputText = closeWarning
@@ -350,9 +332,32 @@ export function registerBeadsTool(
           }
 
           const issues = parseBrReadyJson(result.stdout);
-          const text = issues.length
-            ? issues.map((issue) => formatIssueLabel(issue)).join("\n")
-            : "No ready issues.";
+
+          // V7: Enrich first 5 issues with dep info
+          const MAX_ENRICH = 5;
+          const toEnrich = issues.slice(0, MAX_ENRICH);
+          const enriched: EnrichedReadyIssue[] = await Promise.all(
+            toEnrich.map(async (issue) => {
+              const [upResult, downResult] = await Promise.all([
+                deps.runBr(["dep", "list", issue.id, "--direction", "up", "--json"], 5000).catch(() => ({ stdout: "[]", stderr: "", code: 1, killed: false })),
+                deps.runBr(["dep", "list", issue.id, "--direction", "down", "--json"], 5000).catch(() => ({ stdout: "[]", stderr: "", code: 1, killed: false })),
+              ]);
+
+              // up = dependents (things that depend on this issue)
+              // down = dependencies (things this issue depends on)
+              const unblocks = upResult.code === 0 ? parseBrDepListJson(upResult.stdout, "issue_id") : [];
+              const parents = downResult.code === 0 ? parseBrDepListJson(downResult.stdout, "depends_on_id") : [];
+
+              return { issue, parent: parents[0] ?? null, unblocks };
+            }),
+          );
+
+          // Append remaining issues without enrichment
+          for (let i = MAX_ENRICH; i < issues.length; i++) {
+            enriched.push({ issue: issues[i], parent: null, unblocks: [] });
+          }
+
+          const text = formatEnrichedReadyOutput(enriched);
 
           return {
             content: [{ type: "text" as const, text }],
@@ -401,15 +406,35 @@ export function registerBeadsTool(
           if (!input.id) {
             return fail("beads claim requires id", { action: input.action, missing: "id" });
           }
-          return runBrForTool(["update", input.id, "--status", "in_progress"]);
+          const claimResult = await runBrForTool(["update", input.id, "--status", "in_progress"]);
+
+          if (!claimResult.isError) {
+            deps.onClaim(input.id);
+          }
+
+          return claimResult;
         }
 
         case "close": {
           if (!input.id) {
             return fail("beads close requires id", { action: input.action, missing: "id" });
           }
+
+          // V3: Flush file list as comment before closing
+          const fileListComment = formatFileListComment(deps.getEditedFiles(input.id));
+          if (fileListComment) {
+            await deps.runBr(["comments", "add", input.id, fileListComment], 5000).catch(() => {});
+          }
+
           const reason = input.reason?.trim() || "Verified: completed";
-          return runBrForTool(["close", input.id, "--reason", reason]);
+          const closeResult = await runBrForTool(["close", input.id, "--reason", reason]);
+
+          if (!closeResult.isError) {
+            deps.onClose(input.id);
+            deps.sendContinueMessage(input.id);
+          }
+
+          return closeResult;
         }
 
         case "comment": {
@@ -430,6 +455,9 @@ export function registerBeadsTool(
               exitCode: commentResult.code,
             });
           }
+          // V6: Comment counts as checkpoint
+          deps.onCheckpoint();
+
           return {
             content: [{ type: "text" as const, text: commentResult.stdout || "OK" }],
             details: {

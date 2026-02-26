@@ -78,6 +78,10 @@ export function detectTrackingMode(gitCheckIgnoreExitCode: number): TrackingMode
   return gitCheckIgnoreExitCode === 0 ? "stealth" : "git-tracked";
 }
 
+export function isBrCommand(command: string): boolean {
+  return /^\s*br\b/.test(command);
+}
+
 export function isBrCloseCommand(command: string): boolean {
   return /^\s*br\s+close\b/.test(command);
 }
@@ -164,13 +168,327 @@ export function parseBrShowJson(json: string): BrShowIssue | null {
   }
 }
 
-export function buildResumeContext(issue: BrShowIssue): string {
-  const lastComment = issue.comments?.length ? issue.comments[issue.comments.length - 1]! : null;
-  let line = `## Resuming: ${issue.id} — ${issue.title}`;
-  if (lastComment) {
-    line += `\nLast checkpoint: ${lastComment.text}`;
+export function parseBrDepListJson(json: string, idField?: "issue_id" | "depends_on_id"): BrIssueSummary[] {
+  try {
+    const parsed = JSON.parse(json) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .map((row) => {
+        if (idField && isRecord(row)) {
+          const id = typeof row[idField] === "string" ? (row[idField] as string) : null;
+          if (!id) return null;
+          const title = typeof row.title === "string" && row.title.trim() ? row.title : "(untitled issue)";
+          return {
+            id,
+            title,
+            type: typeof row.type === "string" ? row.type : typeof row.issue_type === "string" ? row.issue_type : undefined,
+            priority: typeof row.priority === "number" ? row.priority : undefined,
+            status: typeof row.status === "string" ? row.status : undefined,
+          } as BrIssueSummary;
+        }
+        return normalizeIssueRow(row);
+      })
+      .filter((issue): issue is BrIssueSummary => issue !== null);
+  } catch {
+    return [];
   }
-  return line;
+}
+
+function formatRelativeTime(date: Date, now: Date): string {
+  const diffMs = now.getTime() - date.getTime();
+  if (!Number.isFinite(diffMs)) return "unknown";
+  const diffMin = Math.floor(diffMs / 60000);
+  if (diffMin < 1) return "just now";
+  if (diffMin < 60) return `${diffMin}m ago`;
+  const diffHours = Math.floor(diffMin / 60);
+  if (diffHours < 24) return `${diffHours}h ago`;
+  const diffDays = Math.floor(diffHours / 24);
+  return `${diffDays}d ago`;
+}
+
+export function formatCheckpointTrail(
+  comments: BrComment[] | undefined,
+  now: Date,
+): string[] {
+  if (!comments?.length) return [];
+
+  const MAX_COMMENTS = 5;
+  const MAX_TEXT_LENGTH = 200;
+
+  const recent = comments.slice(-MAX_COMMENTS);
+  return recent.map((c) => {
+    const time = formatRelativeTime(new Date(c.created_at), now);
+    const text = c.text.length > MAX_TEXT_LENGTH
+      ? c.text.slice(0, MAX_TEXT_LENGTH - 3) + "..."
+      : c.text;
+    return `- [${time}] ${text}`;
+  });
+}
+
+export type RecoveryContext = {
+  issue: BrShowIssue;
+  checkpointTrail: string[];
+  parent: BrIssueSummary | null;
+  blockedBy: BrIssueSummary[];
+  uncommittedFiles: string[];
+};
+
+export function formatRecoveryMessage(ctx: RecoveryContext): string {
+  const { issue, checkpointTrail, parent, blockedBy, uncommittedFiles } = ctx;
+
+  const priority = typeof issue.priority === "number" ? `P${issue.priority}` : "P?";
+  const type = issue.type ?? "issue";
+  const status = issue.status ?? "unknown";
+
+  const lines: string[] = [
+    "# Beads Workflow Context",
+    "",
+    "## Core Rules",
+    "- Use beads for ALL task tracking (`br create`, `br ready`, `br close`)",
+    "- Do NOT use TodoWrite, TaskCreate, or markdown task files for tracking",
+    "- Create beads issue BEFORE writing code",
+    "- Mark issue in_progress when starting work",
+    "",
+    "## Essential Commands",
+    "- br ready",
+    "- br list --status in_progress",
+    "- br show <id>",
+    '- br close <id> --reason "Verified: ..."',
+    "",
+    `## Resuming: ${issue.id} — ${issue.title}`,
+    `**Status:** ${status} | **Type:** ${type} | **Priority:** ${priority}`,
+  ];
+
+  if (parent) {
+    const parentType = parent.type ? ` (${parent.type})` : "";
+    lines.push(`**Parent:** ${parent.id} — ${parent.title}${parentType}`);
+  }
+
+  if (blockedBy.length > 0) {
+    const items = blockedBy.map((b) => `${b.id} — ${b.title}`).join(", ");
+    lines.push(`**Unblocks:** ${items}`);
+  }
+
+  if (checkpointTrail.length > 0) {
+    lines.push("", "### Checkpoint Trail");
+    lines.push(...checkpointTrail);
+  }
+
+  if (uncommittedFiles.length > 0) {
+    const MAX_FILES = 15;
+    lines.push("", "### Uncommitted Changes");
+    const shown = uncommittedFiles.slice(0, MAX_FILES);
+    lines.push(shown.join(", "));
+    if (uncommittedFiles.length > MAX_FILES) {
+      lines.push(`...and ${uncommittedFiles.length - MAX_FILES} more`);
+    }
+  }
+
+  return lines.join("\n");
+}
+
+export function buildCheckpointSummary(opts: {
+  editedFiles: Set<string>;
+  turnsSinceCheckpoint: number;
+}): string {
+  const lines = [`Auto-checkpoint (pre-compaction): ${opts.turnsSinceCheckpoint} turns since last checkpoint.`];
+
+  if (opts.editedFiles.size > 0) {
+    const MAX = 20;
+    const sorted = [...opts.editedFiles].sort();
+    const shown = sorted.slice(0, MAX);
+    let fileList = `Files: ${shown.join(", ")}`;
+    if (sorted.length > MAX) {
+      fileList += ` ...and ${sorted.length - MAX} more`;
+    }
+    lines.push(fileList);
+  }
+
+  return lines.join("\n");
+}
+
+export function buildContinueMessage(closedId: string): string {
+  return [
+    `Issue ${closedId} closed.`,
+    `Check for next ready work: run \`br ready --sort priority\` to pick the next issue.`,
+    `If no ready issues remain, summarize what was accomplished and ask the user what's next.`,
+  ].join("\n");
+}
+
+export type EnrichedReadyIssue = {
+  issue: BrIssueSummary;
+  parent: BrIssueSummary | null;
+  unblocks: BrIssueSummary[];
+};
+
+export function formatEnrichedReadyOutput(issues: EnrichedReadyIssue[]): string {
+  if (issues.length === 0) return "No ready issues.";
+
+  return issues.map((entry) => {
+    const { issue, parent, unblocks } = entry;
+    const lines = [formatIssueLabel(issue)];
+
+    if (parent) {
+      lines.push(`  ↳ parent: ${parent.id} ${parent.title}`);
+    }
+
+    if (unblocks.length > 0) {
+      const items = unblocks.map((u) => `${u.id} ${u.title}`).join(", ");
+      lines.push(`  ↳ unblocks: ${items}`);
+    }
+
+    return lines.join("\n");
+  }).join("\n");
+}
+
+export function extractEditedFilePath(toolName: string, input: Record<string, unknown>): string | null {
+  if (toolName === "write" || toolName === "edit") {
+    return typeof input.path === "string" ? input.path : null;
+  }
+  return null;
+}
+
+export function formatFileListComment(files: Set<string> | undefined): string | null {
+  if (!files?.size) return null;
+
+  const MAX_FILES = 30;
+  const sorted = [...files].sort();
+  const shown = sorted.slice(0, MAX_FILES);
+  let comment = `Files modified: ${shown.join(", ")}`;
+  if (sorted.length > MAX_FILES) {
+    comment += ` ...and ${sorted.length - MAX_FILES} more`;
+  }
+  return comment;
+}
+
+export function shouldNudgeCheckpoint(opts: {
+  turnIndex: number;
+  lastCheckpointTurn: number;
+  threshold: number;
+  hasActiveIssue?: boolean;
+}): boolean {
+  if (opts.hasActiveIssue === false) return false;
+  return opts.turnIndex - opts.lastCheckpointTurn >= opts.threshold;
+}
+
+export function buildCheckpointNudgeMessage(issueId: string, turnsSinceCheckpoint: number): string {
+  return [
+    `You've been working for ${turnsSinceCheckpoint} turns without checkpointing progress to ${issueId}.`,
+    `Consider running: beads comment (id: "${issueId}", comment: "Checkpoint: <brief summary of progress>")`,
+    `Or via CLI: br comments add ${issueId} "Checkpoint: <summary>"`,
+  ].join("\n");
+}
+
+export function isGitCommitCommand(command: string): boolean {
+  return /^\s*git\s+commit\b/.test(command);
+}
+
+export function parseGitCommitOutput(stdout: string): { hash: string; message: string } | null {
+  const match = stdout.match(/^\[[^\]]+\s+([a-f0-9]+)\]\s+(.+)/m);
+  if (!match) return null;
+  return { hash: match[1], message: match[2] };
+}
+
+export function parseGitStatusPorcelain(output: string): string[] {
+  if (!output.trim()) return [];
+
+  return output
+    .split("\n")
+    .filter((line) => line.length >= 4)
+    .map((line) => {
+      const xy = line.slice(0, 2);
+      let path = line.slice(3);
+
+      const arrowIndex = path.indexOf(" -> ");
+      if (arrowIndex !== -1) {
+        path = path.slice(arrowIndex + 4);
+      }
+
+      const code = xy.trim() || "?";
+      const label = code === "??" ? "?" : code;
+      return `${path} (${label})`;
+    });
+}
+
+export type ExecResult = {
+  stdout: string;
+  stderr: string;
+  code: number;
+  killed: boolean;
+};
+
+export type UiContext = { ui: { setStatus: (key: string, value?: string) => void } };
+export type NotifyContext = { hasUI: boolean; ui: { notify: (message: string, level: "info" | "warning" | "error") => void } };
+
+export function extractErrorSummary(output: unknown): string | null {
+  if (typeof output !== "string") return null;
+  const trimmed = output.trim();
+  if (!trimmed) return null;
+
+  try {
+    const parsed = JSON.parse(trimmed) as { error?: { message?: unknown; hint?: unknown } };
+    if (parsed?.error && typeof parsed.error === "object") {
+      const message = typeof parsed.error.message === "string" ? parsed.error.message.trim() : "";
+      const hint = typeof parsed.error.hint === "string" ? parsed.error.hint.trim() : "";
+
+      if (message && hint) return `${message} (${hint})`;
+      if (message) return message;
+      if (hint) return hint;
+    }
+  } catch {
+    // fall through to first non-empty line
+  }
+
+  const firstLine = trimmed
+    .split("\n")
+    .map((line) => line.trim())
+    .find((line) => line.length > 0);
+
+  return firstLine ?? null;
+}
+
+type RecoveryDeps = {
+  runBr(args: string[], timeout?: number): Promise<ExecResult>;
+  runGit(args: string[], timeout?: number): Promise<ExecResult>;
+};
+
+export async function buildRecoveryContext(deps: RecoveryDeps): Promise<RecoveryContext | null> {
+  const listResult = await deps.runBr(["list", "--status", "in_progress", "--sort", "updated_at", "--json"]);
+  if (listResult.code !== 0) return null;
+
+  const issues = parseBrReadyJson(listResult.stdout);
+  const first = issues[0];
+  if (!first) return null;
+
+  const showResult = await deps.runBr(["show", first.id, "--json"]);
+  const detail = showResult.code === 0 ? parseBrShowJson(showResult.stdout) : null;
+
+  const issue: BrShowIssue = detail ?? { ...first };
+  const comments = detail?.comments;
+
+  const [upResult, downResult] = await Promise.all([
+    deps.runBr(["dep", "list", first.id, "--direction", "up", "--json"]).catch(() => ({ stdout: "[]", stderr: "", code: 1, killed: false })),
+    deps.runBr(["dep", "list", first.id, "--direction", "down", "--json"]).catch(() => ({ stdout: "[]", stderr: "", code: 1, killed: false })),
+  ]);
+
+  // up = dependents (things that depend on this issue)
+  // down = dependencies (things this issue depends on)
+  const blockedBy = upResult.code === 0 ? parseBrDepListJson(upResult.stdout, "issue_id") : [];
+  const parents = downResult.code === 0 ? parseBrDepListJson(downResult.stdout, "depends_on_id") : [];
+  const parent = parents[0] ?? null;
+
+  const gitResult = await deps.runGit(["status", "--porcelain"]);
+  const uncommittedFiles = gitResult.code === 0 ? parseGitStatusPorcelain(gitResult.stdout) : [];
+
+  const checkpointTrail = formatCheckpointTrail(comments, new Date());
+
+  return {
+    issue,
+    checkpointTrail,
+    parent,
+    blockedBy,
+    uncommittedFiles,
+  };
 }
 
 export function formatIssueCard(issue: BrShowIssue): string[] {

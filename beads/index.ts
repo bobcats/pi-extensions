@@ -1,48 +1,19 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import {
+  buildContinueMessage,
   DIRTY_TREE_CLOSE_WARNING,
   detectTrackingMode,
   formatBeadsModeStatus,
   parseBrInfoJson,
   parseBrReadyJson,
+  type ExecResult,
+  extractErrorSummary,
+  type NotifyContext,
+  type UiContext,
 } from "./lib.ts";
 import { registerBeadsTool } from "./tool.ts";
 import { registerBeadsCommands, type BeadsState } from "./commands.ts";
 import { registerBeadsHooks } from "./hooks.ts";
-
-type ExecResult = {
-  stdout: string;
-  stderr: string;
-  code: number;
-  killed: boolean;
-};
-
-function extractErrorSummary(output: unknown): string | null {
-  if (typeof output !== "string") return null;
-  const trimmed = output.trim();
-  if (!trimmed) return null;
-
-  try {
-    const parsed = JSON.parse(trimmed) as { error?: { message?: unknown; hint?: unknown } };
-    if (parsed?.error && typeof parsed.error === "object") {
-      const message = typeof parsed.error.message === "string" ? parsed.error.message.trim() : "";
-      const hint = typeof parsed.error.hint === "string" ? parsed.error.hint.trim() : "";
-
-      if (message && hint) return `${message} (${hint})`;
-      if (message) return message;
-      if (hint) return hint;
-    }
-  } catch {
-    // fall through to first non-empty line
-  }
-
-  const firstLine = trimmed
-    .split("\n")
-    .map((line) => line.trim())
-    .find((line) => line.length > 0);
-
-  return firstLine ?? null;
-}
 
 function toExecError(error: unknown): ExecResult {
   return {
@@ -62,7 +33,7 @@ function summarizeExecFailure(result: ExecResult): string {
 }
 
 function commandOut(
-  ctx: { hasUI: boolean; ui: { notify: (message: string, level: "info" | "warning" | "error") => void } },
+  ctx: NotifyContext,
   message: string,
   level: "info" | "warning" | "error" = "info",
 ) {
@@ -74,14 +45,16 @@ function commandOut(
 }
 
 export default function beadsExtension(pi: ExtensionAPI) {
-  type UiContext = { ui: { setStatus: (key: string, value?: string) => void } };
-
   const state: BeadsState = {
     isBeadsProject: false,
     beadsEnabled: false,
     shouldPrime: false,
     contextReminderShown: false,
     cachedModeText: "",
+    currentIssueId: null,
+    editedFiles: new Map(),
+    checkpointState: { lastCheckpointTurn: 0, turnIndex: 0 },
+    autoContinuePending: false,
   };
 
   pi.registerFlag("beads-observe", {
@@ -159,10 +132,10 @@ export default function beadsExtension(pi: ExtensionAPI) {
     );
   };
 
-  const maybeNudgeCommitAfterClose = async (ctx: {
-    hasUI: boolean;
-    ui: { notify: (message: string, level: "info" | "warning" | "error") => void };
-  }): Promise<string | null> => {
+  const maybeNudgeCommitAfterClose = async (
+    ctx: NotifyContext,
+    options?: { queueModelReminder?: boolean },
+  ): Promise<string | null> => {
     const status = await runGit(["status", "--porcelain"]);
     if (status.code !== 0) {
       return null;
@@ -174,14 +147,16 @@ export default function beadsExtension(pi: ExtensionAPI) {
 
     commandOut(ctx, DIRTY_TREE_CLOSE_WARNING, "warning");
 
-    pi.sendMessage(
-      {
-        customType: "beads-dirty-tree-warning",
-        content: DIRTY_TREE_CLOSE_WARNING,
-        display: false,
-      },
-      { deliverAs: "nextTurn" },
-    );
+    if (options?.queueModelReminder !== false) {
+      pi.sendMessage(
+        {
+          customType: "beads-dirty-tree-warning",
+          content: DIRTY_TREE_CLOSE_WARNING,
+          display: false,
+        },
+        { deliverAs: "nextTurn" },
+      );
+    }
 
     return DIRTY_TREE_CLOSE_WARNING;
   };
@@ -191,6 +166,35 @@ export default function beadsExtension(pi: ExtensionAPI) {
     runBr,
     refreshBeadsStatus,
     maybeNudgeCommitAfterClose,
+    onClaim(issueId: string) {
+      state.currentIssueId = issueId;
+      state.editedFiles.set(issueId, new Set());
+      state.checkpointState = { lastCheckpointTurn: 0, turnIndex: 0 };
+    },
+    onClose(issueId: string) {
+      state.currentIssueId = null;
+      state.editedFiles.delete(issueId);
+      state.checkpointState = { lastCheckpointTurn: 0, turnIndex: 0 };
+    },
+    getEditedFiles(issueId: string) {
+      return state.editedFiles.get(issueId);
+    },
+    onCheckpoint() {
+      state.checkpointState.lastCheckpointTurn = state.checkpointState.turnIndex;
+    },
+    sendContinueMessage(closedId: string) {
+      if (state.autoContinuePending) return;
+      state.autoContinuePending = true;
+      const msg = buildContinueMessage(closedId);
+      pi.sendMessage(
+        {
+          customType: "beads-auto-continue",
+          content: msg,
+          display: false,
+        },
+        { deliverAs: "followUp", triggerTurn: true },
+      );
+    },
   });
 
   registerBeadsCommands(pi, {

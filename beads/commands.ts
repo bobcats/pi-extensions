@@ -2,17 +2,10 @@ import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import {
   formatIssueLabel,
   parseBrReadyJson,
+  type ExecResult,
+  type UiContext,
+  type NotifyContext,
 } from "./lib.ts";
-
-type ExecResult = {
-  stdout: string;
-  stderr: string;
-  code: number;
-  killed: boolean;
-};
-
-type UiContext = { ui: { setStatus: (key: string, value?: string) => void } };
-type NotifyContext = { hasUI: boolean; ui: { notify: (message: string, level: "info" | "warning" | "error") => void } };
 
 export interface BeadsState {
   isBeadsProject: boolean;
@@ -20,6 +13,11 @@ export interface BeadsState {
   shouldPrime: boolean;
   contextReminderShown: boolean;
   cachedModeText: string;
+  // V1: Rich recovery stores
+  currentIssueId: string | null;
+  editedFiles: Map<string, Set<string>>;
+  checkpointState: { lastCheckpointTurn: number; turnIndex: number };
+  autoContinuePending: boolean;
 }
 
 export function registerBeadsCommands(
@@ -30,7 +28,10 @@ export function registerBeadsCommands(
     commandOut(ctx: NotifyContext, message: string, level?: "info" | "warning" | "error"): void;
     summarizeExecFailure(result: ExecResult): string;
     refreshBeadsStatus(ctx: UiContext): Promise<void>;
-    maybeNudgeCommitAfterClose(ctx: NotifyContext): Promise<string | null>;
+    maybeNudgeCommitAfterClose(
+      ctx: NotifyContext,
+      options?: { queueModelReminder?: boolean },
+    ): Promise<string | null>;
   },
 ) {
   const { state } = deps;
@@ -203,9 +204,11 @@ export function registerBeadsCommands(
   pi.registerCommand("beads-status", {
     description: "Show beads stats, blocked issues, and in-progress issues",
     handler: async (_args, ctx) => {
-      const stats = await deps.runBr(["stats"]);
-      const blocked = await deps.runBr(["blocked"]);
-      const inProgress = await deps.runBr(["list", "--status", "in_progress"]);
+      const [stats, blocked, inProgress] = await Promise.all([
+        deps.runBr(["stats"]),
+        deps.runBr(["blocked"]),
+        deps.runBr(["list", "--status", "in_progress"]),
+      ]);
 
       const lines: string[] = [];
 

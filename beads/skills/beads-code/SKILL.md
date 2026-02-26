@@ -1,7 +1,6 @@
 ---
 name: beads-code
 description: Execute implementation work on beads issues — select leaf task, TDD, checkpoint, verify, close, bubble up.
-disable-model-invocation: true
 ---
 
 # Beads Code
@@ -24,6 +23,20 @@ Implement beads issues one at a time with TDD, checkpointing, and structured clo
 - When resuming after context compaction or a new session
 
 **Announce at start:** "I'm using the beads-code skill to implement beads issues."
+
+## Workflow Gate (Required Before Coding)
+
+1. **Issue gate:** Do not write code unless work is tied to a beads issue.
+2. **Planning gate:** For new features/behavior changes, require storm + plan outputs first.
+3. **Leaf gate:** Only implement leaf tasks (not epics/features directly).
+
+If a user asks for direct implementation without plan-ready issues, stop and respond:
+
+**"I can't jump straight to implementation. We need `@beads-storm` (feature shaping) and `@beads-plan` (task/dependency plan) before `@beads-code`."**
+
+If ready work contains only epics/features with no tasks, stop and respond:
+
+**"No implementation leaf tasks found. Run `@beads-plan` to decompose features into executable tasks first."**
 
 ## Session Start Protocol
 
@@ -259,15 +272,27 @@ br comments add <feature-id> "Session summary:
 
 If stopping, provide a concise status summary and next recommended issue.
 
+## Stop Conditions
+
+Stop and ask for user input when:
+- No plan-ready leaf tasks exist
+- Task details conflict with parent feature acceptance criteria
+- Verification repeatedly fails and root cause is unclear
+- A discovered blocker requires dependency or scope decisions
+
+Do not bypass these by implementing speculative code.
+
 ## Critical Rules
 
-1. **One issue at a time.** Do not work on multiple issues simultaneously.
-2. **Never close without verification.** `--reason` must contain evidence.
-3. **Never start on a broken codebase.** Fix failing tests first.
-4. **Never stop without committing.** Uncommitted work is lost work.
-5. **Never stop without checkpointing.** Future sessions depend on issue comments.
-6. **Never skip TDD.** Write the failing test first for every code change.
-7. **Always drill to leaf.** Work on leaf tasks, not features or epics directly.
+1. **No coding without a beads issue.** New work must be tracked first.
+2. **No coding without planning for new features.** Use `@beads-storm` and `@beads-plan` before `@beads-code`.
+3. **One issue at a time.** Do not work on multiple issues simultaneously.
+4. **Never close without verification.** `--reason` must contain evidence.
+5. **Never start on a broken codebase.** Fix failing tests first.
+6. **Never stop without committing.** Uncommitted work is lost work.
+7. **Never stop without checkpointing.** Future sessions depend on issue comments.
+8. **Never skip TDD.** Write the failing test first for every code change.
+9. **Always drill to leaf.** Work on leaf tasks, not features or epics directly.
 
 ## Handling Problems
 
