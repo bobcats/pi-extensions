@@ -14,6 +14,11 @@ import {
   formatMemoryDisplay,
   formatMemoryStatus,
   createSessionTracker,
+  getSessionsDir,
+  writeSessionSummary,
+  readSessionSummary,
+  listSessionSummaries,
+  buildExtractionPrompt,
   MEMORY_INDEX_LIMIT,
   MEMORY_TOPIC_LIMIT,
 } from "./lib.ts";
@@ -404,4 +409,73 @@ test("SessionTracker tool calls alone don't trigger first extraction", () => {
   tracker.recordToolCall();
 
   assert.equal(tracker.shouldExtract(), false);
+});
+
+// --- Session summary I/O ---
+
+test("getSessionsDir returns sessions subdirectory", () => {
+  assert.equal(getSessionsDir("/proj/.pi/memories"), "/proj/.pi/memories/sessions");
+});
+
+test("writeSessionSummary creates file and dir", () => {
+  const dir = tmpDir();
+  const sessionsDir = path.join(dir, "sessions");
+
+  writeSessionSummary(sessionsDir, "abc123", "# Session\n- did stuff");
+
+  const content = fs.readFileSync(path.join(sessionsDir, "abc123.md"), "utf-8");
+  assert.equal(content, "# Session\n- did stuff");
+});
+
+test("readSessionSummary reads existing summary", () => {
+  const dir = tmpDir();
+  const sessionsDir = path.join(dir, "sessions");
+  fs.mkdirSync(sessionsDir, { recursive: true });
+  fs.writeFileSync(path.join(sessionsDir, "abc.md"), "summary content");
+
+  assert.equal(readSessionSummary(sessionsDir, "abc"), "summary content");
+});
+
+test("readSessionSummary returns null when missing", () => {
+  assert.equal(readSessionSummary("/nonexistent", "abc"), null);
+});
+
+test("listSessionSummaries returns sorted by mtime desc", () => {
+  const dir = tmpDir();
+  const sessionsDir = path.join(dir, "sessions");
+  fs.mkdirSync(sessionsDir, { recursive: true });
+  fs.writeFileSync(path.join(sessionsDir, "old.md"), "old");
+  const now = Date.now();
+  fs.utimesSync(path.join(sessionsDir, "old.md"), new Date(now - 10000), new Date(now - 10000));
+  fs.writeFileSync(path.join(sessionsDir, "new.md"), "new");
+
+  const list = listSessionSummaries(sessionsDir);
+  assert.equal(list.length, 2);
+  assert.equal(list[0].sessionId, "new");
+  assert.equal(list[1].sessionId, "old");
+});
+
+test("listSessionSummaries returns empty for missing dir", () => {
+  assert.deepEqual(listSessionSummaries("/nonexistent/sessions"), []);
+});
+
+test("listSessionSummaries filters non-md files", () => {
+  const dir = tmpDir();
+  const sessionsDir = path.join(dir, "sessions");
+  fs.mkdirSync(sessionsDir, { recursive: true });
+  fs.writeFileSync(path.join(sessionsDir, "session.md"), "content");
+  fs.writeFileSync(path.join(sessionsDir, "notes.txt"), "not a summary");
+
+  const list = listSessionSummaries(sessionsDir);
+  assert.equal(list.length, 1);
+  assert.equal(list[0].sessionId, "session");
+});
+
+test("buildExtractionPrompt includes session path and structure hints", () => {
+  const prompt = buildExtractionPrompt("/proj/.pi/memories/sessions", "abc123");
+
+  assert.match(prompt, /abc123\.md/);
+  assert.match(prompt, /sessions/);
+  assert.match(prompt, /session title/i);
+  assert.match(prompt, /key decisions/i);
 });
