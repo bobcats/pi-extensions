@@ -247,6 +247,17 @@ test("buildWriteInstructions includes MEMORY.md index and topic file guidance", 
   assert.match(text, /topic/i);
 });
 
+test("buildWriteInstructions includes when to save timing hints", () => {
+  const text = buildWriteInstructions("/g", "/p");
+  assert.match(text, /completing a feature/i);
+  assert.match(text, /fixing a.*bug/i);
+});
+
+test("buildWriteInstructions includes generalizability filter", () => {
+  const text = buildWriteInstructions("/g", "/p");
+  assert.match(text, /generalize/i);
+});
+
 test("buildWriteInstructions mentions write and edit tools", () => {
   const text = buildWriteInstructions("/g", "/p");
   assert.match(text, /write/i);
