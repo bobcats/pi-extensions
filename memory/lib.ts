@@ -170,6 +170,47 @@ export function formatMemoryStatus(
   return parts.join(" · ");
 }
 
+// --- Session tracking ---
+
+export const FIRST_EXTRACTION_THRESHOLD = 10_000;
+export const SUBSEQUENT_TOKEN_THRESHOLD = 5_000;
+export const TOOL_CALL_THRESHOLD = 3;
+
+export interface SessionTracker {
+  updateTokens(currentTokens: number): void;
+  recordToolCall(): void;
+  shouldExtract(): boolean;
+  recordExtraction(): void;
+}
+
+export function createSessionTracker(): SessionTracker {
+  let hasExtractedOnce = false;
+  let tokensAtLastExtraction = 0;
+  let currentTokens = 0;
+  let toolCallsSinceExtraction = 0;
+
+  return {
+    updateTokens(tokens: number) {
+      currentTokens = tokens;
+    },
+    recordToolCall() {
+      toolCallsSinceExtraction++;
+    },
+    shouldExtract(): boolean {
+      if (!hasExtractedOnce) {
+        return currentTokens >= FIRST_EXTRACTION_THRESHOLD;
+      }
+      const tokenDelta = currentTokens - tokensAtLastExtraction;
+      return tokenDelta >= SUBSEQUENT_TOKEN_THRESHOLD || toolCallsSinceExtraction >= TOOL_CALL_THRESHOLD;
+    },
+    recordExtraction() {
+      hasExtractedOnce = true;
+      tokensAtLastExtraction = currentTokens;
+      toolCallsSinceExtraction = 0;
+    },
+  };
+}
+
 export function buildWriteInstructions(
   globalDir: string,
   projectDir: string,
