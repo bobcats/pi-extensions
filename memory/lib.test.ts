@@ -258,6 +258,12 @@ test("buildWriteInstructions includes generalizability filter", () => {
   assert.match(text, /generalize/i);
 });
 
+test("buildWriteInstructions includes self-check gate before writing", () => {
+  const text = buildWriteInstructions("/g", "/p");
+  // Must tell the model to evaluate entries against criteria before saving
+  assert.match(text, /before (saving|writing).*check/i);
+});
+
 test("buildWriteInstructions mentions write and edit tools", () => {
   const text = buildWriteInstructions("/g", "/p");
   assert.match(text, /write/i);
