@@ -170,6 +170,59 @@ export function formatMemoryStatus(
   return parts.join(" · ");
 }
 
+// --- Session summary I/O ---
+
+export function getSessionsDir(projectDir: string): string {
+  return path.join(projectDir, "sessions");
+}
+
+export function writeSessionSummary(sessionsDir: string, sessionId: string, content: string): void {
+  fs.mkdirSync(sessionsDir, { recursive: true });
+  fs.writeFileSync(path.join(sessionsDir, `${sessionId}.md`), content);
+}
+
+export function readSessionSummary(sessionsDir: string, sessionId: string): string | null {
+  try {
+    return fs.readFileSync(path.join(sessionsDir, `${sessionId}.md`), "utf-8");
+  } catch {
+    return null;
+  }
+}
+
+export function listSessionSummaries(sessionsDir: string): { sessionId: string; mtime: number; path: string }[] {
+  try {
+    return fs.readdirSync(sessionsDir)
+      .filter(f => f.endsWith(".md"))
+      .map(f => {
+        const fullPath = path.join(sessionsDir, f);
+        const stat = fs.statSync(fullPath);
+        return { sessionId: f.replace(/\.md$/, ""), mtime: stat.mtimeMs, path: fullPath };
+      })
+      .sort((a, b) => b.mtime - a.mtime);
+  } catch {
+    return [];
+  }
+}
+
+export function buildExtractionPrompt(sessionsDir: string, sessionId: string): string {
+  const targetPath = path.join(sessionsDir, `${sessionId}.md`);
+  return `Write a structured session summary to ${targetPath}. Include:
+
+# Session Title
+A one-line description of what was worked on this session.
+
+## Current Status
+What's done, what's in progress, what's blocked.
+
+## Key Decisions
+Important choices made during this session and their rationale.
+
+## Work Log
+Chronological record of significant actions taken.
+
+Keep it concise — this summary will be loaded as background context in future sessions. Focus on decisions and outcomes, not conversation details.`;
+}
+
 // --- Session tracking ---
 
 export const FIRST_EXTRACTION_THRESHOLD = 10_000;
