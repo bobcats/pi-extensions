@@ -13,6 +13,7 @@ import {
   checkLineLimit,
   formatMemoryDisplay,
   formatMemoryStatus,
+  createSessionTracker,
   MEMORY_INDEX_LIMIT,
   MEMORY_TOPIC_LIMIT,
 } from "./lib.ts";
@@ -328,4 +329,79 @@ test("formatMemoryStatus shows off when disabled", () => {
 
 test("formatMemoryStatus shows 1 topic singular", () => {
   assert.equal(formatMemoryStatus(true, 1, 1), "memory: on · 1 scope · 1 topic");
+});
+
+// --- SessionTracker ---
+
+test("SessionTracker.shouldExtract returns false below first threshold", () => {
+  const tracker = createSessionTracker();
+
+  tracker.updateTokens(5000);
+
+  assert.equal(tracker.shouldExtract(), false);
+});
+
+test("SessionTracker.shouldExtract returns true at first threshold", () => {
+  const tracker = createSessionTracker();
+
+  tracker.updateTokens(10000);
+
+  assert.equal(tracker.shouldExtract(), true);
+});
+
+test("SessionTracker.shouldExtract returns true above first threshold", () => {
+  const tracker = createSessionTracker();
+
+  tracker.updateTokens(15000);
+
+  assert.equal(tracker.shouldExtract(), true);
+});
+
+test("SessionTracker after first extraction needs 5k more tokens", () => {
+  const tracker = createSessionTracker();
+  tracker.updateTokens(10000);
+  tracker.recordExtraction();
+
+  tracker.updateTokens(14000);
+  assert.equal(tracker.shouldExtract(), false);
+
+  tracker.updateTokens(15000);
+  assert.equal(tracker.shouldExtract(), true);
+});
+
+test("SessionTracker after first extraction fires on 3 tool calls", () => {
+  const tracker = createSessionTracker();
+  tracker.updateTokens(10000);
+  tracker.recordExtraction();
+
+  tracker.recordToolCall();
+  tracker.recordToolCall();
+  assert.equal(tracker.shouldExtract(), false);
+
+  tracker.recordToolCall();
+  assert.equal(tracker.shouldExtract(), true);
+});
+
+test("SessionTracker.recordExtraction resets counters", () => {
+  const tracker = createSessionTracker();
+  tracker.updateTokens(10000);
+  tracker.recordExtraction();
+  tracker.recordToolCall();
+  tracker.recordToolCall();
+  tracker.recordToolCall();
+  tracker.recordExtraction();
+
+  assert.equal(tracker.shouldExtract(), false);
+  tracker.recordToolCall();
+  assert.equal(tracker.shouldExtract(), false);
+});
+
+test("SessionTracker tool calls alone don't trigger first extraction", () => {
+  const tracker = createSessionTracker();
+
+  tracker.recordToolCall();
+  tracker.recordToolCall();
+  tracker.recordToolCall();
+
+  assert.equal(tracker.shouldExtract(), false);
 });
