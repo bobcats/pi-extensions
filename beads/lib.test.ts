@@ -7,6 +7,7 @@ import {
   parseBrReadyJson,
   parseBrShowJson,
   detectTrackingMode,
+  isBrCommand,
   isBrCloseCommand,
   shouldShowContextReminder,
   buildBeadsPrimeMessage,
@@ -74,6 +75,13 @@ test("parseBrReadyJson handles issue_type payload from br list --json", () => {
 test("detectTrackingMode maps check-ignore codes", () => {
   assert.equal(detectTrackingMode(0), "stealth");
   assert.equal(detectTrackingMode(1), "git-tracked");
+});
+
+test("isBrCommand only matches literal br invocation", () => {
+  assert.equal(isBrCommand("br update bd-1 --status in_progress"), true);
+  assert.equal(isBrCommand("  br list --status in_progress"), true);
+  assert.equal(isBrCommand("echo br update"), false);
+  assert.equal(isBrCommand("bash -lc 'br update bd-1'"), false);
 });
 
 test("isBrCloseCommand only matches literal br close invocation", () => {

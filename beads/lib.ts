@@ -78,6 +78,10 @@ export function detectTrackingMode(gitCheckIgnoreExitCode: number): TrackingMode
   return gitCheckIgnoreExitCode === 0 ? "stealth" : "git-tracked";
 }
 
+export function isBrCommand(command: string): boolean {
+  return /^\s*br\b/.test(command);
+}
+
 export function isBrCloseCommand(command: string): boolean {
   return /^\s*br\s+close\b/.test(command);
 }

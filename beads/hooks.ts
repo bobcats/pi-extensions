@@ -14,6 +14,7 @@ import {
   extractEditedFilePath,
   formatRecoveryMessage,
   isBrCloseCommand,
+  isBrCommand,
   isGitCommitCommand,
   parseBeadsSessionMode,
   parseGitCommitOutput,
@@ -133,13 +134,20 @@ export function registerBeadsHooks(
     }
   });
 
-  pi.on("tool_result", async (event) => {
-    if (!state.beadsEnabled || !state.currentIssueId) return;
+  pi.on("tool_result", async (event, ctx) => {
+    if (!state.beadsEnabled) return;
 
-    // V2: Commit-to-issue linking
+    // Refresh status when any successful raw br command runs via bash.
     if (isBashToolResult(event) && !event.isError) {
       const command = typeof event.input.command === "string" ? event.input.command : "";
 
+      if (isBrCommand(command)) {
+        await deps.refreshBeadsStatus(ctx);
+      }
+
+      if (!state.currentIssueId) return;
+
+      // V2: Commit-to-issue linking
       if (isGitCommitCommand(command)) {
         const text = event.content.find((c) => c.type === "text");
         const stdout = text && "text" in text ? text.text : "";
@@ -155,7 +163,11 @@ export function registerBeadsHooks(
       if (/^\s*br\s+comments\s+add\b/.test(command)) {
         state.checkpointState.lastCheckpointTurn = state.checkpointState.turnIndex;
       }
+
+      return;
     }
+
+    if (!state.currentIssueId) return;
 
     // V3: File tracking
     if (isWriteToolResult(event) || isEditToolResult(event)) {

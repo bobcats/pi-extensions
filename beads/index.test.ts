@@ -11,6 +11,17 @@ function buildHarness({ execOverride }: { execOverride?: (cmd: string, args: str
   const commands = new Map<string, { handler: (args: string, ctx: any) => Promise<void> }>();
   const hooks = new Map<string, HookHandler[]>();
   const sent: SendCall[] = [];
+  const execCalls: string[] = [];
+
+  const execImpl = execOverride ?? (async (_cmd: string, args: string[]) => {
+    if (args[0] === "info") {
+      return { stdout: JSON.stringify({ mode: "file", issue_count: 1 }), stderr: "", code: 0, killed: false };
+    }
+    if (args[0] === "close") return { stdout: "Closed bd-test", stderr: "", code: 0, killed: false };
+    if (args[0] === "update") return { stdout: "Updated bd-test", stderr: "", code: 0, killed: false };
+    if (args[0] === "status" && args[1] === "--porcelain") return { stdout: "", stderr: "", code: 0, killed: false };
+    return { stdout: "[]", stderr: "", code: 0, killed: false };
+  });
 
   const pi = {
     registerTool(def: { name: string; execute: (...args: any[]) => Promise<any> }) {
@@ -26,15 +37,10 @@ function buildHarness({ execOverride }: { execOverride?: (cmd: string, args: str
       hooks.get(event)!.push(handler);
     },
     getFlag() { return false; },
-    exec: execOverride ?? (async (_cmd: string, args: string[]) => {
-      if (args[0] === "info") {
-        return { stdout: JSON.stringify({ mode: "file", issue_count: 1 }), stderr: "", code: 0, killed: false };
-      }
-      if (args[0] === "close") return { stdout: "Closed bd-test", stderr: "", code: 0, killed: false };
-      if (args[0] === "update") return { stdout: "Updated bd-test", stderr: "", code: 0, killed: false };
-      if (args[0] === "status" && args[1] === "--porcelain") return { stdout: "", stderr: "", code: 0, killed: false };
-      return { stdout: "[]", stderr: "", code: 0, killed: false };
-    }),
+    exec: async (cmd: string, args: string[]) => {
+      execCalls.push(`${cmd} ${args.join(" ")}`.trim());
+      return execImpl(cmd, args);
+    },
     sendMessage(message: Record<string, unknown>, options: Record<string, unknown>) {
       sent.push({ message, options });
     },
@@ -64,7 +70,7 @@ function buildHarness({ execOverride }: { execOverride?: (cmd: string, args: str
     return tool.execute("call-id", { action: "claim", id }, undefined, undefined, ctx);
   }
 
-  return { tools, hooks, sent, fireHook, enableBeads, closeTool, claimTool, ctx, commands };
+  return { tools, hooks, sent, execCalls, fireHook, enableBeads, closeTool, claimTool, ctx, commands };
 }
 
 test("registers beads-mode command", () => {
@@ -202,6 +208,27 @@ test("command close with dirty tree still queues model reminder", async () => {
   const dirtyWarnings = h.sent.filter((s) => s.message.customType === "beads-dirty-tree-warning");
   assert.equal(dirtyWarnings.length, 1, "command close should queue dirty-tree model warning");
   assert.equal(dirtyWarnings[0].options.deliverAs, "nextTurn");
+});
+
+test("successful raw br bash command refreshes beads status", async () => {
+  const h = buildHarness();
+  await h.enableBeads();
+
+  h.execCalls.length = 0;
+
+  await h.fireHook("tool_result", {
+    toolName: "bash",
+    isError: false,
+    input: { command: "br update bd-26ub --status in_progress && br show bd-26ub" },
+    content: [{ type: "text", text: "ok" }],
+  }, h.ctx);
+
+  assert.ok(h.execCalls.some((c) => c === "br info --json"), "should refresh status via br info");
+  assert.ok(h.execCalls.some((c) => c === "br list --json"), "should refresh status via br list");
+  assert.ok(
+    h.execCalls.some((c) => c === "br list --status in_progress --sort updated_at --json"),
+    "should refresh in-progress list",
+  );
 });
 
 test("beads-status runs stats, blocked, and in_progress queries concurrently", async () => {
