@@ -20,6 +20,7 @@ import {
 } from "./lib.ts";
 import { getInitState, initVault, migrateV1Vault } from "./init.ts";
 import { buildReflectPrompt, buildRuminatePrompt } from "./prompts.ts";
+import { synthesizeFindings, formatSynthesisTable } from "./ruminate.ts";
 import { buildVaultSnapshot, runSubagent, parseSessionMessages, batchConversations } from "./subagent.ts";
 
 export default function memoryExtension(
@@ -322,19 +323,20 @@ export default function memoryExtension(
             return null;
           }
 
-          return { index: i, finding: `## Batch ${i + 1}\n\n${result.output}` };
+          return { index: i, output: result.output };
         });
 
-        const findings = (await Promise.all(tasks))
-          .filter((item): item is { index: number; finding: string } => item !== null)
+        const minerOutputs = (await Promise.all(tasks))
+          .filter((item): item is { index: number; output: string } => item !== null)
           .sort((a, b) => a.index - b.index)
-          .map((item) => item.finding);
+          .map((item) => item.output);
 
         for (const p of tempPaths) fs.rmSync(p, { force: true });
 
-        const summary = findings.length > 0
-          ? `## Ruminate Summary\n\nProcessed ${conversations.length} conversations in ${batches.length} batches.\n\n${findings.join("\n\n")}`
-          : `## Ruminate Summary\n\nProcessed ${conversations.length} conversations in ${batches.length} batches. No high-signal findings returned.`;
+        const synthesisRows = synthesizeFindings(minerOutputs);
+        const synthesisTable = formatSynthesisTable(synthesisRows);
+
+        const summary = `## Ruminate Summary\n\nProcessed ${conversations.length} conversations in ${batches.length} batches.\n\n${synthesisTable}`;
         ctx.ui.notify(summary, "info");
         return;
       }

@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "tsx --test lib.test.ts index.test.ts init.test.ts subagent.test.ts prompt-parity.test.ts"
+    "test": "tsx --test lib.test.ts index.test.ts init.test.ts subagent.test.ts prompt-parity.test.ts ruminate.test.ts"
   },
   "devDependencies": {
     "@mariozechner/pi-ai": "*",
