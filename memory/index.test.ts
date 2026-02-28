@@ -1,6 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 import memoryExtension from "./index.ts";
+
+function tmpDir(): string {
+  return fs.mkdtempSync(path.join(os.tmpdir(), "memory-index-test-"));
+}
 
 test("registers session_start and before_agent_start handlers", () => {
   const handlers = new Map<string, Function[]>();
@@ -317,11 +324,78 @@ test("/memory off also skips tool_call line limit enforcement", async () => {
   // Disable memory
   await commands.get("memory").handler("off", { ui: { notify() {}, setStatus() {} } });
 
-  // Write over-limit to MEMORY.md → should pass through (not blocked)
+  // Write over-limit to index.md → should pass through (not blocked)
   const content = Array.from({ length: 201 }, (_, i) => `line ${i}`).join("\n");
   const result = await handlers.get("tool_call")!({
     toolName: "write",
-    input: { path: "/proj/.pi/memories/MEMORY.md", content },
+    input: { path: "/proj/.pi/memories/index.md", content },
   });
   assert.equal(result, undefined);
+});
+
+test("tool_call write triggers index rebuild when new file added", async () => {
+  const handlers = new Map<string, Function>();
+  const root = tmpDir();
+  const projectMem = path.join(root, ".pi", "memories");
+  fs.mkdirSync(projectMem, { recursive: true });
+  fs.writeFileSync(path.join(projectMem, "index.md"), "# Memory\n");
+
+  const pi = {
+    on(event: string, handler: Function) { handlers.set(event, handler); },
+    registerTool() {},
+    registerCommand() {},
+    registerShortcut() {},
+    registerFlag() {},
+    getFlag() { return false; },
+    exec: async () => ({ stdout: "", stderr: "", code: 0, killed: false }),
+    sendMessage() {},
+  } as never;
+
+  memoryExtension(pi);
+  await handlers.get("session_start")!({}, { cwd: root, ui: { notify() {}, setStatus() {} } });
+
+  const toolCall = handlers.get("tool_call")!;
+  const topicPath = path.join(projectMem, "new-topic.md");
+  fs.writeFileSync(topicPath, "hello");
+
+  await toolCall({
+    toolName: "write",
+    input: { path: topicPath, content: "hello" },
+  });
+
+  const index = fs.readFileSync(path.join(projectMem, "index.md"), "utf-8");
+  assert.match(index, /\[\[new-topic\]\]/);
+});
+
+test("tool_call edit skips index rebuild on content-only edit", async () => {
+  const handlers = new Map<string, Function>();
+  const root = tmpDir();
+  const projectMem = path.join(root, ".pi", "memories");
+  fs.mkdirSync(projectMem, { recursive: true });
+  fs.writeFileSync(path.join(projectMem, "index.md"), "# Memory\n\n## Other\n- [[topic]]\n");
+  fs.writeFileSync(path.join(projectMem, "topic.md"), "v1");
+
+  const pi = {
+    on(event: string, handler: Function) { handlers.set(event, handler); },
+    registerTool() {},
+    registerCommand() {},
+    registerShortcut() {},
+    registerFlag() {},
+    getFlag() { return false; },
+    exec: async () => ({ stdout: "", stderr: "", code: 0, killed: false }),
+    sendMessage() {},
+  } as never;
+
+  memoryExtension(pi);
+  await handlers.get("session_start")!({}, { cwd: root, ui: { notify() {}, setStatus() {} } });
+
+  const before = fs.readFileSync(path.join(projectMem, "index.md"), "utf-8");
+
+  await handlers.get("tool_call")!({
+    toolName: "edit",
+    input: { path: path.join(projectMem, "topic.md") },
+  });
+
+  const after = fs.readFileSync(path.join(projectMem, "index.md"), "utf-8");
+  assert.equal(after, before);
 });

@@ -3,8 +3,10 @@ import * as os from "node:os";
 import * as path from "node:path";
 import type { ExtensionAPI, ExtensionContext, ExtensionCommandContext } from "@mariozechner/pi-coding-agent";
 import {
-  readMemoryIndex,
-  listTopicFiles,
+  readVaultIndex,
+  listVaultFiles,
+  buildVaultIndex,
+  detectIndexDrift,
   buildMemoryPrompt,
   buildWriteInstructions,
   isMemoryPath,
@@ -25,18 +27,35 @@ export default function memoryExtension(pi: ExtensionAPI) {
   let memoryEnabled = true;
   let lastCtx: ExtensionContext | null = null;
 
-  function updateStatus(ctx: ExtensionContext) {
-    const scopeCount = (globalScope ? 1 : 0) + (projectScope ? 1 : 0);
-    const topicCount =
-      (globalScope?.topicFiles.length ?? 0) + (projectScope?.topicFiles.length ?? 0);
-    ctx.ui.setStatus("memory", formatMemoryStatus(memoryEnabled, scopeCount, topicCount));
+  function loadScope(dir: string): MemoryScope | null {
+    const indexContent = readVaultIndex(dir);
+    const files = listVaultFiles(dir);
+    if (indexContent === null && files.length === 0) return null;
+    return { dir, indexContent, fileCount: files.length };
   }
 
-  function loadScope(dir: string): MemoryScope | null {
-    const content = readMemoryIndex(dir);
-    const topicFiles = listTopicFiles(dir);
-    if (content === null && topicFiles.length === 0) return null;
-    return { content, topicFiles };
+  function refreshScope(scope: "global" | "project") {
+    if (scope === "global") {
+      globalScope = loadScope(globalDir);
+    } else {
+      projectScope = loadScope(projectDir);
+    }
+  }
+
+  function rebuildIndexIfDrift(scope: "global" | "project") {
+    const dir = scope === "global" ? globalDir : projectDir;
+    if (!detectIndexDrift(dir)) return;
+    const newIndex = buildVaultIndex(dir);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, "index.md"), newIndex);
+    refreshScope(scope);
+  }
+
+  function updateStatus(ctx: ExtensionContext) {
+    const globalHasVault = !!globalScope;
+    const projectHasVault = !!projectScope;
+    const fileCount = (globalScope?.fileCount ?? 0) + (projectScope?.fileCount ?? 0);
+    ctx.ui.setStatus("memory", formatMemoryStatus(memoryEnabled, globalHasVault, projectHasVault, fileCount));
   }
 
   pi.on("session_start", async (_event, ctx) => {
@@ -71,7 +90,8 @@ export default function memoryExtension(pi: ExtensionAPI) {
 
   function mtimeFingerprint(dir: string): string {
     try {
-      const entries = fs.readdirSync(dir).filter((f) => f.endsWith(".md")).sort();
+      const files = listVaultFiles(dir).map((f) => `${f}.md`);
+      const entries = [...files, "index.md"].sort();
       return entries
         .map((f) => {
           try {
@@ -92,6 +112,9 @@ export default function memoryExtension(pi: ExtensionAPI) {
       const fingerprint = mtimeFingerprint(globalDir) + "||" + mtimeFingerprint(projectDir);
       if (fingerprint === lastMtimeFingerprint) return;
       lastMtimeFingerprint = fingerprint;
+
+      rebuildIndexIfDrift("global");
+      rebuildIndexIfDrift("project");
       globalScope = loadScope(globalDir);
       projectScope = loadScope(projectDir);
       if (lastCtx) updateStatus(lastCtx);
@@ -132,6 +155,12 @@ export default function memoryExtension(pi: ExtensionAPI) {
       }
     }
 
+    const result = (event as { result?: { block?: boolean } }).result;
+    if (!result?.block && memPath.scope) {
+      rebuildIndexIfDrift(memPath.scope);
+      if (lastCtx) updateStatus(lastCtx);
+    }
+
     return undefined;
   });
 
@@ -159,32 +188,33 @@ export default function memoryExtension(pi: ExtensionAPI) {
         const filePath = path.join(dir, MEMORY_INDEX_FILE);
         fs.mkdirSync(dir, { recursive: true });
         if (!fs.existsSync(filePath)) {
-          fs.writeFileSync(filePath, "");
+          fs.writeFileSync(filePath, "# Memory\n");
         }
         const content = fs.readFileSync(filePath, "utf-8");
-        const edited = await ctx.ui.editor(`Edit ${trimmed === "edit global" ? "global" : "project"} MEMORY.md:`, content);
+        const edited = await ctx.ui.editor(`Edit ${trimmed === "edit global" ? "global" : "project"} ${MEMORY_INDEX_FILE}:`, content);
         if (edited !== undefined && edited !== content) {
           fs.writeFileSync(filePath, edited);
-          // Reload scope
-          if (trimmed === "edit global") {
-            globalScope = loadScope(globalDir);
-          } else {
-            projectScope = loadScope(projectDir);
-          }
+          refreshScope(trimmed === "edit global" ? "global" : "project");
           updateStatus(ctx);
           ctx.ui.notify("Memory updated", "success");
         }
         return;
       }
 
-      // Default: show display
-      // Re-read fresh
       globalScope = loadScope(globalDir);
       projectScope = loadScope(projectDir);
       updateStatus(ctx);
       const display = formatMemoryDisplay(
-        { dir: globalDir, content: globalScope?.content ?? null, topicFiles: globalScope?.topicFiles ?? [] },
-        { dir: projectDir, content: projectScope?.content ?? null, topicFiles: projectScope?.topicFiles ?? [] },
+        {
+          dir: globalDir,
+          content: globalScope?.indexContent ?? null,
+          topicFiles: Array.from({ length: globalScope?.fileCount ?? 0 }, (_, i) => ({ name: `file-${i + 1}.md`, lines: 0 })),
+        },
+        {
+          dir: projectDir,
+          content: projectScope?.indexContent ?? null,
+          topicFiles: Array.from({ length: projectScope?.fileCount ?? 0 }, (_, i) => ({ name: `file-${i + 1}.md`, lines: 0 })),
+        },
         memoryEnabled,
       );
       ctx.ui.notify(display, "info");

@@ -152,15 +152,19 @@ export function isMemoryPath(
   filePath: string,
   globalDir: string,
   projectDir: string,
-): { isMemory: boolean; isIndex: boolean } {
+): { isMemory: boolean; isIndex: boolean; scope: "global" | "project" | null } {
   const resolved = path.resolve(filePath);
-  const inGlobal = resolved.startsWith(path.resolve(globalDir) + path.sep);
-  const inProject = resolved.startsWith(path.resolve(projectDir) + path.sep);
+  const resolvedGlobal = path.resolve(globalDir);
+  const resolvedProject = path.resolve(projectDir);
 
-  if (!inGlobal && !inProject) return { isMemory: false, isIndex: false };
+  if (resolved.startsWith(resolvedGlobal + path.sep) || resolved === resolvedGlobal) {
+    return { isMemory: true, isIndex: path.basename(resolved) === "index.md", scope: "global" };
+  }
+  if (resolved.startsWith(resolvedProject + path.sep) || resolved === resolvedProject) {
+    return { isMemory: true, isIndex: path.basename(resolved) === "index.md", scope: "project" };
+  }
 
-  const basename = path.basename(resolved);
-  return { isMemory: true, isIndex: basename === MEMORY_INDEX_FILE };
+  return { isMemory: false, isIndex: false, scope: null };
 }
 
 export function checkLineLimit(

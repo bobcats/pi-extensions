@@ -150,7 +150,7 @@ test("buildWriteInstructions is trimmed and references vault conventions", () =>
 
 test("isMemoryPath identifies index.md in global dir", () => {
   const result = isMemoryPath("/home/.pi/memories/index.md", "/home/.pi/memories", "/proj/.pi/memories");
-  assert.deepEqual(result, { isMemory: true, isIndex: true });
+  assert.deepEqual(result, { isMemory: true, isIndex: true, scope: "global" });
 });
 
 // --- checkLineLimit ---
