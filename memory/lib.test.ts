@@ -169,24 +169,24 @@ test("checkLineLimit works with topic file limit", () => {
 
 // --- formatMemoryDisplay ---
 
-test("formatMemoryDisplay shows v2 vault summary", () => {
+test("formatMemoryDisplay shows v2/v1/empty states", () => {
   const display = formatMemoryDisplay(
-    { dir: "/home/.pi/memories", content: "# Memory\n- [[prefs]]", topicFiles: [{ name: "git.md", lines: 10 }] },
-    { dir: "/proj/.pi/memories", content: "# Memory", topicFiles: [] },
+    { dir: "/home/.pi/memories", state: "v2", fileCount: 4 },
+    { dir: "/proj/.pi/memories", state: "v1", fileCount: 0 },
     true,
   );
-  assert.match(display, /Vault files: 1/);
-  assert.match(display, /Index: present/);
+  assert.match(display, /Vault: 4 files/);
+  assert.match(display, /Legacy MEMORY\.md detected/);
+  assert.match(display, /Commands: init, v2migrate, reflect, meditate, ruminate, on, off, edit/);
 });
 
 test("formatMemoryDisplay suggests init when no vault exists", () => {
   const display = formatMemoryDisplay(
-    { dir: "/g", content: null, topicFiles: [] },
-    { dir: "/p", content: null, topicFiles: [] },
+    { dir: "/g", state: "empty", fileCount: 0 },
+    { dir: "/p", state: "empty", fileCount: 0 },
     true,
   );
   assert.match(display, /No vault — run \/memory init/);
-  assert.match(display, /Tip: run \/memory init/);
 });
 
 // --- formatMemoryStatus ---

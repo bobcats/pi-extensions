@@ -177,8 +177,8 @@ export function checkLineLimit(
 
 export type MemoryDisplayScope = {
   dir: string;
-  content: string | null;
-  topicFiles: { name: string; lines: number }[];
+  state: "empty" | "v1" | "v2";
+  fileCount: number;
 };
 
 export function formatMemoryDisplay(
@@ -190,48 +190,29 @@ export function formatMemoryDisplay(
   lines.push(`Memory: ${enabled ? "enabled" : "disabled"}`);
   lines.push("");
 
-  const noGlobalVault = !global.content && global.topicFiles.length === 0;
-  const noProjectVault = !project.content && project.topicFiles.length === 0;
-
   for (const [label, scope] of [["Global", global], ["Project", project]] as const) {
     lines.push(`${label} (${scope.dir}):`);
-    if (!scope.content && scope.topicFiles.length === 0) {
-      lines.push("  No vault — run /memory init");
+    if (scope.state === "v2") {
+      lines.push(`  Vault: ${scope.fileCount} files`);
+    } else if (scope.state === "v1") {
+      lines.push("  Legacy MEMORY.md detected — run /memory v2migrate");
     } else {
-      lines.push(`  Vault files: ${scope.topicFiles.length}`);
-      lines.push(`  Index: ${scope.content ? "present" : "missing"}`);
+      lines.push("  No vault — run /memory init");
     }
     lines.push("");
   }
 
-  if (noGlobalVault && noProjectVault) {
-    lines.push("Tip: run /memory init to create a vault.");
-  }
-
+  lines.push("Commands: init, v2migrate, reflect, meditate, ruminate, on, off, edit");
   return lines.join("\n");
 }
 
 export function formatMemoryStatus(
   enabled: boolean,
-  globalHasVaultOrScopeCount: boolean | number,
-  projectHasVaultOrTopicCount: boolean | number,
-  fileCount = 0,
+  globalHasVault: boolean,
+  projectHasVault: boolean,
+  fileCount: number,
 ): string {
   if (!enabled) return "memory: off";
-
-  // Backward-compat mode for old callers: (enabled, scopeCount, topicCount)
-  if (typeof globalHasVaultOrScopeCount === "number" || typeof projectHasVaultOrTopicCount === "number") {
-    const scopeCount = Number(globalHasVaultOrScopeCount);
-    const topicCount = Number(projectHasVaultOrTopicCount);
-    if (scopeCount === 0) return "memory: on · no vault";
-    const parts = ["memory: on", `${scopeCount} ${scopeCount === 1 ? "scope" : "scopes"}`];
-    if (topicCount > 0) parts.push(`${topicCount} ${topicCount === 1 ? "file" : "files"}`);
-    return parts.join(" · ");
-  }
-
-  const globalHasVault = globalHasVaultOrScopeCount;
-  const projectHasVault = projectHasVaultOrTopicCount;
-
   if (!globalHasVault && !projectHasVault) return "memory: on · no vault";
 
   const scopeCount = (globalHasVault ? 1 : 0) + (projectHasVault ? 1 : 0);
