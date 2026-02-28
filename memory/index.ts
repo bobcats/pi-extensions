@@ -21,7 +21,7 @@ import {
 import { getInitState, initVault, migrateV1Vault } from "./init.ts";
 import { buildMeditateApplyPrompt, buildReflectPrompt, buildRuminatePrompt } from "./prompts.ts";
 import { synthesizeFindings, formatSynthesisTable } from "./ruminate.ts";
-import { buildVaultSnapshot, runSubagent, parseSessionMessages, batchConversations } from "./subagent.ts";
+import { buildVaultSnapshot, runSubagent, parseSessionMessages, batchConversations, encodeProjectSessionPath } from "./subagent.ts";
 
 export default function memoryExtension(
   pi: ExtensionAPI,
@@ -274,7 +274,7 @@ export default function memoryExtension(
       if (trimmed === "ruminate") {
         const minerAgentPath = path.join(import.meta.dirname, "agents", "miner.md");
         const sessionsRoot = path.join(os.homedir(), ".pi", "agent", "sessions");
-        const encodedCwd = "--" + ctx.cwd.replace(/\//g, "--") + "--";
+        const encodedCwd = encodeProjectSessionPath(ctx.cwd);
         const projectSessionsDir = path.join(sessionsRoot, encodedCwd);
 
         const promptHint = buildRuminatePrompt(globalDir, projectDir, ctx.cwd, minerAgentPath);

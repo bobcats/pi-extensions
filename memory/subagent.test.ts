@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
-import { buildVaultSnapshot, parseSessionMessages, batchConversations } from "./subagent.ts";
+import { buildVaultSnapshot, parseSessionMessages, batchConversations, encodeProjectSessionPath } from "./subagent.ts";
 
 function tmpDir(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), "memory-subagent-test-"));
@@ -59,4 +59,8 @@ test("batchConversations splits into N batches", () => {
   assert.equal(batches.length, 3);
   const total = batches.reduce((sum, b) => sum + b.length, 0);
   assert.equal(total, 40);
+});
+
+test("encodeProjectSessionPath encodes cwd to pi session directory format", () => {
+  assert.equal(encodeProjectSessionPath("/Users/a/b/project"), "--Users--a--b--project--");
 });

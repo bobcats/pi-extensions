@@ -39,6 +39,10 @@ export interface SubagentResult {
   stderr: string;
 }
 
+export function encodeProjectSessionPath(cwd: string): string {
+  return "--" + cwd.replace(/^\/+/, "").replace(/\//g, "--") + "--";
+}
+
 export function parseSessionMessages(jsonlContent: string): SessionMessage[] {
   const messages: SessionMessage[] = [];
   for (const line of jsonlContent.split("\n")) {

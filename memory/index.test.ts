@@ -4,6 +4,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import memoryExtension from "./index.ts";
+import { encodeProjectSessionPath } from "./subagent.ts";
 
 function tmpDir(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), "memory-index-test-"));
@@ -597,7 +598,7 @@ test("/memory ruminate launches miner subagents in parallel", async () => {
   const commands = new Map<string, any>();
   const root = tmpDir();
 
-  const encodedCwd = "--" + root.replace(/\//g, "--") + "--";
+  const encodedCwd = encodeProjectSessionPath(root);
   const projectSessionsDir = path.join(os.homedir(), ".pi", "agent", "sessions", encodedCwd);
   fs.mkdirSync(projectSessionsDir, { recursive: true });
 
