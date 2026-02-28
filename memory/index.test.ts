@@ -533,3 +533,58 @@ test("/memory ruminate reports when no project sessions exist", async () => {
 
   assert.match(notified, /No sessions found for project/);
 });
+
+test("/memory ruminate launches miner subagents in parallel", async () => {
+  const handlers = new Map<string, Function>();
+  const commands = new Map<string, any>();
+  const root = tmpDir();
+
+  const encodedCwd = "--" + root.replace(/\//g, "--") + "--";
+  const projectSessionsDir = path.join(os.homedir(), ".pi", "agent", "sessions", encodedCwd);
+  fs.mkdirSync(projectSessionsDir, { recursive: true });
+
+  for (let i = 0; i < 40; i++) {
+    const jsonlPath = path.join(projectSessionsDir, `session-${i}.jsonl`);
+    const entry = {
+      type: "message",
+      message: {
+        role: "user",
+        content: [{ type: "text", text: `message ${i}` }],
+      },
+    };
+    fs.writeFileSync(jsonlPath, JSON.stringify(entry));
+  }
+
+  let inFlight = 0;
+  let maxInFlight = 0;
+
+  const pi = {
+    on(event: string, handler: Function) { handlers.set(event, handler); },
+    registerTool() {},
+    registerCommand(name: string, opts: any) { commands.set(name, opts); },
+    registerShortcut() {},
+    registerFlag() {},
+    getFlag() { return false; },
+    exec: async () => ({ stdout: "", stderr: "", code: 0, killed: false }),
+    sendMessage() {},
+  } as never;
+
+  memoryExtension(pi, {
+    runSubagent: async () => {
+      inFlight += 1;
+      maxInFlight = Math.max(maxInFlight, inFlight);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      inFlight -= 1;
+      return { output: "# Findings\n\n- finding", exitCode: 0, stderr: "" };
+    },
+  });
+
+  await handlers.get("session_start")!({}, { cwd: root, ui: { notify() {}, setStatus() {} } });
+  await commands.get("memory").handler("ruminate", {
+    cwd: root,
+    ui: { notify() {}, setStatus() {}, editor: async () => "", select: async () => "" },
+  });
+
+  fs.rmSync(projectSessionsDir, { recursive: true, force: true });
+  assert.ok(maxInFlight > 1, `expected parallel miner execution, max in-flight: ${maxInFlight}`);
+});

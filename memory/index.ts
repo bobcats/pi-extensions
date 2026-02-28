@@ -304,12 +304,11 @@ export default function memoryExtension(
 
         const ts = Date.now();
         const tempPaths: string[] = [];
-        const findings: string[] = [];
 
-        for (let i = 0; i < batches.length; i++) {
+        const tasks = batches.map(async (batch, i) => {
           const batchPath = path.join(os.tmpdir(), `memory-ruminate-batch-${ts}-${i}.md`);
           const topicsPath = path.join(os.tmpdir(), `memory-ruminate-topics-${ts}-${i}.md`);
-          fs.writeFileSync(batchPath, batches[i].join("\n\n---\n\n"));
+          fs.writeFileSync(batchPath, batch.join("\n\n---\n\n"));
           fs.writeFileSync(topicsPath, existingTopics.join("\n"));
           tempPaths.push(batchPath, topicsPath);
 
@@ -318,10 +317,18 @@ export default function memoryExtension(
             `Read conversations at ${batchPath} and existing topics at ${topicsPath}. Return high-signal findings in markdown.`,
             ctx.cwd,
           );
-          if (result.exitCode === 0 && result.output.trim()) {
-            findings.push(`## Batch ${i + 1}\n\n${result.output}`);
+
+          if (result.exitCode !== 0 || !result.output.trim()) {
+            return null;
           }
-        }
+
+          return { index: i, finding: `## Batch ${i + 1}\n\n${result.output}` };
+        });
+
+        const findings = (await Promise.all(tasks))
+          .filter((item): item is { index: number; finding: string } => item !== null)
+          .sort((a, b) => a.index - b.index)
+          .map((item) => item.finding);
 
         for (const p of tempPaths) fs.rmSync(p, { force: true });
 
