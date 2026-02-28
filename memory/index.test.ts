@@ -433,3 +433,33 @@ test("/memory init project creates vault structure", async () => {
   assert.ok(fs.existsSync(path.join(projectMem, "index.md")));
   assert.match(notified, /initialized|updated/i);
 });
+
+test("/memory reflect sends follow-up prompt", async () => {
+  const handlers = new Map<string, Function>();
+  const commands = new Map<string, any>();
+  const root = tmpDir();
+  let sent: any = null;
+
+  const pi = {
+    on(event: string, handler: Function) { handlers.set(event, handler); },
+    registerTool() {},
+    registerCommand(name: string, opts: any) { commands.set(name, opts); },
+    registerShortcut() {},
+    registerFlag() {},
+    getFlag() { return false; },
+    exec: async () => ({ stdout: "", stderr: "", code: 0, killed: false }),
+    sendMessage(msg: any) { sent = msg; },
+  } as never;
+
+  memoryExtension(pi);
+  await handlers.get("session_start")!({}, { cwd: root, ui: { notify() {}, setStatus() {} } });
+
+  await commands.get("memory").handler("reflect", {
+    ui: { notify() {}, setStatus() {}, editor: async () => "", select: async () => "" },
+  });
+
+  assert.ok(sent);
+  assert.equal(sent.deliverAs, "followUp");
+  assert.equal(sent.triggerTurn, true);
+  assert.match(sent.content, /## Reflect/);
+});

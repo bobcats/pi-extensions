@@ -19,6 +19,7 @@ import {
   type MemoryScope,
 } from "./lib.ts";
 import { getInitState, initVault, migrateV1Vault } from "./init.ts";
+import { buildReflectPrompt } from "./prompts.ts";
 
 export default function memoryExtension(pi: ExtensionAPI) {
   let globalDir = path.join(os.homedir(), ".pi", "memories");
@@ -181,6 +182,16 @@ export default function memoryExtension(pi: ExtensionAPI) {
         memoryEnabled = false;
         updateStatus(ctx);
         ctx.ui.notify("Memory disabled for this session", "info");
+        return;
+      }
+
+      if (trimmed === "reflect") {
+        const prompt = buildReflectPrompt(globalDir, projectDir);
+        pi.sendMessage({
+          content: prompt,
+          deliverAs: "followUp",
+          triggerTurn: true,
+        });
         return;
       }
 
