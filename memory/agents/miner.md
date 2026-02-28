@@ -2,7 +2,7 @@
 name: memory-miner
 description: Mines conversation batches for uncaptured patterns
 tools: read, bash
-model: claude-sonnet-4-5
+model: claude-sonnet-4-6
 ---
 
 You are a conversation miner. You are read-only and must return a structured markdown report.
