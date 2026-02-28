@@ -54,7 +54,7 @@ test("before_agent_start injects memory into system prompt", async () => {
   assert.match(result.systemPrompt, /Updating Memories/);
 });
 
-test("tool_call blocks write to MEMORY.md over 200 lines", async () => {
+test("tool_call blocks write to index.md over 200 lines", async () => {
   const handlers = new Map<string, Function>();
 
   const pi = {
@@ -77,11 +77,11 @@ test("tool_call blocks write to MEMORY.md over 200 lines", async () => {
 
   const toolCall = handlers.get("tool_call")!;
 
-  // Write 201 lines to MEMORY.md → should block
+  // Write 201 lines to index.md → should block
   const content = Array.from({ length: 201 }, (_, i) => `line ${i}`).join("\n");
   const result = await toolCall({
     toolName: "write",
-    input: { path: "/proj/.pi/memories/MEMORY.md", content },
+    input: { path: "/proj/.pi/memories/index.md", content },
   });
   assert.ok(result);
   assert.equal(result.block, true);

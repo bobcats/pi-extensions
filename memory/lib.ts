@@ -3,10 +3,10 @@ import * as path from "node:path";
 
 export const MEMORY_INDEX_LIMIT = 200;
 export const MEMORY_TOPIC_LIMIT = 500;
-export const MEMORY_INDEX_FILE = "MEMORY.md";
+export const MEMORY_INDEX_FILE = "index.md";
 
-export function readMemoryIndex(dir: string): string | null {
-  const filePath = path.join(dir, MEMORY_INDEX_FILE);
+export function readVaultIndex(dir: string): string | null {
+  const filePath = path.join(dir, "index.md");
   try {
     const content = fs.readFileSync(filePath, "utf-8").trim();
     return content || null;
@@ -14,6 +14,9 @@ export function readMemoryIndex(dir: string): string | null {
     return null;
   }
 }
+
+// Backward-compatible alias while v2 migration lands in index.ts
+export const readMemoryIndex = readVaultIndex;
 
 export function listTopicFiles(dir: string): { name: string; lines: number }[] {
   try {
@@ -121,45 +124,10 @@ export function buildVaultIndex(dir: string): string {
   return lines.join("\n") + "\n";
 }
 
-const EMPTY_NUDGE =
-  "Your MEMORY.md is currently empty. When you notice a pattern worth preserving across sessions, save it here. Anything in MEMORY.md will be included in your system prompt next time.";
-
-export function buildMemorySection(
-  scope: string,
-  content: string | null,
-  topicFiles: { name: string; lines: number }[],
-): string {
-  const header = `### ${scope.charAt(0).toUpperCase() + scope.slice(1)} Memory`;
-  let body: string;
-
-  if (!content) {
-    body = EMPTY_NUDGE;
-  } else {
-    const lines = content.split("\n");
-    if (lines.length > MEMORY_INDEX_LIMIT) {
-      body =
-        lines.slice(0, MEMORY_INDEX_LIMIT).join("\n") +
-        `\n\nWARNING: MEMORY.md is ${lines.length} lines (limit: ${MEMORY_INDEX_LIMIT}). Only the first ${MEMORY_INDEX_LIMIT} lines were loaded. Move detailed content into separate topic files and keep MEMORY.md as a concise index.`;
-    } else {
-      body = content;
-    }
-  }
-
-  let section = `${header}\n\n${body}`;
-
-  if (topicFiles.length > 0) {
-    section += "\n\nTopic files (use read tool to load):";
-    for (const f of topicFiles) {
-      section += `\n- ${f.name} (${f.lines} lines)`;
-    }
-  }
-
-  return section;
-}
-
 export type MemoryScope = {
-  content: string | null;
-  topicFiles: { name: string; lines: number }[];
+  dir: string;
+  indexContent: string | null;
+  fileCount: number;
 };
 
 export function buildMemoryPrompt(
@@ -168,16 +136,16 @@ export function buildMemoryPrompt(
 ): string {
   const sections: string[] = [];
 
-  if (global) {
-    sections.push(buildMemorySection("global", global.content, global.topicFiles));
+  if (global?.indexContent) {
+    sections.push(`### Global Memory (${global.dir}/)\n\n${global.indexContent}`);
   }
-  if (project) {
-    sections.push(buildMemorySection("project", project.content, project.topicFiles));
+  if (project?.indexContent) {
+    sections.push(`### Project Memory (${project.dir}/)\n\n${project.indexContent}`);
   }
 
   if (sections.length === 0) return "";
 
-  return "\n\n## Agent Memory\n\n" + sections.join("\n\n");
+  return "\n\n## Agent Memory\n\nMemory vault index — read relevant files with the read tool before acting:\n\n" + sections.join("\n\n");
 }
 
 export function isMemoryPath(
@@ -222,11 +190,11 @@ export function formatMemoryDisplay(
     lines.push(`${label} (${scope.dir}):`);
     if (scope.content) {
       const lineCount = scope.content.split("\n").length;
-      lines.push(`  MEMORY.md: ${lineCount} lines`);
+      lines.push(`  index.md: ${lineCount} lines`);
       lines.push(`  ${scope.content.split("\n").slice(0, 5).join("\n  ")}`);
       if (lineCount > 5) lines.push(`  ... (${lineCount - 5} more lines)`);
     } else {
-      lines.push("  MEMORY.md: empty");
+      lines.push("  index.md: empty");
     }
     if (scope.topicFiles.length > 0) {
       lines.push("  Topic files:");
@@ -267,42 +235,19 @@ export function buildWriteInstructions(
 ): string {
   return `### Updating Memories
 
-As you work, consult your memory files to build on previous experience.
-
 **Memory locations:**
-- Global: ${globalDir}/MEMORY.md (applies to all projects)
-- Project: ${projectDir}/MEMORY.md (specific to this project)
+- Global: ${globalDir}/ (applies to all projects)
+- Project: ${projectDir}/ (specific to this project)
 
-**How to save memories:**
-- Organize memory semantically by topic, not chronologically
-- Use the write and edit tools to update your memory files
-- MEMORY.md is always loaded into your context — keep it under ${MEMORY_INDEX_LIMIT} lines as a concise index
-- Create separate topic files (e.g., debugging.md, api-design.md) for detailed notes and link to them from MEMORY.md
-- Update or remove memories that turn out to be wrong or outdated
-- Do not write duplicate memories — check existing memory before writing new entries
+**How to save:**
+- Use write/edit tools to create or update .md files in the vault
+- One topic per file. Lowercase, hyphenated filenames (e.g., deploy-gotchas.md)
+- Link related notes with [[wikilinks]] — index.md is auto-maintained
+- Keep files under ${MEMORY_TOPIC_LIMIT} lines. Keep index.md under ${MEMORY_INDEX_LIMIT} lines
+- Update existing notes over creating new ones
 - Prefer project memory for project-specific things, global for universal preferences
 
-**When to save:**
-- After completing a feature, fixing a tricky bug, or resolving a debugging session
-- When you discover a pattern, convention, or gotcha that would generalize beyond the current task
-- When the user corrects you or expresses a preference
+**Quality gate:** Only save durable knowledge that generalizes beyond the current session. Check existing vault before writing to avoid duplicates.
 
-**What to save:**
-- Stable patterns and conventions confirmed across multiple interactions
-- Key architectural decisions, important file paths, and project structure
-- User preferences for workflow, tools, and communication style
-- Solutions to recurring problems and debugging insights
-- Only things that generalize — if a lesson only applies to one file or one narrow situation, it's not worth recording
-
-**Quality gate:** Before saving any memory, check each entry against the criteria below. If it doesn't clearly generalize beyond the current session, don't save it.
-
-**What NOT to save:**
-- Session-specific context (current task details, in-progress work, temporary state)
-- Information that might be incomplete — verify before writing
-- Anything that duplicates or contradicts existing project instructions
-- Speculative or unverified conclusions from reading a single file
-
-**Explicit user requests:**
-- When the user asks you to remember something across sessions (e.g., "always use bun", "never auto-commit"), save it immediately — no need to wait for multiple interactions
-- When the user asks to forget or stop remembering something, find and remove the relevant entries from your memory files`;
+**Explicit user requests:** When the user asks you to remember or forget something, do so immediately.`;
 }
