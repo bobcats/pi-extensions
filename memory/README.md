@@ -1,54 +1,76 @@
 # memory
 
-Extension that gives the agent persistent memory across sessions. Memories are stored in Markdown files at two scopes — global and project — and injected into the system prompt automatically.
+Persistent agent memory extension with a structured v2 vault.
 
-## How it works
+## Overview
 
-On session start, the extension reads memory files from:
+The extension stores memory in two scopes:
 
-- **Global**: `~/.pi/memories/MEMORY.md` (applies to all projects)
-- **Project**: `<project>/.pi/memories/MEMORY.md` (specific to the current project)
+- **Global**: `~/.pi/memories/`
+- **Project**: `<project>/.pi/memories/`
 
-The content is appended to the system prompt via `before_agent_start`, along with instructions for the agent to save patterns it notices. Topic files (additional `.md` files in the same directories) are listed so the agent can read them on demand.
+V2 uses an Obsidian-style vault with `index.md` root indexes and `[[wikilinks]]` between notes.
+
+## Vault structure (v2)
+
+```text
+~/.pi/memories/
+├── index.md
+├── principles.md
+├── principles/
+│   └── *.md
+└── *.md
+
+<project>/.pi/memories/
+├── index.md
+└── *.md
+```
+
+## Injection behavior
+
+On `before_agent_start`, the extension injects:
+
+1. Global `index.md` (if present)
+2. Project `index.md` (if present)
+3. Trimmed write instructions
+
+It does **not** inline full note contents. The model reads specific note files on demand.
 
 ## Commands
 
 | Command | Description |
-|---------|-------------|
-| `/memory` | Show memory status and content preview |
-| `/memory on` | Enable memory (default) |
-| `/memory off` | Disable memory for the current session |
-| `/memory edit` | Edit project MEMORY.md in the built-in editor |
-| `/memory edit global` | Edit global MEMORY.md in the built-in editor |
+|---|---|
+| `/memory` | Show status, scope state, and command hints |
+| `/memory on` | Enable memory for this session |
+| `/memory off` | Disable memory for this session |
+| `/memory edit` | Edit project `index.md` |
+| `/memory edit global` | Edit global `index.md` |
+| `/memory init` | Initialize global v2 vault + starter principles |
+| `/memory init project` | Initialize project v2 vault (no starter principles) |
+| `/memory v2migrate` | Migrate legacy global `MEMORY.md` to v2 |
+| `/memory v2migrate project` | Migrate legacy project `MEMORY.md` to v2 |
+| `/memory reflect` | Queue an in-context reflection pass |
+| `/memory meditate` | Run auditor/reviewer subagents via `pi --mode json` |
+| `/memory ruminate` | Mine past sessions via miner subagents |
 
-## Status bar
+## Migration path (v1 → v2)
 
-The extension publishes a footer status with key `memory`:
+If `MEMORY.md` is detected, run:
 
-- `memory: off` — disabled for this session
-- `memory: on · 2 scopes · 3 topics` — enabled with scope/topic counts
+- `/memory v2migrate` (global)
+- `/memory v2migrate project` (project)
+
+Modes:
+
+- **Preserve**: renames legacy file to `migrated.md`
+- **Replace**: removes legacy file and initializes fresh vault
 
 ## Guardrails
 
-The extension intercepts `write` and `edit` tool calls targeting memory files:
-
-- **MEMORY.md** is limited to **200 lines** — keeps the index concise
-- **Topic files** (e.g., `testing.md`) are limited to **500 lines**
-
-If a write would exceed the limit, it's blocked with a reason explaining the constraint.
-
-## File structure
-
-```
-~/.pi/memories/
-├── MEMORY.md           # Global index (max 200 lines)
-├── api-design.md       # Topic file (max 500 lines)
-└── testing.md          # Topic file
-
-<project>/.pi/memories/
-├── MEMORY.md           # Project index (max 200 lines)
-└── conventions.md      # Topic file
-```
+- `index.md` line limit: **200**
+- Topic file line limit: **500**
+- Index auto-rebuild runs when vault file set drifts from indexed wikilinks
+- Polling safety net checks for external edits every 5s
 
 ## Testing
 
