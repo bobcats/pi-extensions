@@ -186,23 +186,22 @@ export function formatMemoryDisplay(
   lines.push(`Memory: ${enabled ? "enabled" : "disabled"}`);
   lines.push("");
 
+  const noGlobalVault = !global.content && global.topicFiles.length === 0;
+  const noProjectVault = !project.content && project.topicFiles.length === 0;
+
   for (const [label, scope] of [["Global", global], ["Project", project]] as const) {
     lines.push(`${label} (${scope.dir}):`);
-    if (scope.content) {
-      const lineCount = scope.content.split("\n").length;
-      lines.push(`  index.md: ${lineCount} lines`);
-      lines.push(`  ${scope.content.split("\n").slice(0, 5).join("\n  ")}`);
-      if (lineCount > 5) lines.push(`  ... (${lineCount - 5} more lines)`);
+    if (!scope.content && scope.topicFiles.length === 0) {
+      lines.push("  No vault — run /memory init");
     } else {
-      lines.push("  index.md: empty");
-    }
-    if (scope.topicFiles.length > 0) {
-      lines.push("  Topic files:");
-      for (const f of scope.topicFiles) {
-        lines.push(`    ${f.name} (${f.lines} lines)`);
-      }
+      lines.push(`  Vault files: ${scope.topicFiles.length}`);
+      lines.push(`  Index: ${scope.content ? "present" : "missing"}`);
     }
     lines.push("");
+  }
+
+  if (noGlobalVault && noProjectVault) {
+    lines.push("Tip: run /memory init to create a vault.");
   }
 
   return lines.join("\n");
@@ -210,22 +209,32 @@ export function formatMemoryDisplay(
 
 export function formatMemoryStatus(
   enabled: boolean,
-  scopeCount: number,
-  topicCount: number,
+  globalHasVaultOrScopeCount: boolean | number,
+  projectHasVaultOrTopicCount: boolean | number,
+  fileCount = 0,
 ): string {
   if (!enabled) return "memory: off";
 
-  const parts = ["memory: on"];
-
-  if (scopeCount === 0) {
-    parts.push("empty");
-  } else {
-    parts.push(`${scopeCount} ${scopeCount === 1 ? "scope" : "scopes"}`);
-    if (topicCount > 0) {
-      parts.push(`${topicCount} ${topicCount === 1 ? "topic" : "topics"}`);
-    }
+  // Backward-compat mode for old callers: (enabled, scopeCount, topicCount)
+  if (typeof globalHasVaultOrScopeCount === "number" || typeof projectHasVaultOrTopicCount === "number") {
+    const scopeCount = Number(globalHasVaultOrScopeCount);
+    const topicCount = Number(projectHasVaultOrTopicCount);
+    if (scopeCount === 0) return "memory: on · no vault";
+    const parts = ["memory: on", `${scopeCount} ${scopeCount === 1 ? "scope" : "scopes"}`];
+    if (topicCount > 0) parts.push(`${topicCount} ${topicCount === 1 ? "file" : "files"}`);
+    return parts.join(" · ");
   }
 
+  const globalHasVault = globalHasVaultOrScopeCount;
+  const projectHasVault = projectHasVaultOrTopicCount;
+
+  if (!globalHasVault && !projectHasVault) return "memory: on · no vault";
+
+  const scopeCount = (globalHasVault ? 1 : 0) + (projectHasVault ? 1 : 0);
+  const parts = ["memory: on", `${scopeCount} ${scopeCount === 1 ? "scope" : "scopes"}`];
+  if (fileCount > 0) {
+    parts.push(`${fileCount} ${fileCount === 1 ? "file" : "files"}`);
+  }
   return parts.join(" · ");
 }
 

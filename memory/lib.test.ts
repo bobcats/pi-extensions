@@ -169,25 +169,42 @@ test("checkLineLimit works with topic file limit", () => {
 
 // --- formatMemoryDisplay ---
 
-test("formatMemoryDisplay shows both scopes with content", () => {
+test("formatMemoryDisplay shows v2 vault summary", () => {
   const display = formatMemoryDisplay(
     { dir: "/home/.pi/memories", content: "# Memory\n- [[prefs]]", topicFiles: [{ name: "git.md", lines: 10 }] },
     { dir: "/proj/.pi/memories", content: "# Memory", topicFiles: [] },
     true,
   );
-  assert.match(display, /Global/);
-  assert.match(display, /index\.md/);
-  assert.match(display, /enabled/i);
+  assert.match(display, /Vault files: 1/);
+  assert.match(display, /Index: present/);
+});
+
+test("formatMemoryDisplay suggests init when no vault exists", () => {
+  const display = formatMemoryDisplay(
+    { dir: "/g", content: null, topicFiles: [] },
+    { dir: "/p", content: null, topicFiles: [] },
+    true,
+  );
+  assert.match(display, /No vault — run \/memory init/);
+  assert.match(display, /Tip: run \/memory init/);
 });
 
 // --- formatMemoryStatus ---
 
-test("formatMemoryStatus shows on with 2 scopes and topics", () => {
-  assert.equal(formatMemoryStatus(true, 2, 3), "memory: on · 2 scopes · 3 topics");
+test("formatMemoryStatus shows no vault", () => {
+  assert.equal(formatMemoryStatus(true, false, false, 0), "memory: on · no vault");
+});
+
+test("formatMemoryStatus shows one scope and file count", () => {
+  assert.equal(formatMemoryStatus(true, true, false, 16), "memory: on · 1 scope · 16 files");
+});
+
+test("formatMemoryStatus shows two scopes and file count", () => {
+  assert.equal(formatMemoryStatus(true, true, true, 5), "memory: on · 2 scopes · 5 files");
 });
 
 test("formatMemoryStatus shows off when disabled", () => {
-  assert.equal(formatMemoryStatus(false, 2, 5), "memory: off");
+  assert.equal(formatMemoryStatus(false, true, true, 5), "memory: off");
 });
 
 // --- constants ---
