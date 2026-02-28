@@ -6,6 +6,10 @@ import * as os from "node:os";
 import {
   readMemoryIndex,
   listTopicFiles,
+  listVaultFiles,
+  parseWikilinks,
+  detectIndexDrift,
+  buildVaultIndex,
   buildMemorySection,
   buildMemoryPrompt,
   buildWriteInstructions,
@@ -84,6 +88,136 @@ test("listTopicFiles sorted alphabetically", () => {
   const files = listTopicFiles(dir);
   assert.equal(files[0].name, "alpha.md");
   assert.equal(files[1].name, "zebra.md");
+});
+
+// --- listVaultFiles ---
+
+test("listVaultFiles returns all .md files recursively except index.md", () => {
+  const dir = tmpDir();
+  fs.mkdirSync(path.join(dir, "principles"), { recursive: true });
+  fs.writeFileSync(path.join(dir, "index.md"), "# Index");
+  fs.writeFileSync(path.join(dir, "preferences.md"), "prefs");
+  fs.writeFileSync(path.join(dir, "principles", "prove-it-works.md"), "prove");
+  fs.writeFileSync(path.join(dir, "principles", "fix-root-causes.md"), "fix");
+
+  const files = listVaultFiles(dir);
+  assert.deepEqual(files, [
+    "preferences",
+    "principles/fix-root-causes",
+    "principles/prove-it-works",
+  ]);
+});
+
+test("listVaultFiles returns empty array for missing dir", () => {
+  assert.deepEqual(listVaultFiles("/nonexistent/xyz"), []);
+});
+
+test("listVaultFiles returns empty array when only index.md exists", () => {
+  const dir = tmpDir();
+  fs.writeFileSync(path.join(dir, "index.md"), "# Index");
+  assert.deepEqual(listVaultFiles(dir), []);
+});
+
+test("listVaultFiles ignores non-md files", () => {
+  const dir = tmpDir();
+  fs.writeFileSync(path.join(dir, "notes.txt"), "text");
+  fs.writeFileSync(path.join(dir, "topic.md"), "content");
+  assert.deepEqual(listVaultFiles(dir), ["topic"]);
+});
+
+// --- parseWikilinks ---
+
+test("parseWikilinks extracts wikilink targets", () => {
+  const content = "- [[principles/prove-it-works]]\n- [[preferences]]\n- [[principles/fix-root-causes]]";
+  assert.deepEqual(parseWikilinks(content), [
+    "preferences",
+    "principles/fix-root-causes",
+    "principles/prove-it-works",
+  ]);
+});
+
+test("parseWikilinks returns empty array for no links", () => {
+  assert.deepEqual(parseWikilinks("no links here"), []);
+});
+
+test("parseWikilinks deduplicates", () => {
+  const content = "- [[a]]\n- [[a]]\n- [[b]]";
+  assert.deepEqual(parseWikilinks(content), ["a", "b"]);
+});
+
+test("parseWikilinks handles inline links", () => {
+  const content = "See [[topic-a]] and also [[topic-b]] for details.";
+  assert.deepEqual(parseWikilinks(content), ["topic-a", "topic-b"]);
+});
+
+// --- detectIndexDrift ---
+
+test("detectIndexDrift returns false when index matches files", () => {
+  const dir = tmpDir();
+  fs.mkdirSync(path.join(dir, "principles"), { recursive: true });
+  fs.writeFileSync(path.join(dir, "index.md"), "- [[preferences]]\n- [[principles/prove-it-works]]");
+  fs.writeFileSync(path.join(dir, "preferences.md"), "prefs");
+  fs.writeFileSync(path.join(dir, "principles", "prove-it-works.md"), "prove");
+  assert.equal(detectIndexDrift(dir), false);
+});
+
+test("detectIndexDrift returns true when file added", () => {
+  const dir = tmpDir();
+  fs.writeFileSync(path.join(dir, "index.md"), "- [[preferences]]");
+  fs.writeFileSync(path.join(dir, "preferences.md"), "prefs");
+  fs.writeFileSync(path.join(dir, "new-topic.md"), "new");
+  assert.equal(detectIndexDrift(dir), true);
+});
+
+test("detectIndexDrift returns true when file removed", () => {
+  const dir = tmpDir();
+  fs.writeFileSync(path.join(dir, "index.md"), "- [[preferences]]\n- [[old-topic]]");
+  fs.writeFileSync(path.join(dir, "preferences.md"), "prefs");
+  assert.equal(detectIndexDrift(dir), true);
+});
+
+test("detectIndexDrift returns true when no index.md exists", () => {
+  const dir = tmpDir();
+  fs.writeFileSync(path.join(dir, "topic.md"), "content");
+  assert.equal(detectIndexDrift(dir), true);
+});
+
+test("detectIndexDrift returns false for empty vault", () => {
+  const dir = tmpDir();
+  fs.writeFileSync(path.join(dir, "index.md"), "# Memory");
+  assert.equal(detectIndexDrift(dir), false);
+});
+
+// --- buildVaultIndex ---
+
+test("buildVaultIndex groups files by top-level directory", () => {
+  const dir = tmpDir();
+  fs.mkdirSync(path.join(dir, "principles"), { recursive: true });
+  fs.mkdirSync(path.join(dir, "codebase"), { recursive: true });
+  fs.writeFileSync(path.join(dir, "preferences.md"), "prefs");
+  fs.writeFileSync(path.join(dir, "principles", "prove-it-works.md"), "prove");
+  fs.writeFileSync(path.join(dir, "principles", "fix-root-causes.md"), "fix");
+  fs.writeFileSync(path.join(dir, "codebase", "api.md"), "api");
+
+  const index = buildVaultIndex(dir);
+  assert.match(index, /^# Memory\n/);
+  assert.match(index, /## Codebase\n- \[\[codebase\/api\]\]/);
+  assert.match(index, /## Principles\n- \[\[principles\/fix-root-causes\]\]\n- \[\[principles\/prove-it-works\]\]/);
+  assert.match(index, /## Other\n- \[\[preferences\]\]/);
+});
+
+test("buildVaultIndex handles empty vault", () => {
+  const dir = tmpDir();
+  assert.equal(buildVaultIndex(dir), "# Memory\n");
+});
+
+test("buildVaultIndex puts standalone files under Other", () => {
+  const dir = tmpDir();
+  fs.writeFileSync(path.join(dir, "prefs.md"), "prefs");
+  fs.writeFileSync(path.join(dir, "workflow.md"), "flow");
+  const index = buildVaultIndex(dir);
+  assert.match(index, /## Other\n- \[\[prefs\]\]\n- \[\[workflow\]\]/);
+  assert.ok(!index.includes("## Prefs"));
 });
 
 // --- buildMemorySection ---
