@@ -131,6 +131,36 @@ Update \`${globalDir}/index.md\` and \`${projectDir}/index.md\` for any files ad
 \`\`\``;
 }
 
+export function buildMeditateApplyPrompt(
+  auditReport: string,
+  reviewReport: string,
+  globalDir: string,
+  projectDir: string,
+): string {
+  return `# Meditate Apply Handoff
+
+Read the reports below and prepare concrete vault updates.
+
+## Inputs
+
+### Audit Report
+${auditReport || "(no audit report)"}
+
+### Review Report
+${reviewReport || "(no review report)"}
+
+## Apply workflow
+
+1. Propose concrete edits to memory vault files under \`${globalDir}/\` and \`${projectDir}/\`.
+2. Identify adds/updates/deletes and explain each change briefly.
+3. Ask for approval if there are any destructive changes or uncertain merges.
+4. Apply approved changes directly to vault files.
+5. Update \`${globalDir}/index.md\` and \`${projectDir}/index.md\` if files were added or removed.
+
+Apply approved changes directly and keep edits scoped to findings with clear evidence.
+`;
+}
+
 export function buildRuminatePrompt(
   globalDir: string,
   projectDir: string,

@@ -504,6 +504,64 @@ test("/memory meditate runs subagents via runSubagent dependency", async () => {
   assert.match(notified, /Meditate Summary/);
 });
 
+test("/memory meditate sends post-report apply handoff prompt", async () => {
+  const handlers = new Map<string, Function>();
+  const commands = new Map<string, any>();
+  const root = tmpDir();
+  const projectMem = path.join(root, ".pi", "memories");
+  fs.mkdirSync(projectMem, { recursive: true });
+  fs.writeFileSync(path.join(projectMem, "index.md"), "# Memory\n");
+  fs.writeFileSync(path.join(projectMem, "topic.md"), "content");
+
+  let sent: any = null;
+  const pi = {
+    on(event: string, handler: Function) { handlers.set(event, handler); },
+    registerTool() {},
+    registerCommand(name: string, opts: any) { commands.set(name, opts); },
+    registerShortcut() {},
+    registerFlag() {},
+    getFlag() { return false; },
+    exec: async () => ({ stdout: "", stderr: "", code: 0, killed: false }),
+    sendMessage(message: any) { sent = message; },
+  } as never;
+
+  memoryExtension(pi, {
+    runSubagent: async (agentPath: string) => {
+      if (agentPath.endsWith("auditor.md")) {
+        return {
+          output: "# Audit Report\n\n- outdated\n- redundant\n- low-value",
+          exitCode: 0,
+          stderr: "",
+        };
+      }
+      return {
+        output: "# Review Report\n\n## Synthesis Results\n- link A -> add wikilink",
+        exitCode: 0,
+        stderr: "",
+      };
+    },
+  });
+
+  await handlers.get("session_start")!({}, { cwd: root, ui: { notify() {}, setStatus() {} } });
+
+  await commands.get("memory").handler("meditate", {
+    cwd: root,
+    ui: {
+      notify() {},
+      setStatus() {},
+      editor: async () => "",
+      select: async () => "",
+    },
+  });
+
+  assert.ok(sent);
+  assert.equal(sent.deliverAs, "followUp");
+  assert.equal(sent.triggerTurn, true);
+  assert.match(sent.content, /Audit Report/);
+  assert.match(sent.content, /Review Report/);
+  assert.match(sent.content, /Apply approved changes directly/);
+});
+
 test("/memory ruminate reports when no project sessions exist", async () => {
   const handlers = new Map<string, Function>();
   const commands = new Map<string, any>();

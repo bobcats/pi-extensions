@@ -19,7 +19,7 @@ import {
   type MemoryScope,
 } from "./lib.ts";
 import { getInitState, initVault, migrateV1Vault } from "./init.ts";
-import { buildReflectPrompt, buildRuminatePrompt } from "./prompts.ts";
+import { buildMeditateApplyPrompt, buildReflectPrompt, buildRuminatePrompt } from "./prompts.ts";
 import { synthesizeFindings, formatSynthesisTable } from "./ruminate.ts";
 import { buildVaultSnapshot, runSubagent, parseSessionMessages, batchConversations } from "./subagent.ts";
 
@@ -258,6 +258,13 @@ export default function memoryExtension(
         ].join("\n");
 
         ctx.ui.notify(summary, "info");
+
+        pi.sendMessage({
+          content: buildMeditateApplyPrompt(auditor.output, reviewerOutput, globalDir, projectDir),
+          deliverAs: "followUp",
+          triggerTurn: true,
+        });
+
         fs.rmSync(snapshotPath, { force: true });
         fs.rmSync(auditPath, { force: true });
         fs.rmSync(reviewPath, { force: true });
