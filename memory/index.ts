@@ -18,6 +18,7 @@ import {
   MEMORY_TOPIC_LIMIT,
   type MemoryScope,
 } from "./lib.ts";
+import { getInitState, initVault } from "./init.ts";
 
 export default function memoryExtension(pi: ExtensionAPI) {
   let globalDir = path.join(os.homedir(), ".pi", "memories");
@@ -180,6 +181,50 @@ export default function memoryExtension(pi: ExtensionAPI) {
         memoryEnabled = false;
         updateStatus(ctx);
         ctx.ui.notify("Memory disabled for this session", "info");
+        return;
+      }
+
+      if (trimmed === "init" || trimmed === "init project") {
+        const isProject = trimmed === "init project";
+        const dir = isProject ? projectDir : globalDir;
+        const state = getInitState(dir);
+
+        if (state === "v2") {
+          const files = listVaultFiles(dir);
+          const choice = await ctx.ui.select(
+            `Vault exists: ${files.length} files. What would you like to do?`,
+            [
+              { label: "Add missing starter principles only", value: "add" },
+              { label: "Replace all principles with defaults (keeps other files)", value: "replace" },
+              { label: "Cancel", value: "cancel" },
+            ],
+          );
+          if (choice === "cancel" || choice === undefined) return;
+
+          if (choice === "replace" && !isProject) {
+            fs.rmSync(path.join(dir, "principles"), { recursive: true, force: true });
+            fs.rmSync(path.join(dir, "principles.md"), { force: true });
+          }
+
+          const result = initVault(dir, !isProject);
+          refreshScope(isProject ? "project" : "global");
+          updateStatus(ctx);
+          ctx.ui.notify(
+            isProject
+              ? "Project memory vault updated."
+              : `Global memory vault updated with ${result.principlesInstalled} starter principles.`,
+            "success",
+          );
+          return;
+        }
+
+        const result = initVault(dir, !isProject);
+        refreshScope(isProject ? "project" : "global");
+        updateStatus(ctx);
+        const msg = isProject
+          ? "Project memory vault initialized."
+          : `Global memory vault initialized with ${result.principlesInstalled} starter principles.`;
+        ctx.ui.notify(msg, "success");
         return;
       }
 

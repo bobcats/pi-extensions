@@ -399,3 +399,37 @@ test("tool_call edit skips index rebuild on content-only edit", async () => {
   const after = fs.readFileSync(path.join(projectMem, "index.md"), "utf-8");
   assert.equal(after, before);
 });
+
+test("/memory init project creates vault structure", async () => {
+  const handlers = new Map<string, Function>();
+  const commands = new Map<string, any>();
+  const root = tmpDir();
+  let notified = "";
+
+  const pi = {
+    on(event: string, handler: Function) { handlers.set(event, handler); },
+    registerTool() {},
+    registerCommand(name: string, opts: any) { commands.set(name, opts); },
+    registerShortcut() {},
+    registerFlag() {},
+    getFlag() { return false; },
+    exec: async () => ({ stdout: "", stderr: "", code: 0, killed: false }),
+    sendMessage() {},
+  } as never;
+
+  memoryExtension(pi);
+  await handlers.get("session_start")!({}, { cwd: root, ui: { notify() {}, setStatus() {} } });
+
+  await commands.get("memory").handler("init project", {
+    ui: {
+      notify(msg: string) { notified = msg; },
+      setStatus() {},
+      editor: async () => "",
+      select: async () => "add",
+    },
+  });
+
+  const projectMem = path.join(root, ".pi", "memories");
+  assert.ok(fs.existsSync(path.join(projectMem, "index.md")));
+  assert.match(notified, /initialized|updated/i);
+});
