@@ -54,3 +54,24 @@ export function initVault(vaultDir: string, includePrinciples: boolean): InitRes
 
   return { created: true, principlesInstalled };
 }
+
+export function migrateV1Vault(
+  dir: string,
+  includePrinciples: boolean,
+  mode: "preserve" | "replace",
+): InitResult {
+  if (mode === "preserve") {
+    const memoryPath = path.join(dir, "MEMORY.md");
+    const migratedPath = path.join(dir, "migrated.md");
+    if (fs.existsSync(memoryPath)) {
+      fs.renameSync(memoryPath, migratedPath);
+    }
+  } else {
+    const memoryPath = path.join(dir, "MEMORY.md");
+    if (fs.existsSync(memoryPath)) {
+      fs.unlinkSync(memoryPath);
+    }
+  }
+
+  return initVault(dir, includePrinciples);
+}

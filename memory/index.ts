@@ -18,7 +18,7 @@ import {
   MEMORY_TOPIC_LIMIT,
   type MemoryScope,
 } from "./lib.ts";
-import { getInitState, initVault } from "./init.ts";
+import { getInitState, initVault, migrateV1Vault } from "./init.ts";
 
 export default function memoryExtension(pi: ExtensionAPI) {
   let globalDir = path.join(os.homedir(), ".pi", "memories");
@@ -181,6 +181,30 @@ export default function memoryExtension(pi: ExtensionAPI) {
         memoryEnabled = false;
         updateStatus(ctx);
         ctx.ui.notify("Memory disabled for this session", "info");
+        return;
+      }
+
+      if (trimmed === "v2migrate" || trimmed === "v2migrate project") {
+        const isProject = trimmed === "v2migrate project";
+        const dir = isProject ? projectDir : globalDir;
+        const state = getInitState(dir);
+
+        if (state !== "v1") {
+          ctx.ui.notify("No legacy MEMORY.md found for migration.", "info");
+          return;
+        }
+
+        const choice = await ctx.ui.select("Migrate legacy MEMORY.md to v2 vault", [
+          { label: "Preserve old content as migrated.md (recommended)", value: "preserve" },
+          { label: "Replace with fresh vault", value: "replace" },
+          { label: "Cancel", value: "cancel" },
+        ]);
+        if (choice === "cancel" || choice === undefined) return;
+
+        migrateV1Vault(dir, !isProject, choice as "preserve" | "replace");
+        refreshScope(isProject ? "project" : "global");
+        updateStatus(ctx);
+        ctx.ui.notify("Memory vault migrated to v2.", "success");
         return;
       }
 
