@@ -463,3 +463,73 @@ test("/memory reflect sends follow-up prompt", async () => {
   assert.equal(sent.triggerTurn, true);
   assert.match(sent.content, /## Reflect/);
 });
+
+test("/memory meditate runs subagents via runSubagent dependency", async () => {
+  const handlers = new Map<string, Function>();
+  const commands = new Map<string, any>();
+  const root = tmpDir();
+  const projectMem = path.join(root, ".pi", "memories");
+  fs.mkdirSync(projectMem, { recursive: true });
+  fs.writeFileSync(path.join(projectMem, "index.md"), "# Memory\n");
+  fs.writeFileSync(path.join(projectMem, "topic.md"), "content");
+
+  let notified = "";
+  const pi = {
+    on(event: string, handler: Function) { handlers.set(event, handler); },
+    registerTool() {},
+    registerCommand(name: string, opts: any) { commands.set(name, opts); },
+    registerShortcut() {},
+    registerFlag() {},
+    getFlag() { return false; },
+    exec: async () => ({ stdout: "", stderr: "", code: 0, killed: false }),
+    sendMessage() {},
+  } as never;
+
+  memoryExtension(pi, {
+    runSubagent: async () => ({ output: "# Audit Report\n\n- finding", exitCode: 0, stderr: "" }),
+  });
+
+  await handlers.get("session_start")!({}, { cwd: root, ui: { notify() {}, setStatus() {} } });
+
+  await commands.get("memory").handler("meditate", {
+    cwd: root,
+    ui: {
+      notify(msg: string) { notified = msg; },
+      setStatus() {},
+      editor: async () => "",
+      select: async () => "",
+    },
+  });
+
+  assert.match(notified, /Meditate Summary/);
+});
+
+test("/memory ruminate reports when no project sessions exist", async () => {
+  const handlers = new Map<string, Function>();
+  const commands = new Map<string, any>();
+  const root = tmpDir();
+  let notified = "";
+
+  const pi = {
+    on(event: string, handler: Function) { handlers.set(event, handler); },
+    registerTool() {},
+    registerCommand(name: string, opts: any) { commands.set(name, opts); },
+    registerShortcut() {},
+    registerFlag() {},
+    getFlag() { return false; },
+    exec: async () => ({ stdout: "", stderr: "", code: 0, killed: false }),
+    sendMessage() {},
+  } as never;
+
+  memoryExtension(pi, {
+    runSubagent: async () => ({ output: "", exitCode: 0, stderr: "" }),
+  });
+  await handlers.get("session_start")!({}, { cwd: root, ui: { notify() {}, setStatus() {} } });
+
+  await commands.get("memory").handler("ruminate", {
+    cwd: root,
+    ui: { notify(msg: string) { notified = msg; }, setStatus() {}, editor: async () => "", select: async () => "" },
+  });
+
+  assert.match(notified, /No sessions found for project/);
+});

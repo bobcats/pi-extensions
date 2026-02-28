@@ -19,9 +19,13 @@ import {
   type MemoryScope,
 } from "./lib.ts";
 import { getInitState, initVault, migrateV1Vault } from "./init.ts";
-import { buildReflectPrompt } from "./prompts.ts";
+import { buildReflectPrompt, buildRuminatePrompt } from "./prompts.ts";
+import { buildVaultSnapshot, runSubagent, parseSessionMessages, batchConversations } from "./subagent.ts";
 
-export default function memoryExtension(pi: ExtensionAPI) {
+export default function memoryExtension(
+  pi: ExtensionAPI,
+  deps: { runSubagent: typeof runSubagent } = { runSubagent },
+) {
   let globalDir = path.join(os.homedir(), ".pi", "memories");
   let projectDir = "";
   let globalScope: MemoryScope | null = null;
@@ -167,7 +171,7 @@ export default function memoryExtension(pi: ExtensionAPI) {
   });
 
   pi.registerCommand("memory", {
-    description: "View and manage agent memory (on/off/edit/edit global)",
+    description: "View and manage agent memory (init/migrate/reflect/meditate/ruminate/on/off/edit)",
     handler: async (args: string, ctx: ExtensionCommandContext) => {
       const trimmed = args.trim();
 
@@ -192,6 +196,139 @@ export default function memoryExtension(pi: ExtensionAPI) {
           deliverAs: "followUp",
           triggerTurn: true,
         });
+        return;
+      }
+
+      if (trimmed === "meditate") {
+        const snapshot = [buildVaultSnapshot(globalDir), buildVaultSnapshot(projectDir)]
+          .filter(Boolean)
+          .join("\n\n");
+
+        if (!snapshot.trim()) {
+          ctx.ui.notify("No vault content found to audit.", "info");
+          return;
+        }
+
+        const ts = Date.now();
+        const snapshotPath = path.join(os.tmpdir(), `memory-vault-snapshot-${ts}.md`);
+        const auditPath = path.join(os.tmpdir(), `memory-audit-report-${ts}.md`);
+        const reviewPath = path.join(os.tmpdir(), `memory-review-report-${ts}.md`);
+        const auditorAgentPath = path.join(import.meta.dirname, "agents", "auditor.md");
+        const reviewerAgentPath = path.join(import.meta.dirname, "agents", "reviewer.md");
+        fs.writeFileSync(snapshotPath, snapshot);
+
+        const auditor = await deps.runSubagent(
+          auditorAgentPath,
+          `Read the vault snapshot at ${snapshotPath} and return your audit report in markdown.`,
+          ctx.cwd,
+        );
+
+        if (auditor.exitCode !== 0) {
+          ctx.ui.notify(`Meditate failed (auditor): ${auditor.stderr || "unknown error"}`, "error");
+          fs.rmSync(snapshotPath, { force: true });
+          return;
+        }
+
+        fs.writeFileSync(auditPath, auditor.output || "# Audit Report\n\nNo findings.");
+        const actionable = (auditor.output.match(/^-\s+/gm) ?? []).length;
+
+        let reviewerOutput = "";
+        if (actionable >= 3) {
+          const reviewer = await deps.runSubagent(
+            reviewerAgentPath,
+            `Read the vault snapshot at ${snapshotPath} and the audit report at ${auditPath}. Return your review report in markdown.`,
+            ctx.cwd,
+          );
+          if (reviewer.exitCode !== 0) {
+            ctx.ui.notify(`Meditate partial (reviewer failed): ${reviewer.stderr || "unknown error"}`, "warning");
+          } else {
+            reviewerOutput = reviewer.output;
+            fs.writeFileSync(reviewPath, reviewerOutput || "# Review Report\n\nNo additional findings.");
+          }
+        }
+
+        const summary = [
+          "## Meditate Summary",
+          `- Auditor findings: ${actionable}`,
+          `- Reviewer run: ${actionable >= 3 ? (reviewerOutput ? "yes" : "failed") : "skipped"}`,
+          "",
+          auditor.output ? `### Audit\n${auditor.output}` : "",
+          reviewerOutput ? `\n### Review\n${reviewerOutput}` : "",
+        ].join("\n");
+
+        ctx.ui.notify(summary, "info");
+        fs.rmSync(snapshotPath, { force: true });
+        fs.rmSync(auditPath, { force: true });
+        fs.rmSync(reviewPath, { force: true });
+        return;
+      }
+
+      if (trimmed === "ruminate") {
+        const minerAgentPath = path.join(import.meta.dirname, "agents", "miner.md");
+        const sessionsRoot = path.join(os.homedir(), ".pi", "agent", "sessions");
+        const encodedCwd = "--" + ctx.cwd.replace(/\//g, "--") + "--";
+        const projectSessionsDir = path.join(sessionsRoot, encodedCwd);
+
+        const promptHint = buildRuminatePrompt(globalDir, projectDir, ctx.cwd, minerAgentPath);
+        if (!fs.existsSync(projectSessionsDir)) {
+          ctx.ui.notify(`No sessions found for project.\n\n${promptHint}`, "info");
+          return;
+        }
+
+        const jsonlPaths: string[] = [];
+        const walk = (dir: string) => {
+          for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+            const full = path.join(dir, entry.name);
+            if (entry.isDirectory()) walk(full);
+            if (entry.isFile() && entry.name.endsWith(".jsonl")) jsonlPaths.push(full);
+          }
+        };
+        walk(projectSessionsDir);
+
+        const conversations: string[] = [];
+        for (const filePath of jsonlPaths.sort()) {
+          const raw = fs.readFileSync(filePath, "utf-8");
+          const msgs = parseSessionMessages(raw);
+          if (msgs.length === 0) continue;
+          conversations.push(msgs.map((m) => `${m.role}: ${m.text}`).join("\n\n"));
+        }
+
+        if (conversations.length === 0) {
+          ctx.ui.notify("No parseable conversation messages found in project sessions.", "info");
+          return;
+        }
+
+        const numBatches = Math.max(2, Math.min(10, Math.ceil(conversations.length / 20)));
+        const batches = batchConversations(conversations, numBatches).filter((b) => b.length > 0);
+        const existingTopics = [...new Set([...listVaultFiles(globalDir), ...listVaultFiles(projectDir)])].sort();
+
+        const ts = Date.now();
+        const tempPaths: string[] = [];
+        const findings: string[] = [];
+
+        for (let i = 0; i < batches.length; i++) {
+          const batchPath = path.join(os.tmpdir(), `memory-ruminate-batch-${ts}-${i}.md`);
+          const topicsPath = path.join(os.tmpdir(), `memory-ruminate-topics-${ts}-${i}.md`);
+          fs.writeFileSync(batchPath, batches[i].join("\n\n---\n\n"));
+          fs.writeFileSync(topicsPath, existingTopics.join("\n"));
+          tempPaths.push(batchPath, topicsPath);
+
+          const result = await deps.runSubagent(
+            minerAgentPath,
+            `Read conversations at ${batchPath} and existing topics at ${topicsPath}. Return high-signal findings in markdown.`,
+            ctx.cwd,
+          );
+          if (result.exitCode === 0 && result.output.trim()) {
+            findings.push(`## Batch ${i + 1}\n\n${result.output}`);
+          }
+        }
+
+        for (const p of tempPaths) fs.rmSync(p, { force: true });
+
+        const summary = findings.length > 0
+          ? `## Ruminate Summary\n\nProcessed ${conversations.length} conversations in ${batches.length} batches.\n\n${findings.join("\n\n")}`
+          : `## Ruminate Summary\n\nProcessed ${conversations.length} conversations in ${batches.length} batches. No high-signal findings returned.`;
+        ctx.ui.notify(summary, "info");
         return;
       }
 
@@ -284,17 +421,12 @@ export default function memoryExtension(pi: ExtensionAPI) {
       globalScope = loadScope(globalDir);
       projectScope = loadScope(projectDir);
       updateStatus(ctx);
+
+      const globalState = getInitState(globalDir);
+      const projectState = getInitState(projectDir);
       const display = formatMemoryDisplay(
-        {
-          dir: globalDir,
-          content: globalScope?.indexContent ?? null,
-          topicFiles: Array.from({ length: globalScope?.fileCount ?? 0 }, (_, i) => ({ name: `file-${i + 1}.md`, lines: 0 })),
-        },
-        {
-          dir: projectDir,
-          content: projectScope?.indexContent ?? null,
-          topicFiles: Array.from({ length: projectScope?.fileCount ?? 0 }, (_, i) => ({ name: `file-${i + 1}.md`, lines: 0 })),
-        },
+        { dir: globalDir, state: globalState, fileCount: globalScope?.fileCount ?? 0 },
+        { dir: projectDir, state: projectState, fileCount: projectScope?.fileCount ?? 0 },
         memoryEnabled,
       );
       ctx.ui.notify(display, "info");
