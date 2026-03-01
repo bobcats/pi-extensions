@@ -253,3 +253,27 @@ Remove temporary extraction files.
 - **Shut down agents** when analysis is complete. Don't leave them idle.
 `;
 }
+
+export function buildRuminateApplyPrompt(
+  synthesisTable: string,
+  globalDir: string,
+  projectDir: string,
+): string {
+  return `# Ruminate Findings
+
+Review the findings below from mining past conversations. Present them to the user and apply approved changes.
+
+## Findings
+
+${synthesisTable || "(no findings)"}
+
+## Apply workflow
+
+1. Present the findings table to the user. Be honest about which are one-offs vs. recurring patterns.
+2. Ask which findings the user wants to persist.
+3. Route each approved finding:
+   - **Memory vault**: Create or update files under \`${globalDir}/\` or \`${projectDir}/\`. One topic per file, use \`[[wikilinks]]\`, prefer updating existing notes over creating new ones.
+   - **Skill files**: If a finding is about how a specific skill works, update the skill's SKILL.md directly. Read the skill first to avoid duplication.
+4. Update \`${globalDir}/index.md\` and \`${projectDir}/index.md\` if files were added or removed.
+`;
+}

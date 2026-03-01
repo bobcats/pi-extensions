@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { extractBulletFindings, synthesizeFindings, formatSynthesisTable } from "./ruminate.ts";
+import { buildRuminateApplyPrompt } from "./prompts.ts";
 
 test("synthesizeFindings dedupes identical findings across batches and counts frequency", () => {
   const minerOutputs = [
@@ -53,4 +54,14 @@ test("formatSynthesisTable renders finding, frequency/evidence, proposed action 
   assert.match(table, /Keep commits scoped to one task/);
   assert.match(table, /3 \(batch 1; batch 2; batch 3\)/);
   assert.match(table, /Review and, if approved, persist this as a memory vault update\./);
+});
+
+test("buildRuminateApplyPrompt includes synthesis table and apply instructions", () => {
+  const table = "| finding | frequency/evidence | proposed action |\n| --- | --- | --- |\n| Run tests first | 3 (batch 1; batch 2; batch 3) | Review |";
+  const prompt = buildRuminateApplyPrompt(table, "/global", "/project");
+  
+  assert.match(prompt, /Run tests first/);
+  assert.match(prompt, /\/global/);
+  assert.match(prompt, /\/project/);
+  assert.match(prompt, /approve/i);
 });
