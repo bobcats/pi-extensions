@@ -343,11 +343,20 @@ export default function memoryExtension(
           widget.setStep(`Miner ${i + 1}`, "running");
         }
 
+        const activityPanel = openActivityOverlay(ctx, "Miner 1");
+
         const tasks = extraction.batches.map(async (manifestPath, i) => {
           const result = await deps.runSubagent(
             minerAgentPath,
             `Read the batch manifest at ${manifestPath} — it lists conversation file paths, one per line. Read each conversation file. Also read existing topics at ${topicsPath}. Return high-signal findings in markdown.`,
             ctx.cwd,
+            undefined,
+            (event) => {
+              if (event.type === "text_delta") {
+                activityPanel?.overlay.setAgent(`Miner ${i + 1}`);
+                activityPanel?.overlay.appendText(event.text);
+              }
+            },
           );
 
           if (result.exitCode !== 0 || !result.output.trim()) {
@@ -372,6 +381,7 @@ export default function memoryExtension(
         const synthesisRows = synthesizeFindings(minerOutputs);
         const synthesisTable = formatSynthesisTable(synthesisRows);
 
+        activityPanel?.hide();
         widget.clear();
 
         if (synthesisRows.length === 0) {
