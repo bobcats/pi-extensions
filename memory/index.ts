@@ -211,12 +211,7 @@ export default function memoryExtension(
 
       if (trimmed === "reflect") {
         const prompt = buildReflectPrompt(globalDir, projectDir);
-        ctx.ui.notify("Reflect prompt sent — the agent will capture session learnings.", "info");
-        pi.sendMessage({
-          content: prompt,
-          deliverAs: "followUp",
-          triggerTurn: true,
-        });
+        pi.sendUserMessage(prompt);
         return;
       }
 

@@ -533,11 +533,11 @@ test("/memory v2migrate project uses string select options", async () => {
   assert.ok(fs.existsSync(path.join(projectMem, "migrated.md")));
 });
 
-test("/memory reflect sends follow-up prompt", async () => {
+test("/memory reflect sends user message with reflect prompt", async () => {
   const handlers = new Map<string, Function>();
   const commands = new Map<string, any>();
   const root = tmpDir();
-  let sent: any = null;
+  let sentUserMessage: any = null;
 
   const pi = {
     on(event: string, handler: Function) { handlers.set(event, handler); },
@@ -547,22 +547,19 @@ test("/memory reflect sends follow-up prompt", async () => {
     registerFlag() {},
     getFlag() { return false; },
     exec: async () => ({ stdout: "", stderr: "", code: 0, killed: false }),
-    sendMessage(msg: any) { sent = msg; },
+    sendMessage() {},
+    sendUserMessage(msg: any) { sentUserMessage = msg; },
   } as never;
 
   memoryExtension(pi);
   await handlers.get("session_start")!({}, { cwd: root, ui: { notify() {}, setStatus() {} } });
 
-  let notified = "";
   await commands.get("memory").handler("reflect", {
-    ui: { notify(msg: string) { notified = msg; }, setStatus() {}, editor: async () => "", select: async () => "" },
+    ui: { notify() {}, setStatus() {}, editor: async () => "", select: async () => "" },
   });
 
-  assert.match(notified, /Reflect/);
-  assert.ok(sent);
-  assert.equal(sent.deliverAs, "followUp");
-  assert.equal(sent.triggerTurn, true);
-  assert.match(sent.content, /## Reflect/);
+  assert.ok(sentUserMessage);
+  assert.match(sentUserMessage, /## Reflect/);
 });
 
 test("/memory meditate runs subagents via runSubagent dependency", async () => {
