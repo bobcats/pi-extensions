@@ -572,6 +572,7 @@ test("/memory meditate runs subagents via runSubagent dependency", async () => {
   fs.writeFileSync(path.join(projectMem, "topic.md"), "content");
 
   let notified = "";
+  let widgetCalls: { key: string; lines: string[] | undefined }[] = [];
   const pi = {
     on(event: string, handler: Function) { handlers.set(event, handler); },
     registerTool() {},
@@ -594,12 +595,15 @@ test("/memory meditate runs subagents via runSubagent dependency", async () => {
     ui: {
       notify(msg: string) { notified = msg; },
       setStatus() {},
+      setWidget(key: string, lines: string[] | undefined) { widgetCalls.push({ key, lines: lines ? [...lines] : undefined }); },
       editor: async () => "",
       select: async () => "",
     },
   });
 
   assert.match(notified, /Meditate Summary/);
+  assert.ok(widgetCalls.some((c) => c.key === "meditate" && c.lines?.some((l: string) => l.includes("Auditor"))));
+  assert.ok(widgetCalls.some((c) => c.key === "meditate" && c.lines === undefined));
 });
 
 test("/memory meditate sends post-report apply handoff prompt", async () => {
@@ -647,6 +651,7 @@ test("/memory meditate sends post-report apply handoff prompt", async () => {
     ui: {
       notify() {},
       setStatus() {},
+      setWidget() {},
       editor: async () => "",
       select: async () => "",
     },

@@ -21,6 +21,7 @@ import {
 } from "./lib.ts";
 import { getInitState, initVault, migrateV1Vault } from "./init.ts";
 import { buildMeditateApplyPrompt, buildReflectPrompt, buildRuminatePrompt } from "./prompts.ts";
+import { ProgressWidget } from "./widget.ts";
 import { synthesizeFindings, formatSynthesisTable } from "./ruminate.ts";
 import { buildVaultSnapshot, runSubagent, parseSessionMessages, batchConversations, encodeProjectSessionPath } from "./subagent.ts";
 
@@ -188,6 +189,9 @@ export default function memoryExtension(
         const reviewerAgentPath = path.join(import.meta.dirname, "agents", "reviewer.md");
         fs.writeFileSync(snapshotPath, snapshot);
 
+        const widget = new ProgressWidget(ctx.ui, "meditate");
+        widget.setStep("Auditor", "running");
+
         const auditor = await deps.runSubagent(
           auditorAgentPath,
           `Read the vault snapshot at ${snapshotPath} and return your audit report in markdown.`,
@@ -195,6 +199,8 @@ export default function memoryExtension(
         );
 
         if (auditor.exitCode !== 0) {
+          widget.setStep("Auditor", "error");
+          widget.clear();
           ctx.ui.notify(`Meditate failed (auditor): ${auditor.stderr || "unknown error"}`, "error");
           fs.rmSync(snapshotPath, { force: true });
           return;
@@ -202,18 +208,22 @@ export default function memoryExtension(
 
         fs.writeFileSync(auditPath, auditor.output || "# Audit Report\n\nNo findings.");
         const actionable = (auditor.output.match(/^-\s+/gm) ?? []).length;
+        widget.setStep("Auditor", "done", `${actionable} findings`);
 
         let reviewerOutput = "";
         if (actionable >= 3) {
+          widget.setStep("Reviewer", "running");
           const reviewer = await deps.runSubagent(
             reviewerAgentPath,
             `Read the vault snapshot at ${snapshotPath} and the audit report at ${auditPath}. Return your review report in markdown.`,
             ctx.cwd,
           );
           if (reviewer.exitCode !== 0) {
+            widget.setStep("Reviewer", "error");
             ctx.ui.notify(`Meditate partial (reviewer failed): ${reviewer.stderr || "unknown error"}`, "warning");
           } else {
             reviewerOutput = reviewer.output;
+            widget.setStep("Reviewer", "done");
             fs.writeFileSync(reviewPath, reviewerOutput || "# Review Report\n\nNo additional findings.");
           }
         }
@@ -228,6 +238,7 @@ export default function memoryExtension(
         ].join("\n");
 
         ctx.ui.notify(summary, "info");
+        widget.clear();
 
         pi.sendMessage({
           content: buildMeditateApplyPrompt(auditor.output, reviewerOutput, globalDir, projectDir),
