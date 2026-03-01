@@ -71,17 +71,17 @@ export default function memoryExtension(
     projectDir = path.join(ctx.cwd, ".pi", "memories");
     globalScope = loadScope(globalDir);
     projectScope = loadScope(projectDir);
-    lastMtimeFingerprint = mtimeFingerprint(globalDir) + "||" + mtimeFingerprint(projectDir);
     updateStatus(ctx);
-    startPolling();
-  });
-
-  pi.on("session_shutdown", async () => {
-    stopPolling();
   });
 
   pi.on("before_agent_start", async (event) => {
     if (!memoryEnabled) return;
+
+    rebuildIndexIfDrift("global");
+    rebuildIndexIfDrift("project");
+    globalScope = loadScope(globalDir);
+    projectScope = loadScope(projectDir);
+    if (lastCtx) updateStatus(lastCtx);
 
     const memoryPrompt = buildMemoryPrompt(globalScope, projectScope);
     const writeInstructions = buildWriteInstructions(globalDir, projectDir);
@@ -92,51 +92,6 @@ export default function memoryExtension(
       systemPrompt: event.systemPrompt + (memoryPrompt || "") + "\n\n" + writeInstructions,
     };
   });
-
-  let pollInterval: ReturnType<typeof setInterval> | null = null;
-  let lastMtimeFingerprint = "";
-
-  function mtimeFingerprint(dir: string): string {
-    try {
-      const files = listVaultFiles(dir).map((f) => `${f}.md`);
-      const entries = [...files, "index.md"].sort();
-      return entries
-        .map((f) => {
-          try {
-            return `${f}:${fs.statSync(path.join(dir, f)).mtimeMs}`;
-          } catch {
-            return `${f}:missing`;
-          }
-        })
-        .join(",");
-    } catch {
-      return "";
-    }
-  }
-
-  function startPolling() {
-    if (pollInterval) return;
-    const interval = setInterval(() => {
-      const fingerprint = mtimeFingerprint(globalDir) + "||" + mtimeFingerprint(projectDir);
-      if (fingerprint === lastMtimeFingerprint) return;
-      lastMtimeFingerprint = fingerprint;
-
-      rebuildIndexIfDrift("global");
-      rebuildIndexIfDrift("project");
-      globalScope = loadScope(globalDir);
-      projectScope = loadScope(projectDir);
-      if (lastCtx) updateStatus(lastCtx);
-    }, 5000);
-    interval.unref();
-    pollInterval = interval;
-  }
-
-  function stopPolling() {
-    if (pollInterval) {
-      clearInterval(pollInterval);
-      pollInterval = null;
-    }
-  }
 
   pi.on("tool_call", async (event) => {
     if (!memoryEnabled) return undefined;
