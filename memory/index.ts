@@ -2,6 +2,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import type { ExtensionAPI, ExtensionContext, ExtensionCommandContext } from "@mariozechner/pi-coding-agent";
+import type { AutocompleteItem } from "@mariozechner/pi-tui";
 import {
   readVaultIndex,
   listVaultFiles,
@@ -171,8 +172,26 @@ export default function memoryExtension(
     return undefined;
   });
 
+  const MEMORY_SUBCOMMANDS: AutocompleteItem[] = [
+    { value: "reflect",               label: "reflect",               description: "Capture learnings from current session" },
+    { value: "meditate",              label: "meditate",              description: "Audit and evolve the vault" },
+    { value: "ruminate",              label: "ruminate",              description: "Mine past sessions for patterns" },
+    { value: "on",                    label: "on",                    description: "Enable memory for this session" },
+    { value: "off",                   label: "off",                   description: "Disable memory for this session" },
+    { value: "edit",                  label: "edit",                  description: "Edit project index.md" },
+    { value: "edit global",           label: "edit global",           description: "Edit global index.md" },
+    { value: "init",                  label: "init",                  description: "Initialize global vault with starter principles" },
+    { value: "init project",          label: "init project",          description: "Initialize project vault (no principles)" },
+    { value: "v2migrate",             label: "v2migrate",             description: "Migrate legacy global MEMORY.md to v2" },
+    { value: "v2migrate project",     label: "v2migrate project",     description: "Migrate legacy project MEMORY.md to v2" },
+  ];
+
   pi.registerCommand("memory", {
     description: "View and manage agent memory (init/migrate/reflect/meditate/ruminate/on/off/edit)",
+    getArgumentCompletions: (prefix: string): AutocompleteItem[] | null => {
+      const filtered = MEMORY_SUBCOMMANDS.filter((c) => c.value.startsWith(prefix));
+      return filtered.length > 0 ? filtered : null;
+    },
     handler: async (args: string, ctx: ExtensionCommandContext) => {
       const trimmed = args.trim();
 
@@ -358,14 +377,18 @@ export default function memoryExtension(
           return;
         }
 
+        const preserveLabel = "Preserve old content as migrated.md (recommended)";
+        const replaceLabel = "Replace with fresh vault";
+        const cancelLabel = "Cancel";
         const choice = await ctx.ui.select("Migrate legacy MEMORY.md to v2 vault", [
-          { label: "Preserve old content as migrated.md (recommended)", value: "preserve" },
-          { label: "Replace with fresh vault", value: "replace" },
-          { label: "Cancel", value: "cancel" },
+          preserveLabel,
+          replaceLabel,
+          cancelLabel,
         ]);
-        if (choice === "cancel" || choice === undefined) return;
+        if (choice === cancelLabel || choice === undefined) return;
 
-        migrateV1Vault(dir, !isProject, choice as "preserve" | "replace");
+        const mode: "preserve" | "replace" = choice === replaceLabel ? "replace" : "preserve";
+        migrateV1Vault(dir, !isProject, mode);
         refreshScope(isProject ? "project" : "global");
         updateStatus(ctx);
         ctx.ui.notify("Memory vault migrated to v2.", "success");
@@ -379,17 +402,16 @@ export default function memoryExtension(
 
         if (state === "v2") {
           const files = listVaultFiles(dir);
+          const addLabel = "Add missing starter principles only";
+          const replaceLabel = "Replace all principles with defaults (keeps other files)";
+          const cancelLabel = "Cancel";
           const choice = await ctx.ui.select(
             `Vault exists: ${files.length} files. What would you like to do?`,
-            [
-              { label: "Add missing starter principles only", value: "add" },
-              { label: "Replace all principles with defaults (keeps other files)", value: "replace" },
-              { label: "Cancel", value: "cancel" },
-            ],
+            [addLabel, replaceLabel, cancelLabel],
           );
-          if (choice === "cancel" || choice === undefined) return;
+          if (choice === cancelLabel || choice === undefined) return;
 
-          if (choice === "replace" && !isProject) {
+          if (choice === replaceLabel && !isProject) {
             fs.rmSync(path.join(dir, "principles"), { recursive: true, force: true });
             fs.rmSync(path.join(dir, "principles.md"), { force: true });
           }

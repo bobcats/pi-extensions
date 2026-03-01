@@ -224,6 +224,63 @@ test("registers /memory command", () => {
   assert.ok(commands.get("memory").description);
 });
 
+test("/memory getArgumentCompletions returns all subcommands for empty prefix", () => {
+  const commands = new Map<string, any>();
+
+  const pi = {
+    on() {},
+    registerTool() {},
+    registerCommand(name: string, opts: any) { commands.set(name, opts); },
+    registerShortcut() {},
+    registerFlag() {},
+    getFlag() { return false; },
+    exec: async () => ({ stdout: "", stderr: "", code: 0, killed: false }),
+    sendMessage() {},
+  } as never;
+
+  memoryExtension(pi);
+  const completions = commands.get("memory").getArgumentCompletions("");
+  assert.ok(Array.isArray(completions));
+  assert.ok(completions.length === 11);
+  assert.ok(completions.every((c: any) => typeof c.value === "string" && typeof c.label === "string"));
+  const values = completions.map((c: any) => c.value);
+  assert.ok(values.includes("reflect"));
+  assert.ok(values.includes("meditate"));
+  assert.ok(values.includes("ruminate"));
+  assert.ok(values.includes("edit global"));
+  assert.ok(values.includes("init project"));
+  assert.ok(values.includes("v2migrate project"));
+});
+
+test("/memory getArgumentCompletions filters by prefix", () => {
+  const commands = new Map<string, any>();
+
+  const pi = {
+    on() {},
+    registerTool() {},
+    registerCommand(name: string, opts: any) { commands.set(name, opts); },
+    registerShortcut() {},
+    registerFlag() {},
+    getFlag() { return false; },
+    exec: async () => ({ stdout: "", stderr: "", code: 0, killed: false }),
+    sendMessage() {},
+  } as never;
+
+  memoryExtension(pi);
+  const fn = commands.get("memory").getArgumentCompletions;
+
+  const edits = fn("ed");
+  assert.ok(Array.isArray(edits));
+  assert.equal(edits.map((c: any) => c.value).sort().join(","), "edit,edit global");
+
+  const inits = fn("init");
+  assert.ok(Array.isArray(inits));
+  assert.equal(inits.map((c: any) => c.value).sort().join(","), "init,init project");
+
+  const none = fn("xyz");
+  assert.equal(none, null);
+});
+
 test("/memory command shows display when called with no args", async () => {
   const handlers = new Map<string, Function>();
   const commands = new Map<string, any>();
@@ -433,6 +490,47 @@ test("/memory init project creates vault structure", async () => {
   const projectMem = path.join(root, ".pi", "memories");
   assert.ok(fs.existsSync(path.join(projectMem, "index.md")));
   assert.match(notified, /initialized|updated/i);
+});
+
+test("/memory v2migrate project uses string select options", async () => {
+  const handlers = new Map<string, Function>();
+  const commands = new Map<string, any>();
+  const root = tmpDir();
+  const projectMem = path.join(root, ".pi", "memories");
+  fs.mkdirSync(projectMem, { recursive: true });
+  fs.writeFileSync(path.join(projectMem, "MEMORY.md"), "legacy content");
+
+  let selectOptions: unknown[] | undefined;
+
+  const pi = {
+    on(event: string, handler: Function) { handlers.set(event, handler); },
+    registerTool() {},
+    registerCommand(name: string, opts: any) { commands.set(name, opts); },
+    registerShortcut() {},
+    registerFlag() {},
+    getFlag() { return false; },
+    exec: async () => ({ stdout: "", stderr: "", code: 0, killed: false }),
+    sendMessage() {},
+  } as never;
+
+  memoryExtension(pi);
+  await handlers.get("session_start")!({}, { cwd: root, ui: { notify() {}, setStatus() {} } });
+
+  await commands.get("memory").handler("v2migrate project", {
+    ui: {
+      notify() {},
+      setStatus() {},
+      editor: async () => "",
+      select: async (_prompt: string, options: unknown[]) => {
+        selectOptions = options;
+        return "Preserve old content as migrated.md (recommended)";
+      },
+    },
+  });
+
+  assert.ok(Array.isArray(selectOptions));
+  assert.ok(selectOptions!.every((option) => typeof option === "string"));
+  assert.ok(fs.existsSync(path.join(projectMem, "migrated.md")));
 });
 
 test("/memory reflect sends follow-up prompt", async () => {
