@@ -15,7 +15,8 @@ test("ProgressWidget.setStep updates lines and calls setWidget", () => {
   
   assert.equal(widgetCalls.length, 1);
   assert.equal(widgetCalls[0].key, "test-op");
-  assert.ok(widgetCalls[0].lines!.some((l: string) => l.includes("auditor")));
+  assert.ok(widgetCalls[0].lines!.some((l: string) => l.includes("auditor") && l.includes("⏳")));
+  widget.clear();
 });
 
 test("ProgressWidget.setStep tracks multiple agents", () => {
@@ -34,6 +35,7 @@ test("ProgressWidget.setStep tracks multiple agents", () => {
   const last = lastLines[lastLines.length - 1];
   assert.ok(last.some((l: string) => l.includes("miner 1") && l.includes("5 findings")));
   assert.ok(last.some((l: string) => l.includes("miner 2") && l.includes("⏳")));
+  widget.clear();
 });
 
 test("ProgressWidget.clear calls setWidget with undefined", () => {
@@ -67,4 +69,47 @@ test("ProgressWidget.setHeader shows header line above steps", () => {
 
   assert.ok(lastLines[0].includes("47 conversations"));
   assert.ok(lastLines.length >= 2);
+  widget.clear();
+});
+
+test("ProgressWidget running steps show elapsed time", () => {
+  let lastLines: string[] = [];
+  const ui = {
+    setWidget(_key: string, lines: string[] | undefined) {
+      if (lines) lastLines = [...lines];
+    },
+  };
+
+  const widget = new ProgressWidget(ui as any, "test-op");
+  widget.setStep("auditor", "running");
+
+  // Initial render should show elapsed time (0s)
+  assert.ok(lastLines.some((l: string) => l.includes("0s")));
+  widget.clear();
+});
+
+test("ProgressWidget stops timer when no steps are running", () => {
+  const ui = { setWidget() {} };
+
+  const widget = new ProgressWidget(ui as any, "test-op");
+  widget.setStep("auditor", "running");
+  widget.setStep("auditor", "done");
+
+  // No assertion needed — if timer leaks, test runner would hang.
+  // The fact that this test completes proves the timer stopped.
+});
+
+test("ProgressWidget error step shows detail instead of elapsed time", () => {
+  let lastLines: string[] = [];
+  const ui = {
+    setWidget(_key: string, lines: string[] | undefined) {
+      if (lines) lastLines = [...lines];
+    },
+  };
+
+  const widget = new ProgressWidget(ui as any, "test-op");
+  widget.setStep("auditor", "error", "timed out");
+
+  assert.ok(lastLines.some((l: string) => l.includes("✗") && l.includes("timed out")));
+  assert.ok(lastLines.every((l: string) => !l.includes("0s")));
 });
