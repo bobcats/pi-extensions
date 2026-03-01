@@ -24,6 +24,42 @@ import { buildMeditateApplyPrompt, buildReflectPrompt, buildRuminatePrompt, buil
 import { ProgressWidget } from "./widget.ts";
 import { synthesizeFindings, formatSynthesisTable } from "./ruminate.ts";
 import { buildVaultSnapshot, runSubagent, extractConversations, encodeProjectSessionPath } from "./subagent.ts";
+import { ActivityOverlay } from "./activity-overlay.ts";
+import type { StreamEvent } from "./subagent.ts";
+
+function openActivityOverlay(
+  ctx: ExtensionCommandContext,
+  initialAgent: string,
+): { overlay: ActivityOverlay; hide: () => void } | null {
+  if (!ctx.hasUI) return null;
+
+  const overlay = new ActivityOverlay();
+  let handle: { hide: () => void } | undefined;
+
+  ctx.ui.custom(
+    () => {
+      overlay.setAgent(initialAgent);
+      return {
+        render: (w: number) => overlay.render(w),
+        invalidate: () => overlay.invalidate(),
+        handleInput: () => {},
+      };
+    },
+    {
+      overlay: true,
+      overlayOptions: {
+        anchor: "right-center",
+        width: "40%",
+        minWidth: 30,
+        maxHeight: "80%",
+        visible: (tw: number) => tw >= 100,
+      },
+      onHandle: (h) => { handle = h; },
+    },
+  );
+
+  return { overlay, hide: () => handle?.hide() };
+}
 
 export default function memoryExtension(
   pi: ExtensionAPI,
@@ -192,15 +228,24 @@ export default function memoryExtension(
         const widget = new ProgressWidget(ctx.ui, "meditate");
         widget.setStep("Auditor", "running");
 
+        const activityPanel = openActivityOverlay(ctx, "Auditor");
+
         const auditor = await deps.runSubagent(
           auditorAgentPath,
           `Read the vault snapshot at ${snapshotPath} and return your audit report in markdown.`,
           ctx.cwd,
+          undefined,
+          (event) => {
+            if (event.type === "text_delta") {
+              activityPanel?.overlay.appendText(event.text);
+            }
+          },
         );
 
         if (auditor.exitCode !== 0 || !auditor.output.trim()) {
           const reason = auditor.stderr || (auditor.output.trim() ? "unknown error" : "no output");
           widget.setStep("Auditor", "error", `${reason.split("\n")[0].slice(0, 80)} — log: ${auditor.logFile}`);
+          activityPanel?.hide();
           ctx.ui.notify(`Meditate failed (auditor): ${reason}\nLog: ${auditor.logFile}`, "error");
           fs.rmSync(snapshotPath, { force: true });
           return;
@@ -213,10 +258,17 @@ export default function memoryExtension(
         let reviewerOutput = "";
         if (actionable >= 3) {
           widget.setStep("Reviewer", "running");
+          activityPanel?.overlay.setAgent("Reviewer");
           const reviewer = await deps.runSubagent(
             reviewerAgentPath,
             `Read the vault snapshot at ${snapshotPath} and the audit report at ${auditPath}. Return your review report in markdown.`,
             ctx.cwd,
+            undefined,
+            (event) => {
+              if (event.type === "text_delta") {
+                activityPanel?.overlay.appendText(event.text);
+              }
+            },
           );
           if (reviewer.exitCode !== 0) {
             widget.setStep("Reviewer", "error", `log: ${reviewer.logFile}`);
@@ -238,6 +290,7 @@ export default function memoryExtension(
         ].join("\n");
 
         ctx.ui.notify(summary, "info");
+        activityPanel?.hide();
         widget.clear();
 
         pi.sendMessage({
