@@ -291,6 +291,12 @@ export default function memoryExtension(
         const batches = batchConversations(conversations, numBatches).filter((b) => b.length > 0);
         const existingTopics = [...new Set([...listVaultFiles(globalDir), ...listVaultFiles(projectDir)])].sort();
 
+        const widget = new ProgressWidget(ctx.ui, "ruminate");
+        widget.setHeader(`Found ${conversations.length} conversations in ${batches.length} batches`);
+        for (let i = 0; i < batches.length; i++) {
+          widget.setStep(`Miner ${i + 1}`, "running");
+        }
+
         const ts = Date.now();
         const tempPaths: string[] = [];
 
@@ -308,8 +314,12 @@ export default function memoryExtension(
           );
 
           if (result.exitCode !== 0 || !result.output.trim()) {
+            widget.setStep(`Miner ${i + 1}`, "error");
             return null;
           }
+
+          const findings = (result.output.match(/^-\s+/gm) ?? []).length;
+          widget.setStep(`Miner ${i + 1}`, "done", `${findings} findings`);
 
           return { index: i, output: result.output };
         });
@@ -323,6 +333,8 @@ export default function memoryExtension(
 
         const synthesisRows = synthesizeFindings(minerOutputs);
         const synthesisTable = formatSynthesisTable(synthesisRows);
+
+        widget.clear();
 
         const summary = `## Ruminate Summary\n\nProcessed ${conversations.length} conversations in ${batches.length} batches.\n\n${synthesisTable}`;
         ctx.ui.notify(summary, "info");

@@ -740,12 +740,23 @@ test("/memory ruminate launches miner subagents in parallel", async () => {
     },
   });
 
+  let widgetCalls: { key: string; lines: string[] | undefined }[] = [];
+
   await handlers.get("session_start")!({}, { cwd: root, ui: { notify() {}, setStatus() {} } });
   await commands.get("memory").handler("ruminate", {
     cwd: root,
-    ui: { notify() {}, setStatus() {}, editor: async () => "", select: async () => "" },
+    ui: {
+      notify() {},
+      setStatus() {},
+      setWidget(key: string, lines: string[] | undefined) { widgetCalls.push({ key, lines: lines ? [...lines] : undefined }); },
+      editor: async () => "",
+      select: async () => "",
+    },
   });
 
   fs.rmSync(projectSessionsDir, { recursive: true, force: true });
   assert.ok(maxInFlight > 1, `expected parallel miner execution, max in-flight: ${maxInFlight}`);
+  assert.ok(widgetCalls.some((c) => c.key === "ruminate" && c.lines?.some((l: string) => l.includes("conversations"))));
+  assert.ok(widgetCalls.some((c) => c.key === "ruminate" && c.lines?.some((l: string) => l.includes("Miner"))));
+  assert.ok(widgetCalls.some((c) => c.key === "ruminate" && c.lines === undefined));
 });
