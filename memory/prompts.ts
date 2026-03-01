@@ -168,7 +168,7 @@ export function buildRuminatePrompt(
   minerAgentPath: string,
 ): string {
   const sessionsDir = path.join(os.homedir(), ".pi", "agent", "sessions");
-  const encodedCwd = "--" + projectCwd.replace(/^\/+/, "").replace(/\//g, "--") + "--";
+  const encodedCwd = "--" + projectCwd.replace(/^[/\\]/, "").replace(/[/\\:]/g, "-") + "--";
   const projectSessionsDir = path.join(sessionsDir, encodedCwd);
 
   return `# Ruminate

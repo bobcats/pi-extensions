@@ -4,10 +4,21 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import memoryExtension from "./index.ts";
-import { encodeProjectSessionPath } from "./subagent.ts";
+import { encodeProjectSessionPath, MIN_FILE_SIZE } from "./subagent.ts";
 
 function tmpDir(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), "memory-index-test-"));
+}
+
+/** Create a JSONL session file large enough to pass min-size and min-text-length filters. */
+function writeSessionFile(dir: string, name: string, messageText: string): void {
+  const entry = JSON.stringify({
+    type: "message",
+    message: { role: "user", content: [{ type: "text", text: messageText }] },
+  });
+  // Repeat entry enough times to exceed MIN_FILE_SIZE
+  const repeats = Math.ceil(MIN_FILE_SIZE / entry.length) + 1;
+  fs.writeFileSync(path.join(dir, name), (entry + "\n").repeat(repeats));
 }
 
 test("registers session_start and before_agent_start handlers", () => {
@@ -705,15 +716,7 @@ test("/memory ruminate launches miner subagents in parallel", async () => {
   fs.mkdirSync(projectSessionsDir, { recursive: true });
 
   for (let i = 0; i < 40; i++) {
-    const jsonlPath = path.join(projectSessionsDir, `session-${i}.jsonl`);
-    const entry = {
-      type: "message",
-      message: {
-        role: "user",
-        content: [{ type: "text", text: `message ${i}` }],
-      },
-    };
-    fs.writeFileSync(jsonlPath, JSON.stringify(entry));
+    writeSessionFile(projectSessionsDir, `session-${i}.jsonl`, `this is conversation message number ${i} with enough text to pass filters`);
   }
 
   let inFlight = 0;
@@ -771,12 +774,7 @@ test("/memory ruminate sends apply handoff when findings exist", async () => {
   fs.mkdirSync(projectSessionsDir, { recursive: true });
 
   for (let i = 0; i < 40; i++) {
-    const jsonlPath = path.join(projectSessionsDir, `session-${i}.jsonl`);
-    const entry = {
-      type: "message",
-      message: { role: "user", content: [{ type: "text", text: `message ${i}` }] },
-    };
-    fs.writeFileSync(jsonlPath, JSON.stringify(entry));
+    writeSessionFile(projectSessionsDir, `session-${i}.jsonl`, `this is conversation message number ${i} with enough text to pass filters`);
   }
 
   let sent: any = null;

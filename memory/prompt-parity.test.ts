@@ -345,7 +345,7 @@ You are a conversation miner. You are read-only and must return a structured mar
 
 ## Inputs
 
-- Batch file path containing serialized conversations
+- Batch manifest file — lists conversation file paths, one per line. Read the manifest, then read each conversation file listed in it.
 - Existing topics list (already captured in the memory vault)
 
 ## Task
@@ -436,7 +436,7 @@ test("buildMeditatePrompt matches brainmaxxing meditate text with allowed pi sub
 
 test("buildRuminatePrompt matches brainmaxxing ruminate text with allowed pi substitutions", () => {
   const projectCwd = "/Users/test/work/repo";
-  const projectSessionsDir = path.join(os.homedir(), ".pi", "agent", "sessions", "--Users--test--work--repo--");
+  const projectSessionsDir = path.join(os.homedir(), ".pi", "agent", "sessions", "--Users-test-work-repo--");
   const values = {
     globalDir: "/Users/test/.pi/memories",
     projectDir: "/Users/test/work/repo/.pi/memories",

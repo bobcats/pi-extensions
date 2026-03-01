@@ -23,7 +23,7 @@ import { getInitState, initVault, migrateV1Vault } from "./init.ts";
 import { buildMeditateApplyPrompt, buildReflectPrompt, buildRuminatePrompt, buildRuminateApplyPrompt } from "./prompts.ts";
 import { ProgressWidget } from "./widget.ts";
 import { synthesizeFindings, formatSynthesisTable } from "./ruminate.ts";
-import { buildVaultSnapshot, runSubagent, parseSessionMessages, batchConversations, encodeProjectSessionPath } from "./subagent.ts";
+import { buildVaultSnapshot, runSubagent, extractConversations, encodeProjectSessionPath } from "./subagent.ts";
 
 export default function memoryExtension(
   pi: ExtensionAPI,
@@ -198,15 +198,15 @@ export default function memoryExtension(
           ctx.cwd,
         );
 
-        if (auditor.exitCode !== 0) {
-          widget.setStep("Auditor", "error");
-          widget.clear();
-          ctx.ui.notify(`Meditate failed (auditor): ${auditor.stderr || "unknown error"}`, "error");
+        if (auditor.exitCode !== 0 || !auditor.output.trim()) {
+          const reason = auditor.stderr || (auditor.output.trim() ? "unknown error" : "no output");
+          widget.setStep("Auditor", "error", `${reason.split("\n")[0].slice(0, 80)} — log: ${auditor.logFile}`);
+          ctx.ui.notify(`Meditate failed (auditor): ${reason}\nLog: ${auditor.logFile}`, "error");
           fs.rmSync(snapshotPath, { force: true });
           return;
         }
 
-        fs.writeFileSync(auditPath, auditor.output || "# Audit Report\n\nNo findings.");
+        fs.writeFileSync(auditPath, auditor.output);
         const actionable = (auditor.output.match(/^-\s+/gm) ?? []).length;
         widget.setStep("Auditor", "done", `${actionable} findings`);
 
@@ -219,8 +219,8 @@ export default function memoryExtension(
             ctx.cwd,
           );
           if (reviewer.exitCode !== 0) {
-            widget.setStep("Reviewer", "error");
-            ctx.ui.notify(`Meditate partial (reviewer failed): ${reviewer.stderr || "unknown error"}`, "warning");
+            widget.setStep("Reviewer", "error", `log: ${reviewer.logFile}`);
+            ctx.ui.notify(`Meditate partial (reviewer failed): ${reviewer.stderr || "unknown error"}\nLog: ${reviewer.logFile}`, "warning");
           } else {
             reviewerOutput = reviewer.output;
             widget.setStep("Reviewer", "done");
@@ -258,63 +258,48 @@ export default function memoryExtension(
         const encodedCwd = encodeProjectSessionPath(ctx.cwd);
         const projectSessionsDir = path.join(sessionsRoot, encodedCwd);
 
-        const promptHint = buildRuminatePrompt(globalDir, projectDir, ctx.cwd, minerAgentPath);
         if (!fs.existsSync(projectSessionsDir)) {
-          ctx.ui.notify(`No sessions found for project.\n\n${promptHint}`, "info");
+          ctx.ui.notify("No sessions found for project.", "info");
           return;
         }
 
-        const jsonlPaths: string[] = [];
-        const walk = (dir: string) => {
-          for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-            const full = path.join(dir, entry.name);
-            if (entry.isDirectory()) walk(full);
-            if (entry.isFile() && entry.name.endsWith(".jsonl")) jsonlPaths.push(full);
-          }
-        };
-        walk(projectSessionsDir);
+        // Extract conversations into per-file text + batch manifests
+        // (mirrors brainmaxxing extract-conversations.py)
+        const ts = Date.now();
+        const outputDir = path.join(os.tmpdir(), `memory-ruminate-${ts}`);
 
-        const conversations: string[] = [];
-        for (const filePath of jsonlPaths.sort()) {
-          const raw = fs.readFileSync(filePath, "utf-8");
-          const msgs = parseSessionMessages(raw);
-          if (msgs.length === 0) continue;
-          conversations.push(msgs.map((m) => `${m.role}: ${m.text}`).join("\n\n"));
-        }
+        // Determine batch count before extraction so we can pass it in
+        const jsonlCount = fs.readdirSync(projectSessionsDir).filter((f) => f.endsWith(".jsonl")).length;
+        const numBatches = Math.max(2, Math.min(10, Math.ceil(jsonlCount / 20)));
 
-        if (conversations.length === 0) {
+        const extraction = extractConversations(projectSessionsDir, outputDir, numBatches);
+
+        if (extraction.conversationCount === 0) {
           ctx.ui.notify("No parseable conversation messages found in project sessions.", "info");
+          fs.rmSync(outputDir, { recursive: true, force: true });
           return;
         }
 
-        const numBatches = Math.max(2, Math.min(10, Math.ceil(conversations.length / 20)));
-        const batches = batchConversations(conversations, numBatches).filter((b) => b.length > 0);
         const existingTopics = [...new Set([...listVaultFiles(globalDir), ...listVaultFiles(projectDir)])].sort();
+        const topicsPath = path.join(outputDir, "existing-topics.txt");
+        fs.writeFileSync(topicsPath, existingTopics.join("\n"));
 
         const widget = new ProgressWidget(ctx.ui, "ruminate");
-        widget.setHeader(`Found ${conversations.length} conversations in ${batches.length} batches`);
-        for (let i = 0; i < batches.length; i++) {
+        widget.setHeader(`Found ${extraction.conversationCount} conversations in ${extraction.batches.length} batches`);
+        for (let i = 0; i < extraction.batches.length; i++) {
           widget.setStep(`Miner ${i + 1}`, "running");
         }
 
-        const ts = Date.now();
-        const tempPaths: string[] = [];
-
-        const tasks = batches.map(async (batch, i) => {
-          const batchPath = path.join(os.tmpdir(), `memory-ruminate-batch-${ts}-${i}.md`);
-          const topicsPath = path.join(os.tmpdir(), `memory-ruminate-topics-${ts}-${i}.md`);
-          fs.writeFileSync(batchPath, batch.join("\n\n---\n\n"));
-          fs.writeFileSync(topicsPath, existingTopics.join("\n"));
-          tempPaths.push(batchPath, topicsPath);
-
+        const tasks = extraction.batches.map(async (manifestPath, i) => {
           const result = await deps.runSubagent(
             minerAgentPath,
-            `Read conversations at ${batchPath} and existing topics at ${topicsPath}. Return high-signal findings in markdown.`,
+            `Read the batch manifest at ${manifestPath} — it lists conversation file paths, one per line. Read each conversation file. Also read existing topics at ${topicsPath}. Return high-signal findings in markdown.`,
             ctx.cwd,
           );
 
           if (result.exitCode !== 0 || !result.output.trim()) {
-            widget.setStep(`Miner ${i + 1}`, "error");
+            const hint = result.stderr ? result.stderr.split("\n")[0].slice(0, 80) : `exit ${result.exitCode}`;
+            widget.setStep(`Miner ${i + 1}`, "error", `${hint} — log: ${result.logFile}`);
             return null;
           }
 
@@ -329,7 +314,7 @@ export default function memoryExtension(
           .sort((a, b) => a.index - b.index)
           .map((item) => item.output);
 
-        for (const p of tempPaths) fs.rmSync(p, { force: true });
+        fs.rmSync(outputDir, { recursive: true, force: true });
 
         const synthesisRows = synthesizeFindings(minerOutputs);
         const synthesisTable = formatSynthesisTable(synthesisRows);
@@ -337,11 +322,11 @@ export default function memoryExtension(
         widget.clear();
 
         if (synthesisRows.length === 0) {
-          ctx.ui.notify(`Ruminate complete — processed ${conversations.length} conversations, no high-signal findings.`, "info");
+          ctx.ui.notify(`Ruminate complete — processed ${extraction.conversationCount} conversations, no high-signal findings.`, "info");
           return;
         }
 
-        ctx.ui.notify(`Ruminate complete — ${synthesisRows.length} findings from ${conversations.length} conversations.`, "info");
+        ctx.ui.notify(`Ruminate complete — ${synthesisRows.length} findings from ${extraction.conversationCount} conversations.`, "info");
 
         pi.sendMessage({
           content: buildRuminateApplyPrompt(synthesisTable, globalDir, projectDir),
