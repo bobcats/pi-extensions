@@ -20,7 +20,7 @@ import {
   type MemoryScope,
 } from "./lib.ts";
 import { getInitState, initVault, migrateV1Vault } from "./init.ts";
-import { buildMeditateApplyPrompt, buildReflectPrompt, buildRuminatePrompt } from "./prompts.ts";
+import { buildMeditateApplyPrompt, buildReflectPrompt, buildRuminatePrompt, buildRuminateApplyPrompt } from "./prompts.ts";
 import { ProgressWidget } from "./widget.ts";
 import { synthesizeFindings, formatSynthesisTable } from "./ruminate.ts";
 import { buildVaultSnapshot, runSubagent, parseSessionMessages, batchConversations, encodeProjectSessionPath } from "./subagent.ts";
@@ -336,8 +336,18 @@ export default function memoryExtension(
 
         widget.clear();
 
-        const summary = `## Ruminate Summary\n\nProcessed ${conversations.length} conversations in ${batches.length} batches.\n\n${synthesisTable}`;
-        ctx.ui.notify(summary, "info");
+        if (synthesisRows.length === 0) {
+          ctx.ui.notify(`Ruminate complete — processed ${conversations.length} conversations, no high-signal findings.`, "info");
+          return;
+        }
+
+        ctx.ui.notify(`Ruminate complete — ${synthesisRows.length} findings from ${conversations.length} conversations.`, "info");
+
+        pi.sendMessage({
+          content: buildRuminateApplyPrompt(synthesisTable, globalDir, projectDir),
+          deliverAs: "followUp",
+          triggerTurn: true,
+        });
         return;
       }
 

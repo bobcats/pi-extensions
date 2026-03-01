@@ -760,3 +760,56 @@ test("/memory ruminate launches miner subagents in parallel", async () => {
   assert.ok(widgetCalls.some((c) => c.key === "ruminate" && c.lines?.some((l: string) => l.includes("Miner"))));
   assert.ok(widgetCalls.some((c) => c.key === "ruminate" && c.lines === undefined));
 });
+
+test("/memory ruminate sends apply handoff when findings exist", async () => {
+  const handlers = new Map<string, Function>();
+  const commands = new Map<string, any>();
+  const root = tmpDir();
+
+  const encodedCwd = encodeProjectSessionPath(root);
+  const projectSessionsDir = path.join(os.homedir(), ".pi", "agent", "sessions", encodedCwd);
+  fs.mkdirSync(projectSessionsDir, { recursive: true });
+
+  for (let i = 0; i < 40; i++) {
+    const jsonlPath = path.join(projectSessionsDir, `session-${i}.jsonl`);
+    const entry = {
+      type: "message",
+      message: { role: "user", content: [{ type: "text", text: `message ${i}` }] },
+    };
+    fs.writeFileSync(jsonlPath, JSON.stringify(entry));
+  }
+
+  let sent: any = null;
+  const pi = {
+    on(event: string, handler: Function) { handlers.set(event, handler); },
+    registerTool() {},
+    registerCommand(name: string, opts: any) { commands.set(name, opts); },
+    registerShortcut() {},
+    registerFlag() {},
+    getFlag() { return false; },
+    exec: async () => ({ stdout: "", stderr: "", code: 0, killed: false }),
+    sendMessage(message: any) { sent = message; },
+  } as never;
+
+  memoryExtension(pi, {
+    runSubagent: async () => ({
+      output: "# Findings\n\n## User Corrections\n- Always run tests: user said so",
+      exitCode: 0,
+      stderr: "",
+    }),
+  });
+
+  await handlers.get("session_start")!({}, { cwd: root, ui: { notify() {}, setStatus() {} } });
+  await commands.get("memory").handler("ruminate", {
+    cwd: root,
+    ui: { notify() {}, setStatus() {}, setWidget() {}, editor: async () => "", select: async () => "" },
+  });
+
+  fs.rmSync(projectSessionsDir, { recursive: true, force: true });
+
+  assert.ok(sent, "expected sendMessage to be called");
+  assert.equal(sent.deliverAs, "followUp");
+  assert.equal(sent.triggerTurn, true);
+  assert.match(sent.content, /Always run tests/);
+  assert.match(sent.content, /approve/i);
+});
