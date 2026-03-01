@@ -63,8 +63,9 @@ function openActivityOverlay(
 
 export default function memoryExtension(
   pi: ExtensionAPI,
-  deps: { runSubagent: typeof runSubagent } = { runSubagent },
+  deps: { runSubagent: typeof runSubagent; staggerMs?: number } = { runSubagent },
 ) {
+  const staggerMs = deps.staggerMs ?? 2000;
   let globalDir = path.join(os.homedir(), ".pi", "memories");
   let projectDir = "";
   let globalScope: MemoryScope | null = null;
@@ -346,6 +347,7 @@ export default function memoryExtension(
         const activityPanel = openActivityOverlay(ctx, "Miner 1");
 
         const tasks = extraction.batches.map(async (manifestPath, i) => {
+          if (i > 0) await new Promise((r) => setTimeout(r, i * staggerMs));
           const result = await deps.runSubagent(
             minerAgentPath,
             `Read the batch manifest at ${manifestPath} — it lists conversation file paths, one per line. Read each conversation file. Also read existing topics at ${topicsPath}. Return high-signal findings in markdown.`,
