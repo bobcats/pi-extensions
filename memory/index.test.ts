@@ -553,10 +553,12 @@ test("/memory reflect sends follow-up prompt", async () => {
   memoryExtension(pi);
   await handlers.get("session_start")!({}, { cwd: root, ui: { notify() {}, setStatus() {} } });
 
+  let notified = "";
   await commands.get("memory").handler("reflect", {
-    ui: { notify() {}, setStatus() {}, editor: async () => "", select: async () => "" },
+    ui: { notify(msg: string) { notified = msg; }, setStatus() {}, editor: async () => "", select: async () => "" },
   });
 
+  assert.match(notified, /Reflect/);
   assert.ok(sent);
   assert.equal(sent.deliverAs, "followUp");
   assert.equal(sent.triggerTurn, true);
