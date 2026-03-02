@@ -12,7 +12,7 @@ You are a reviewer for the memory vault. You are read-only and must return a str
 - Memory snapshot path
 - Auditor report path
 - Skills snapshot/path if provided in the task
-- `${globalDir}/principles.md` and `${projectDir}/principles.md` when present
+- `principles.md` when present
 
 Read all provided inputs. Skip notes the auditor flagged for deletion.
 
