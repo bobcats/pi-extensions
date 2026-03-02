@@ -1,17 +1,12 @@
 # memory
 
-Persistent agent memory extension with a structured v2 vault.
+Persistent agent memory extension with a single global vault.
 
 ## Overview
 
-The extension stores memory in two scopes:
+The extension stores memory in one vault at `~/.pi/memories/`. Project-specific knowledge lives under `projects/<project-name>/` by convention — the agent manages the organization.
 
-- **Global**: `~/.pi/memories/`
-- **Project**: `<project>/.pi/memories/`
-
-V2 uses an Obsidian-style vault with `index.md` root indexes and `[[wikilinks]]` between notes.
-
-## Vault structure (v2)
+## Vault structure
 
 ```text
 ~/.pi/memories/
@@ -19,10 +14,11 @@ V2 uses an Obsidian-style vault with `index.md` root indexes and `[[wikilinks]]`
 ├── principles.md
 ├── principles/
 │   └── *.md
-└── *.md
-
-<project>/.pi/memories/
-├── index.md
+├── projects/
+│   ├── my-project/
+│   │   └── *.md
+│   └── other-project/
+│       └── *.md
 └── *.md
 ```
 
@@ -30,9 +26,8 @@ V2 uses an Obsidian-style vault with `index.md` root indexes and `[[wikilinks]]`
 
 On `before_agent_start`, the extension injects:
 
-1. Global `index.md` (if present)
-2. Project `index.md` (if present)
-3. Trimmed write instructions
+1. `index.md` contents (if present)
+2. Trimmed write instructions
 
 It does **not** inline full note contents. The model reads specific note files on demand.
 
@@ -40,37 +35,19 @@ It does **not** inline full note contents. The model reads specific note files o
 
 | Command | Description |
 |---|---|
-| `/memory` | Show status, scope state, and command hints |
+| `/memory` | Show vault status and command hints |
 | `/memory on` | Enable memory for this session |
 | `/memory off` | Disable memory for this session |
-| `/memory edit` | Edit project `index.md` |
-| `/memory edit global` | Edit global `index.md` |
-| `/memory init` | Initialize global v2 vault + starter principles |
-| `/memory init project` | Initialize project v2 vault (no starter principles) |
-| `/memory v2migrate` | Migrate legacy global `MEMORY.md` to v2 |
-| `/memory v2migrate project` | Migrate legacy project `MEMORY.md` to v2 |
+| `/memory edit` | Edit `index.md` |
+| `/memory init` | Initialize vault with starter principles |
 | `/memory reflect` | Queue an in-context reflection pass |
 | `/memory meditate` | Run auditor/reviewer subagents via `pi --mode json` |
 | `/memory ruminate` | Mine past sessions via miner subagents |
-
-## Migration path (v1 → v2)
-
-If `MEMORY.md` is detected, run:
-
-- `/memory v2migrate` (global)
-- `/memory v2migrate project` (project)
-
-Modes:
-
-- **Preserve**: renames legacy file to `migrated.md`
-- **Replace**: removes legacy file and initializes fresh vault
 
 ## Guardrails
 
 - `index.md` line limit: **200**
 - Topic file line limit: **500**
-- Index auto-rebuild runs when vault file set drifts from indexed wikilinks
-- Polling safety net checks for external edits every 5s
 
 ## Testing
 
