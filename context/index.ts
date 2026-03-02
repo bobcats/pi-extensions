@@ -362,7 +362,7 @@ export default function contextExtension(pi: ExtensionAPI) {
 		}
 	});
 
-	pi.registerCommand("context", {
+	pi.registerCommand("ctx", {
 		description: "Show loaded context overview",
 		handler: async (_args, ctx: ExtensionCommandContext) => {
 			const commands = pi.getCommands();
