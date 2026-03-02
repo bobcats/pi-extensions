@@ -355,7 +355,7 @@ export default function memoryExtension(
             undefined,
             (event) => {
               if (event.type === "text_delta") {
-                activityPanel?.overlay.setAgent(`Miner ${i + 1}`);
+                activityPanel?.overlay.setLabel(`Miner ${i + 1}`);
                 activityPanel?.overlay.appendText(event.text);
               }
             },

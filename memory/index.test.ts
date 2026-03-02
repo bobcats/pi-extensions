@@ -731,6 +731,7 @@ test("/memory ruminate launches miner subagents in parallel", async () => {
     getFlag() { return false; },
     exec: async () => ({ stdout: "", stderr: "", code: 0, killed: false }),
     sendMessage() {},
+    sendUserMessage() {},
   } as never;
 
   memoryExtension(pi, {
@@ -790,6 +791,7 @@ test("/memory ruminate sends apply handoff when findings exist", async () => {
     getFlag() { return false; },
     exec: async () => ({ stdout: "", stderr: "", code: 0, killed: false }),
     sendMessage(message: any) { sent = message; },
+    sendUserMessage() {},
   } as never;
 
   memoryExtension(pi, {

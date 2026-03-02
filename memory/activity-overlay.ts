@@ -16,6 +16,13 @@ export class ActivityOverlay {
     this.invalidate();
   }
 
+  setLabel(name: string): void {
+    if (this.agent !== name) {
+      this.agent = name;
+      this.invalidate();
+    }
+  }
+
   appendText(text: string): void {
     const newLines = text.split("\n");
     if (this.textLines.length > 0 && newLines.length > 0) {
