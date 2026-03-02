@@ -160,3 +160,63 @@ test("registers shortcut to enable profiler and updates status bar", async () =>
     delete (globalThis as Record<symbol, unknown>)[GLOBAL_PATCH_STATE_KEY];
   }
 });
+
+test("ext-prof getArgumentCompletions returns all subcommands for empty prefix", async () => {
+  const commands = new Map<string, any>();
+
+  const pi = {
+    registerCommand(name: string, opts: any) { commands.set(name, opts); },
+    registerShortcut() { return undefined; },
+    on() { return undefined; },
+  } as never;
+
+  delete (globalThis as Record<symbol, unknown>)[GLOBAL_PATCHED_KEY];
+  delete (globalThis as Record<symbol, unknown>)[GLOBAL_PATCH_STATE_KEY];
+
+  try {
+    await profilerExtension(pi);
+    const completions = commands.get("ext-prof").getArgumentCompletions("");
+    assert.ok(Array.isArray(completions));
+    assert.equal(completions.length, 5);
+    const values = completions.map((c: any) => c.value);
+    assert.ok(values.includes("on"));
+    assert.ok(values.includes("off"));
+    assert.ok(values.includes("reset"));
+    assert.ok(values.includes("save"));
+    assert.ok(values.includes("status"));
+  } finally {
+    delete (globalThis as Record<symbol, unknown>)[GLOBAL_PATCHED_KEY];
+    delete (globalThis as Record<symbol, unknown>)[GLOBAL_PATCH_STATE_KEY];
+  }
+});
+
+test("ext-prof getArgumentCompletions filters by prefix and returns null for no match", async () => {
+  const commands = new Map<string, any>();
+
+  const pi = {
+    registerCommand(name: string, opts: any) { commands.set(name, opts); },
+    registerShortcut() { return undefined; },
+    on() { return undefined; },
+  } as never;
+
+  delete (globalThis as Record<symbol, unknown>)[GLOBAL_PATCHED_KEY];
+  delete (globalThis as Record<symbol, unknown>)[GLOBAL_PATCH_STATE_KEY];
+
+  try {
+    await profilerExtension(pi);
+    const fn = commands.get("ext-prof").getArgumentCompletions;
+
+    const sMatches = fn("s");
+    assert.ok(Array.isArray(sMatches));
+    assert.equal(sMatches.map((c: any) => c.value).sort().join(","), "save,status");
+
+    const oMatches = fn("o");
+    assert.ok(Array.isArray(oMatches));
+    assert.equal(oMatches.map((c: any) => c.value).sort().join(","), "off,on");
+
+    assert.equal(fn("xyz"), null);
+  } finally {
+    delete (globalThis as Record<symbol, unknown>)[GLOBAL_PATCHED_KEY];
+    delete (globalThis as Record<symbol, unknown>)[GLOBAL_PATCH_STATE_KEY];
+  }
+});
