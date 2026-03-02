@@ -1,4 +1,5 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { AutocompleteItem } from "@mariozechner/pi-tui";
 import {
   formatIssueLabel,
   parseBrReadyJson,
@@ -294,8 +295,18 @@ export function registerBeadsCommands(
     },
   });
 
+  const BEADS_MODE_SUBCOMMANDS: AutocompleteItem[] = [
+    { value: "on",     label: "on",     description: "Enable beads mode" },
+    { value: "off",    label: "off",    description: "Disable beads mode" },
+    { value: "status", label: "status", description: "Show current beads mode" },
+  ];
+
   pi.registerCommand("beads-mode", {
     description: "Set/query beads mode: /beads-mode [on|off|status]",
+    getArgumentCompletions: (prefix: string): AutocompleteItem[] | null => {
+      const filtered = BEADS_MODE_SUBCOMMANDS.filter((c) => c.value.startsWith(prefix));
+      return filtered.length > 0 ? filtered : null;
+    },
     handler: async (args, ctx) => {
       const value = args.trim().toLowerCase();
 
