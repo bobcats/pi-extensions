@@ -6,6 +6,7 @@
     "test": "tsx --test *.test.ts"
   },
   "devDependencies": {
+    "@mariozechner/pi-tui": "*",
     "tsx": "^4.20.0"
   }
 }

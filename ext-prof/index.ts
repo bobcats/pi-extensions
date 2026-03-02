@@ -4,6 +4,7 @@ import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { AutocompleteItem } from "@mariozechner/pi-tui";
 import {
   createCollector,
   resetCollector,
@@ -337,8 +338,20 @@ export default async function extProfiler(pi: ExtensionAPI) {
     );
   };
 
+  const EXT_PROF_SUBCOMMANDS: AutocompleteItem[] = [
+    { value: "on",     label: "on",     description: "Enable profiling" },
+    { value: "off",    label: "off",    description: "Disable profiling" },
+    { value: "reset",  label: "reset",  description: "Clear collected data" },
+    { value: "save",   label: "save",   description: "Save profile to disk" },
+    { value: "status", label: "status", description: "Show profiler status" },
+  ];
+
   pi.registerCommand("ext-prof", {
     description: "Extension profiler controls and report",
+    getArgumentCompletions: (prefix: string): AutocompleteItem[] | null => {
+      const filtered = EXT_PROF_SUBCOMMANDS.filter((c) => c.value.startsWith(prefix));
+      return filtered.length > 0 ? filtered : null;
+    },
     handler: async (args, ctx) => {
       const response = await controller.handle(args);
       syncRuntimeState();
