@@ -402,7 +402,7 @@ test("/memory off also skips tool_call line limit enforcement", async () => {
   assert.equal(result, undefined);
 });
 
-test("tool_call write triggers index rebuild when new file added", async () => {
+test("tool_call write to memory file refreshes scope without rewriting index", async () => {
   const handlers = new Map<string, Function>();
   const root = tmpDir();
   const projectMem = path.join(root, ".pi", "memories");
@@ -432,8 +432,9 @@ test("tool_call write triggers index rebuild when new file added", async () => {
     input: { path: topicPath, content: "hello" },
   });
 
+  // Index is NOT auto-rebuilt — agent is responsible for updating it
   const index = fs.readFileSync(path.join(projectMem, "index.md"), "utf-8");
-  assert.match(index, /\[\[new-topic\]\]/);
+  assert.equal(index, "# Memory\n");
 });
 
 test("tool_call edit skips index rebuild on content-only edit", async () => {

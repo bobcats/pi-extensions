@@ -236,7 +236,8 @@ export function buildWriteInstructions(
 **How to save:**
 - Use write/edit tools to create or update .md files in the vault
 - One topic per file. Lowercase, hyphenated filenames (e.g., deploy-gotchas.md)
-- Link related notes with [[wikilinks]] — index.md is auto-maintained
+- Link related notes with [[wikilinks]]
+- Update index.md if any files were added or removed
 - Keep files under ${MEMORY_TOPIC_LIMIT} lines. Keep index.md under ${MEMORY_INDEX_LIMIT} lines
 - Update existing notes over creating new ones
 - Prefer project memory for project-specific things, global for universal preferences

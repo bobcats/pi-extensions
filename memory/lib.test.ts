@@ -141,7 +141,7 @@ test("buildWriteInstructions is trimmed and references vault conventions", () =>
   assert.match(text, /\/home\/user\/\.pi\/memories\//);
   assert.match(text, /\/project\/\.pi\/memories\//);
   assert.match(text, /\[\[wikilinks\]\]/);
-  assert.match(text, /index\.md is auto-maintained/);
+  assert.match(text, /Update index\.md if any files were added or removed/);
   assert.ok(!text.includes("What NOT to save"));
   assert.ok(!text.includes("When to save"));
 });

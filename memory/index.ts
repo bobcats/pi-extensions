@@ -6,8 +6,7 @@ import type { AutocompleteItem } from "@mariozechner/pi-tui";
 import {
   readVaultIndex,
   listVaultFiles,
-  buildVaultIndex,
-  detectIndexDrift,
+
   buildMemoryPrompt,
   buildWriteInstructions,
   isMemoryPath,
@@ -88,15 +87,6 @@ export default function memoryExtension(
     }
   }
 
-  function rebuildIndexIfDrift(scope: "global" | "project") {
-    const dir = scope === "global" ? globalDir : projectDir;
-    if (!detectIndexDrift(dir)) return;
-    const newIndex = buildVaultIndex(dir);
-    fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(path.join(dir, "index.md"), newIndex);
-    refreshScope(scope);
-  }
-
   function updateStatus(ctx: ExtensionContext) {
     const globalHasVault = !!globalScope;
     const projectHasVault = !!projectScope;
@@ -115,8 +105,6 @@ export default function memoryExtension(
   pi.on("before_agent_start", async (event) => {
     if (!memoryEnabled) return;
 
-    rebuildIndexIfDrift("global");
-    rebuildIndexIfDrift("project");
     globalScope = loadScope(globalDir);
     projectScope = loadScope(projectDir);
     if (lastCtx) updateStatus(lastCtx);
@@ -158,7 +146,7 @@ export default function memoryExtension(
 
     const result = (event as { result?: { block?: boolean } }).result;
     if (!result?.block && memPath.scope) {
-      rebuildIndexIfDrift(memPath.scope);
+      refreshScope(memPath.scope);
       if (lastCtx) updateStatus(lastCtx);
     }
 
