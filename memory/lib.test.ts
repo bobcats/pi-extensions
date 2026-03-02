@@ -115,42 +115,44 @@ test("buildVaultIndex groups files by top-level directory", () => {
 
 // --- buildMemoryPrompt ---
 
-test("buildMemoryPrompt injects index-only content with paths", () => {
+test("buildMemoryPrompt injects index content with vault path", () => {
   const prompt = buildMemoryPrompt(
-    { dir: "/g/.pi/memories", indexContent: "# Memory\n- [[global-topic]]", fileCount: 1 },
-    { dir: "/p/.pi/memories", indexContent: "# Memory\n- [[project-topic]]", fileCount: 1 },
+    { dir: "/home/user/.pi/memories", indexContent: "# Memory\n- [[topic]]", fileCount: 1 },
   );
   assert.match(prompt, /Memory vault index/);
-  assert.match(prompt, /### Global Memory \(\/g\/\.pi\/memories\/\)/);
-  assert.match(prompt, /### Project Memory \(\/p\/\.pi\/memories\/\)/);
-  assert.ok(!prompt.includes("Topic files"));
+  assert.match(prompt, /# Memory/);
+  assert.match(prompt, /\/home\/user\/\.pi\/memories\//);
 });
 
-test("buildMemoryPrompt returns empty string when both indexes missing", () => {
-  const prompt = buildMemoryPrompt(
-    { dir: "/g", indexContent: null, fileCount: 0 },
-    { dir: "/p", indexContent: null, fileCount: 0 },
-  );
-  assert.equal(prompt, "");
+test("buildMemoryPrompt returns empty string when scope is null", () => {
+  assert.equal(buildMemoryPrompt(null), "");
+});
+
+test("buildMemoryPrompt returns empty string when indexContent is null", () => {
+  assert.equal(buildMemoryPrompt({ dir: "/g", indexContent: null, fileCount: 0 }), "");
 });
 
 // --- buildWriteInstructions ---
 
-test("buildWriteInstructions is trimmed and references vault conventions", () => {
-  const text = buildWriteInstructions("/home/user/.pi/memories", "/project/.pi/memories");
+test("buildWriteInstructions references single vault dir", () => {
+  const text = buildWriteInstructions("/home/user/.pi/memories");
   assert.match(text, /\/home\/user\/\.pi\/memories\//);
-  assert.match(text, /\/project\/\.pi\/memories\//);
   assert.match(text, /\[\[wikilinks\]\]/);
+  assert.match(text, /projects\//);
   assert.match(text, /Update index\.md if any files were added or removed/);
-  assert.ok(!text.includes("What NOT to save"));
-  assert.ok(!text.includes("When to save"));
+  assert.ok(!text.includes("Project:"));
 });
 
 // --- isMemoryPath ---
 
-test("isMemoryPath identifies index.md in global dir", () => {
-  const result = isMemoryPath("/home/.pi/memories/index.md", "/home/.pi/memories", "/proj/.pi/memories");
-  assert.deepEqual(result, { isMemory: true, isIndex: true, scope: "global" });
+test("isMemoryPath identifies index.md in vault dir", () => {
+  const result = isMemoryPath("/home/.pi/memories/index.md", "/home/.pi/memories");
+  assert.deepEqual(result, { isMemory: true, isIndex: true });
+});
+
+test("isMemoryPath identifies non-memory path", () => {
+  const result = isMemoryPath("/proj/src/main.ts", "/home/.pi/memories");
+  assert.deepEqual(result, { isMemory: false, isIndex: false });
 });
 
 // --- checkLineLimit ---
@@ -169,21 +171,20 @@ test("checkLineLimit works with topic file limit", () => {
 
 // --- formatMemoryDisplay ---
 
-test("formatMemoryDisplay shows v2/v1/empty states", () => {
+test("formatMemoryDisplay shows vault state", () => {
   const display = formatMemoryDisplay(
     { dir: "/home/.pi/memories", state: "v2", fileCount: 4 },
-    { dir: "/proj/.pi/memories", state: "v1", fileCount: 0 },
     true,
   );
   assert.match(display, /Vault: 4 files/);
-  assert.match(display, /Legacy MEMORY\.md detected/);
-  assert.match(display, /Commands: init, v2migrate, reflect, meditate, ruminate, on, off, edit/);
+  assert.match(display, /Commands:/);
+  assert.ok(!display.includes("v2migrate"));
+  assert.ok(!display.includes("Project"));
 });
 
-test("formatMemoryDisplay suggests init when no vault exists", () => {
+test("formatMemoryDisplay suggests init when no vault", () => {
   const display = formatMemoryDisplay(
     { dir: "/g", state: "empty", fileCount: 0 },
-    { dir: "/p", state: "empty", fileCount: 0 },
     true,
   );
   assert.match(display, /No vault — run \/memory init/);
@@ -192,19 +193,15 @@ test("formatMemoryDisplay suggests init when no vault exists", () => {
 // --- formatMemoryStatus ---
 
 test("formatMemoryStatus shows no vault", () => {
-  assert.equal(formatMemoryStatus(true, false, false, 0), "memory: on · no vault");
+  assert.equal(formatMemoryStatus(true, false, 0), "memory: on · no vault");
 });
 
-test("formatMemoryStatus shows one scope and file count", () => {
-  assert.equal(formatMemoryStatus(true, true, false, 16), "memory: on · 1 scope · 16 files");
-});
-
-test("formatMemoryStatus shows two scopes and file count", () => {
-  assert.equal(formatMemoryStatus(true, true, true, 5), "memory: on · 2 scopes · 5 files");
+test("formatMemoryStatus shows file count", () => {
+  assert.equal(formatMemoryStatus(true, true, 16), "memory: on · 16 files");
 });
 
 test("formatMemoryStatus shows off when disabled", () => {
-  assert.equal(formatMemoryStatus(false, true, true, 5), "memory: off");
+  assert.equal(formatMemoryStatus(false, true, 5), "memory: off");
 });
 
 // --- constants ---

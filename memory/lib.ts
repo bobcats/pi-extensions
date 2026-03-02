@@ -131,40 +131,26 @@ export type MemoryScope = {
 };
 
 export function buildMemoryPrompt(
-  global: MemoryScope | null,
-  project: MemoryScope | null,
+  scope: MemoryScope | null,
 ): string {
-  const sections: string[] = [];
+  if (!scope?.indexContent) return "";
 
-  if (global?.indexContent) {
-    sections.push(`### Global Memory (${global.dir}/)\n\n${global.indexContent}`);
-  }
-  if (project?.indexContent) {
-    sections.push(`### Project Memory (${project.dir}/)\n\n${project.indexContent}`);
-  }
-
-  if (sections.length === 0) return "";
-
-  return "\n\n## Agent Memory\n\nMemory vault index — read relevant files with the read tool before acting:\n\n" + sections.join("\n\n");
+  return "\n\n## Agent Memory\n\nMemory vault index — read relevant files with the read tool before acting:\n\n"
+    + `### Memory vault (${scope.dir}/)\n\n${scope.indexContent}`;
 }
 
 export function isMemoryPath(
   filePath: string,
-  globalDir: string,
-  projectDir: string,
-): { isMemory: boolean; isIndex: boolean; scope: "global" | "project" | null } {
+  vaultDir: string,
+): { isMemory: boolean; isIndex: boolean } {
   const resolved = path.resolve(filePath);
-  const resolvedGlobal = path.resolve(globalDir);
-  const resolvedProject = path.resolve(projectDir);
+  const resolvedVault = path.resolve(vaultDir);
 
-  if (resolved.startsWith(resolvedGlobal + path.sep) || resolved === resolvedGlobal) {
-    return { isMemory: true, isIndex: path.basename(resolved) === "index.md", scope: "global" };
-  }
-  if (resolved.startsWith(resolvedProject + path.sep) || resolved === resolvedProject) {
-    return { isMemory: true, isIndex: path.basename(resolved) === "index.md", scope: "project" };
+  if (resolved.startsWith(resolvedVault + path.sep) || resolved === resolvedVault) {
+    return { isMemory: true, isIndex: path.basename(resolved) === "index.md" };
   }
 
-  return { isMemory: false, isIndex: false, scope: null };
+  return { isMemory: false, isIndex: false };
 }
 
 export function checkLineLimit(
@@ -177,61 +163,47 @@ export function checkLineLimit(
 
 export type MemoryDisplayScope = {
   dir: string;
-  state: "empty" | "v1" | "v2";
+  state: "empty" | "v2";
   fileCount: number;
 };
 
 export function formatMemoryDisplay(
-  global: MemoryDisplayScope,
-  project: MemoryDisplayScope,
+  vault: MemoryDisplayScope,
   enabled: boolean,
 ): string {
   const lines: string[] = [];
   lines.push(`Memory: ${enabled ? "enabled" : "disabled"}`);
   lines.push("");
-
-  for (const [label, scope] of [["Global", global], ["Project", project]] as const) {
-    lines.push(`${label} (${scope.dir}):`);
-    if (scope.state === "v2") {
-      lines.push(`  Vault: ${scope.fileCount} files`);
-    } else if (scope.state === "v1") {
-      lines.push("  Legacy MEMORY.md detected — run /memory v2migrate");
-    } else {
-      lines.push("  No vault — run /memory init");
-    }
-    lines.push("");
+  lines.push(`Vault (${vault.dir}):`);
+  if (vault.state === "v2") {
+    lines.push(`  Vault: ${vault.fileCount} files`);
+  } else {
+    lines.push("  No vault — run /memory init");
   }
-
-  lines.push("Commands: init, v2migrate, reflect, meditate, ruminate, on, off, edit");
+  lines.push("");
+  lines.push("Commands: init, reflect, meditate, ruminate, on, off, edit");
   return lines.join("\n");
 }
 
 export function formatMemoryStatus(
   enabled: boolean,
-  globalHasVault: boolean,
-  projectHasVault: boolean,
+  hasVault: boolean,
   fileCount: number,
 ): string {
   if (!enabled) return "memory: off";
-  if (!globalHasVault && !projectHasVault) return "memory: on · no vault";
+  if (!hasVault) return "memory: on · no vault";
 
-  const scopeCount = (globalHasVault ? 1 : 0) + (projectHasVault ? 1 : 0);
-  const parts = ["memory: on", `${scopeCount} ${scopeCount === 1 ? "scope" : "scopes"}`];
+  const parts = ["memory: on"];
   if (fileCount > 0) {
     parts.push(`${fileCount} ${fileCount === 1 ? "file" : "files"}`);
   }
   return parts.join(" · ");
 }
 
-export function buildWriteInstructions(
-  globalDir: string,
-  projectDir: string,
-): string {
+export function buildWriteInstructions(dir: string): string {
   return `### Updating Memories
 
-**Memory locations:**
-- Global: ${globalDir}/ (applies to all projects)
-- Project: ${projectDir}/ (specific to this project)
+**Memory location:** ${dir}/
 
 **How to save:**
 - Use write/edit tools to create or update .md files in the vault
@@ -240,7 +212,8 @@ export function buildWriteInstructions(
 - Update index.md if any files were added or removed
 - Keep files under ${MEMORY_TOPIC_LIMIT} lines. Keep index.md under ${MEMORY_INDEX_LIMIT} lines
 - Update existing notes over creating new ones
-- Prefer project memory for project-specific things, global for universal preferences
+- Project-specific notes go under projects/<project-name>/
+- Universal preferences, principles, and cross-project knowledge go at the top level
 
 **Quality gate:** Only save durable knowledge that generalizes beyond the current session. Check existing vault before writing to avoid duplicates.
 
