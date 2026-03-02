@@ -27,6 +27,7 @@ import { type AgentConfig, type AgentScope, discoverAgents } from "./agents.js";
 const BUNDLED_AGENTS_DIR = path.join(import.meta.dirname, "agents");
 const MAX_PARALLEL_TASKS = 8;
 const MAX_CONCURRENCY = 4;
+const SPAWN_STAGGER_MS = 2000;
 const COLLAPSED_ITEM_COUNT = 10;
 
 function formatTokens(count: number): string {
@@ -573,6 +574,8 @@ export default function (pi: ExtensionAPI) {
 				};
 
 				const results = await mapWithConcurrencyLimit(params.tasks, MAX_CONCURRENCY, async (t, index) => {
+					// Stagger spawns to avoid pi settings file lock contention (proper-lockfile sync, no retries)
+					if (index > 0) await new Promise((r) => setTimeout(r, index * SPAWN_STAGGER_MS));
 					const result = await runSingleAgent(
 						ctx.cwd,
 						agents,
