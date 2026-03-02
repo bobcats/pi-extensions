@@ -6,7 +6,6 @@ import type { AutocompleteItem } from "@mariozechner/pi-tui";
 import {
   readVaultIndex,
   listVaultFiles,
-
   buildMemoryPrompt,
   buildWriteInstructions,
   isMemoryPath,
@@ -18,8 +17,8 @@ import {
   MEMORY_TOPIC_LIMIT,
   type MemoryScope,
 } from "./lib.ts";
-import { getInitState, initVault, migrateV1Vault } from "./init.ts";
-import { buildMeditateApplyPrompt, buildReflectPrompt, buildRuminatePrompt, buildRuminateApplyPrompt } from "./prompts.ts";
+import { getInitState, initVault } from "./init.ts";
+import { buildMeditateApplyPrompt, buildReflectPrompt, buildRuminateApplyPrompt } from "./prompts.ts";
 import { ProgressWidget } from "./widget.ts";
 import { synthesizeFindings, formatSynthesisTable } from "./ruminate.ts";
 import { buildVaultSnapshot, runSubagent, extractConversations, encodeProjectSessionPath } from "./subagent.ts";
@@ -66,9 +65,7 @@ export default function memoryExtension(
 ) {
   const staggerMs = deps.staggerMs ?? 2000;
   let globalDir = path.join(os.homedir(), ".pi", "memories");
-  let projectDir = "";
   let globalScope: MemoryScope | null = null;
-  let projectScope: MemoryScope | null = null;
   let memoryEnabled = true;
   let lastCtx: ExtensionContext | null = null;
 
@@ -79,26 +76,17 @@ export default function memoryExtension(
     return { dir, indexContent, fileCount: files.length };
   }
 
-  function refreshScope(scope: "global" | "project") {
-    if (scope === "global") {
-      globalScope = loadScope(globalDir);
-    } else {
-      projectScope = loadScope(projectDir);
-    }
+  function refreshScope() {
+    globalScope = loadScope(globalDir);
   }
 
   function updateStatus(ctx: ExtensionContext) {
-    const globalHasVault = !!globalScope;
-    const projectHasVault = !!projectScope;
-    const fileCount = (globalScope?.fileCount ?? 0) + (projectScope?.fileCount ?? 0);
-    ctx.ui.setStatus("memory", formatMemoryStatus(memoryEnabled, globalHasVault, projectHasVault, fileCount));
+    ctx.ui.setStatus("memory", formatMemoryStatus(memoryEnabled, !!globalScope, globalScope?.fileCount ?? 0));
   }
 
   pi.on("session_start", async (_event, ctx) => {
     lastCtx = ctx;
-    projectDir = path.join(ctx.cwd, ".pi", "memories");
     globalScope = loadScope(globalDir);
-    projectScope = loadScope(projectDir);
     updateStatus(ctx);
   });
 
@@ -106,11 +94,10 @@ export default function memoryExtension(
     if (!memoryEnabled) return;
 
     globalScope = loadScope(globalDir);
-    projectScope = loadScope(projectDir);
     if (lastCtx) updateStatus(lastCtx);
 
-    const memoryPrompt = buildMemoryPrompt(globalScope, projectScope);
-    const writeInstructions = buildWriteInstructions(globalDir, projectDir);
+    const memoryPrompt = buildMemoryPrompt(globalScope);
+    const writeInstructions = buildWriteInstructions(globalDir);
 
     if (!memoryPrompt && !writeInstructions) return;
 
@@ -126,7 +113,7 @@ export default function memoryExtension(
     const filePath = event.input.path as string | undefined;
     if (!filePath) return undefined;
 
-    const memPath = isMemoryPath(filePath, globalDir, projectDir);
+    const memPath = isMemoryPath(filePath, globalDir);
     if (!memPath.isMemory) return undefined;
 
     const limit = memPath.isIndex ? MEMORY_INDEX_LIMIT : MEMORY_TOPIC_LIMIT;
@@ -145,8 +132,8 @@ export default function memoryExtension(
     }
 
     const result = (event as { result?: { block?: boolean } }).result;
-    if (!result?.block && memPath.scope) {
-      refreshScope(memPath.scope);
+    if (!result?.block) {
+      refreshScope();
       if (lastCtx) updateStatus(lastCtx);
     }
 
@@ -154,21 +141,17 @@ export default function memoryExtension(
   });
 
   const MEMORY_SUBCOMMANDS: AutocompleteItem[] = [
-    { value: "reflect",               label: "reflect",               description: "Capture learnings from current session" },
-    { value: "meditate",              label: "meditate",              description: "Audit and evolve the vault" },
-    { value: "ruminate",              label: "ruminate",              description: "Mine past sessions for patterns" },
-    { value: "on",                    label: "on",                    description: "Enable memory for this session" },
-    { value: "off",                   label: "off",                   description: "Disable memory for this session" },
-    { value: "edit",                  label: "edit",                  description: "Edit project index.md" },
-    { value: "edit global",           label: "edit global",           description: "Edit global index.md" },
-    { value: "init",                  label: "init",                  description: "Initialize global vault with starter principles" },
-    { value: "init project",          label: "init project",          description: "Initialize project vault (no principles)" },
-    { value: "v2migrate",             label: "v2migrate",             description: "Migrate legacy global MEMORY.md to v2" },
-    { value: "v2migrate project",     label: "v2migrate project",     description: "Migrate legacy project MEMORY.md to v2" },
+    { value: "reflect",   label: "reflect",   description: "Capture learnings from current session" },
+    { value: "meditate",  label: "meditate",  description: "Audit and evolve the vault" },
+    { value: "ruminate",  label: "ruminate",  description: "Mine past sessions for patterns" },
+    { value: "on",        label: "on",        description: "Enable memory for this session" },
+    { value: "off",       label: "off",       description: "Disable memory for this session" },
+    { value: "edit",      label: "edit",      description: "Edit index.md" },
+    { value: "init",      label: "init",      description: "Initialize vault with starter principles" },
   ];
 
   pi.registerCommand("memory", {
-    description: "View and manage agent memory (init/migrate/reflect/meditate/ruminate/on/off/edit)",
+    description: "View and manage agent memory (init/reflect/meditate/ruminate/on/off/edit)",
     getArgumentCompletions: (prefix: string): AutocompleteItem[] | null => {
       const filtered = MEMORY_SUBCOMMANDS.filter((c) => c.value.startsWith(prefix));
       return filtered.length > 0 ? filtered : null;
@@ -191,15 +174,13 @@ export default function memoryExtension(
       }
 
       if (trimmed === "reflect") {
-        const prompt = buildReflectPrompt(globalDir, projectDir);
+        const prompt = buildReflectPrompt(globalDir);
         pi.sendUserMessage(prompt);
         return;
       }
 
       if (trimmed === "meditate") {
-        const snapshot = [buildVaultSnapshot(globalDir), buildVaultSnapshot(projectDir)]
-          .filter(Boolean)
-          .join("\n\n");
+        const snapshot = buildVaultSnapshot(globalDir);
 
         if (!snapshot.trim()) {
           ctx.ui.notify("No vault content found to audit.", "info");
@@ -283,7 +264,7 @@ export default function memoryExtension(
         widget.clear();
 
         pi.sendMessage({
-          content: buildMeditateApplyPrompt(auditor.output, reviewerOutput, globalDir, projectDir),
+          content: buildMeditateApplyPrompt(auditor.output, reviewerOutput, globalDir),
           deliverAs: "followUp",
           triggerTurn: true,
         });
@@ -305,12 +286,9 @@ export default function memoryExtension(
           return;
         }
 
-        // Extract conversations into per-file text + batch manifests
-        // (mirrors brainmaxxing extract-conversations.py)
         const ts = Date.now();
         const outputDir = path.join(os.tmpdir(), `memory-ruminate-${ts}`);
 
-        // Determine batch count before extraction so we can pass it in
         const jsonlCount = fs.readdirSync(projectSessionsDir).filter((f) => f.endsWith(".jsonl")).length;
         const numBatches = Math.max(2, Math.min(10, Math.ceil(jsonlCount / 20)));
 
@@ -322,7 +300,7 @@ export default function memoryExtension(
           return;
         }
 
-        const existingTopics = [...new Set([...listVaultFiles(globalDir), ...listVaultFiles(projectDir)])].sort();
+        const existingTopics = listVaultFiles(globalDir).sort();
         const topicsPath = path.join(outputDir, "existing-topics.txt");
         fs.writeFileSync(topicsPath, existingTopics.join("\n"));
 
@@ -382,48 +360,18 @@ export default function memoryExtension(
         ctx.ui.notify(`Ruminate complete — ${synthesisRows.length} findings from ${extraction.conversationCount} conversations.`, "info");
 
         pi.sendMessage({
-          content: buildRuminateApplyPrompt(synthesisTable, globalDir, projectDir),
+          content: buildRuminateApplyPrompt(synthesisTable, globalDir),
           deliverAs: "followUp",
           triggerTurn: true,
         });
         return;
       }
 
-      if (trimmed === "v2migrate" || trimmed === "v2migrate project") {
-        const isProject = trimmed === "v2migrate project";
-        const dir = isProject ? projectDir : globalDir;
-        const state = getInitState(dir);
-
-        if (state !== "v1") {
-          ctx.ui.notify("No legacy MEMORY.md found for migration.", "info");
-          return;
-        }
-
-        const preserveLabel = "Preserve old content as migrated.md (recommended)";
-        const replaceLabel = "Replace with fresh vault";
-        const cancelLabel = "Cancel";
-        const choice = await ctx.ui.select("Migrate legacy MEMORY.md to v2 vault", [
-          preserveLabel,
-          replaceLabel,
-          cancelLabel,
-        ]);
-        if (choice === cancelLabel || choice === undefined) return;
-
-        const mode: "preserve" | "replace" = choice === replaceLabel ? "replace" : "preserve";
-        migrateV1Vault(dir, !isProject, mode);
-        refreshScope(isProject ? "project" : "global");
-        updateStatus(ctx);
-        ctx.ui.notify("Memory vault migrated to v2.", "success");
-        return;
-      }
-
-      if (trimmed === "init" || trimmed === "init project") {
-        const isProject = trimmed === "init project";
-        const dir = isProject ? projectDir : globalDir;
-        const state = getInitState(dir);
+      if (trimmed === "init") {
+        const state = getInitState(globalDir);
 
         if (state === "v2") {
-          const files = listVaultFiles(dir);
+          const files = listVaultFiles(globalDir);
           const addLabel = "Add missing starter principles only";
           const replaceLabel = "Replace all principles with defaults (keeps other files)";
           const cancelLabel = "Cancel";
@@ -433,60 +381,48 @@ export default function memoryExtension(
           );
           if (choice === cancelLabel || choice === undefined) return;
 
-          if (choice === replaceLabel && !isProject) {
-            fs.rmSync(path.join(dir, "principles"), { recursive: true, force: true });
-            fs.rmSync(path.join(dir, "principles.md"), { force: true });
+          if (choice === replaceLabel) {
+            fs.rmSync(path.join(globalDir, "principles"), { recursive: true, force: true });
+            fs.rmSync(path.join(globalDir, "principles.md"), { force: true });
           }
 
-          const result = initVault(dir, !isProject);
-          refreshScope(isProject ? "project" : "global");
+          const result = initVault(globalDir, true);
+          refreshScope();
           updateStatus(ctx);
-          ctx.ui.notify(
-            isProject
-              ? "Project memory vault updated."
-              : `Global memory vault updated with ${result.principlesInstalled} starter principles.`,
-            "success",
-          );
+          ctx.ui.notify(`Global memory vault updated with ${result.principlesInstalled} starter principles.`, "success");
           return;
         }
 
-        const result = initVault(dir, !isProject);
-        refreshScope(isProject ? "project" : "global");
+        const result = initVault(globalDir, true);
+        refreshScope();
         updateStatus(ctx);
-        const msg = isProject
-          ? "Project memory vault initialized."
-          : `Global memory vault initialized with ${result.principlesInstalled} starter principles.`;
-        ctx.ui.notify(msg, "success");
+        ctx.ui.notify(`Global memory vault initialized with ${result.principlesInstalled} starter principles.`, "success");
         return;
       }
 
-      if (trimmed === "edit" || trimmed === "edit global") {
-        const dir = trimmed === "edit global" ? globalDir : projectDir;
-        const filePath = path.join(dir, MEMORY_INDEX_FILE);
-        fs.mkdirSync(dir, { recursive: true });
+      if (trimmed === "edit") {
+        const filePath = path.join(globalDir, MEMORY_INDEX_FILE);
+        fs.mkdirSync(globalDir, { recursive: true });
         if (!fs.existsSync(filePath)) {
           fs.writeFileSync(filePath, "# Memory\n");
         }
         const content = fs.readFileSync(filePath, "utf-8");
-        const edited = await ctx.ui.editor(`Edit ${trimmed === "edit global" ? "global" : "project"} ${MEMORY_INDEX_FILE}:`, content);
+        const edited = await ctx.ui.editor(`Edit ${MEMORY_INDEX_FILE}:`, content);
         if (edited !== undefined && edited !== content) {
           fs.writeFileSync(filePath, edited);
-          refreshScope(trimmed === "edit global" ? "global" : "project");
+          refreshScope();
           updateStatus(ctx);
           ctx.ui.notify("Memory updated", "success");
         }
         return;
       }
 
-      globalScope = loadScope(globalDir);
-      projectScope = loadScope(projectDir);
+      refreshScope();
       updateStatus(ctx);
 
-      const globalState = getInitState(globalDir);
-      const projectState = getInitState(projectDir);
+      const state = getInitState(globalDir);
       const display = formatMemoryDisplay(
-        { dir: globalDir, state: globalState, fileCount: globalScope?.fileCount ?? 0 },
-        { dir: projectDir, state: projectState, fileCount: projectScope?.fileCount ?? 0 },
+        { dir: globalDir, state, fileCount: globalScope?.fileCount ?? 0 },
         memoryEnabled,
       );
       ctx.ui.notify(display, "info");
