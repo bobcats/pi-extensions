@@ -4,14 +4,11 @@ import { buildVaultIndex } from "./lib.ts";
 
 const CONTENT_DIR = path.join(import.meta.dirname, "content");
 
-export type InitState = "empty" | "v1" | "v2";
+export type InitState = "empty" | "v2";
 
 export function getInitState(dir: string): InitState {
   try {
     if (fs.existsSync(path.join(dir, "index.md"))) return "v2";
-    if (fs.existsSync(path.join(dir, "MEMORY.md"))) return "v1";
-    const entries = fs.readdirSync(dir);
-    if (entries.length === 0) return "empty";
     return "empty";
   } catch {
     return "empty";
@@ -25,6 +22,7 @@ export interface InitResult {
 
 export function initVault(vaultDir: string, includePrinciples: boolean): InitResult {
   fs.mkdirSync(vaultDir, { recursive: true });
+  fs.mkdirSync(path.join(vaultDir, "projects"), { recursive: true });
 
   let principlesInstalled = 0;
 
@@ -53,25 +51,4 @@ export function initVault(vaultDir: string, includePrinciples: boolean): InitRes
   fs.writeFileSync(path.join(vaultDir, "index.md"), index);
 
   return { created: true, principlesInstalled };
-}
-
-export function migrateV1Vault(
-  dir: string,
-  includePrinciples: boolean,
-  mode: "preserve" | "replace",
-): InitResult {
-  if (mode === "preserve") {
-    const memoryPath = path.join(dir, "MEMORY.md");
-    const migratedPath = path.join(dir, "migrated.md");
-    if (fs.existsSync(memoryPath)) {
-      fs.renameSync(memoryPath, migratedPath);
-    }
-  } else {
-    const memoryPath = path.join(dir, "MEMORY.md");
-    if (fs.existsSync(memoryPath)) {
-      fs.unlinkSync(memoryPath);
-    }
-  }
-
-  return initVault(dir, includePrinciples);
 }
