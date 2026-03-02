@@ -290,3 +290,60 @@ test("before_agent_start resets coalesce flag so next close sends again", async 
   const continues = h.sent.filter((s) => s.message.customType === "beads-auto-continue");
   assert.equal(continues.length, 2, "second auto-continue should fire after flag reset");
 });
+
+test("beads-mode getArgumentCompletions returns all subcommands for empty prefix", () => {
+  const commands = new Map<string, any>();
+
+  const pi = {
+    registerTool() {},
+    registerCommand(name: string, options: any) { commands.set(name, options); },
+    registerShortcut() {},
+    registerFlag() {},
+    on() {},
+    getFlag() { return false; },
+    exec: async () => ({ stdout: "", stderr: "", code: 0, killed: false }),
+    sendMessage() {},
+  } as never;
+
+  beadsExtension(pi);
+
+  const opts = commands.get("beads-mode");
+  assert.ok(opts, "beads-mode command should be registered");
+  const completions = opts.getArgumentCompletions("");
+  assert.ok(Array.isArray(completions));
+  assert.equal(completions.length, 3);
+  const values = completions.map((c: any) => c.value);
+  assert.ok(values.includes("on"));
+  assert.ok(values.includes("off"));
+  assert.ok(values.includes("status"));
+});
+
+test("beads-mode getArgumentCompletions filters by prefix and returns null for no match", () => {
+  const commands = new Map<string, any>();
+
+  const pi = {
+    registerTool() {},
+    registerCommand(name: string, options: any) { commands.set(name, options); },
+    registerShortcut() {},
+    registerFlag() {},
+    on() {},
+    getFlag() { return false; },
+    exec: async () => ({ stdout: "", stderr: "", code: 0, killed: false }),
+    sendMessage() {},
+  } as never;
+
+  beadsExtension(pi);
+
+  const fn = commands.get("beads-mode").getArgumentCompletions;
+
+  const oMatches = fn("o");
+  assert.ok(Array.isArray(oMatches));
+  assert.equal(oMatches.map((c: any) => c.value).sort().join(","), "off,on");
+
+  const sMatches = fn("s");
+  assert.ok(Array.isArray(sMatches));
+  assert.equal(sMatches.length, 1);
+  assert.equal(sMatches[0].value, "status");
+
+  assert.equal(fn("xyz"), null);
+});
