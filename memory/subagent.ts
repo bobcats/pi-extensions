@@ -110,7 +110,12 @@ export interface ExtractResult {
  * Extract conversations from a sessions directory into per-conversation text files
  * and batch manifests, mirroring brainmaxxing's extract-conversations.py.
  */
-export function extractConversations(sessionsDir: string, outputDir: string, numBatches: number): ExtractResult {
+export function extractConversations(
+  sessionsDir: string,
+  outputDir: string,
+  numBatches: number,
+  options?: { fromDate?: Date; toDate?: Date },
+): ExtractResult {
   // Find JSONL files, filter by min size, sort by mtime descending
   const jsonlFiles: { path: string; mtime: number }[] = [];
   const walk = (dir: string) => {
@@ -120,6 +125,8 @@ export function extractConversations(sessionsDir: string, outputDir: string, num
       if (entry.isFile() && entry.name.endsWith(".jsonl")) {
         const stat = fs.statSync(full);
         if (stat.size >= MIN_FILE_SIZE) {
+          if (options?.fromDate && stat.mtime < options.fromDate) continue;
+          if (options?.toDate && stat.mtime > options.toDate) continue;
           jsonlFiles.push({ path: full, mtime: stat.mtimeMs });
         }
       }
@@ -182,7 +189,7 @@ export function parseJsonEvent(line: string): StreamEvent | null {
   }
 }
 
-const DEFAULT_TIMEOUT_MS = 180_000; // 3 minutes
+const DEFAULT_TIMEOUT_MS = 600_000; // 10 minutes
 
 export async function runSubagent(
   agentPath: string,

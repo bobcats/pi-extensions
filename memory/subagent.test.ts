@@ -153,6 +153,83 @@ test("extractConversations returns 0 conversations for empty dir", () => {
   assert.equal(result.batches.length, 0);
 });
 
+test("extractConversations filters by fromDate", () => {
+  const sessionsDir = tmpDir();
+  const outputDir = path.join(tmpDir(), "output");
+
+  const makeEntry = (text: string) => JSON.stringify({
+    type: "message",
+    message: { role: "user", content: [{ type: "text", text }] },
+  });
+
+  const entry = makeEntry("conversation with enough text to matter and pass all filters");
+  const lines = Array.from({ length: Math.ceil(MIN_FILE_SIZE / entry.length) + 1 }, () => entry);
+  const content = lines.join("\n");
+
+  // Create two files with different mtimes
+  const oldFile = path.join(sessionsDir, "old-session.jsonl");
+  const newFile = path.join(sessionsDir, "new-session.jsonl");
+  fs.writeFileSync(oldFile, content);
+  fs.writeFileSync(newFile, content);
+
+  // Set old file mtime to 2025-01-01
+  const oldDate = new Date("2025-01-01T00:00:00");
+  fs.utimesSync(oldFile, oldDate, oldDate);
+  // Set new file mtime to 2026-02-15
+  const newDate = new Date("2026-02-15T00:00:00");
+  fs.utimesSync(newFile, newDate, newDate);
+
+  const result = extractConversations(sessionsDir, outputDir, 2, { fromDate: new Date("2026-01-01") });
+  assert.equal(result.conversationCount, 1);
+});
+
+test("extractConversations filters by toDate", () => {
+  const sessionsDir = tmpDir();
+  const outputDir = path.join(tmpDir(), "output");
+
+  const makeEntry = (text: string) => JSON.stringify({
+    type: "message",
+    message: { role: "user", content: [{ type: "text", text }] },
+  });
+
+  const entry = makeEntry("conversation with enough text to matter and pass all filters");
+  const lines = Array.from({ length: Math.ceil(MIN_FILE_SIZE / entry.length) + 1 }, () => entry);
+  const content = lines.join("\n");
+
+  const oldFile = path.join(sessionsDir, "old-session.jsonl");
+  const newFile = path.join(sessionsDir, "new-session.jsonl");
+  fs.writeFileSync(oldFile, content);
+  fs.writeFileSync(newFile, content);
+
+  const oldDate = new Date("2025-01-01T00:00:00");
+  fs.utimesSync(oldFile, oldDate, oldDate);
+  const newDate = new Date("2026-02-15T00:00:00");
+  fs.utimesSync(newFile, newDate, newDate);
+
+  const result = extractConversations(sessionsDir, outputDir, 2, { toDate: new Date("2025-12-31") });
+  assert.equal(result.conversationCount, 1);
+});
+
+test("extractConversations with no date options processes all files", () => {
+  const sessionsDir = tmpDir();
+  const outputDir = path.join(tmpDir(), "output");
+
+  const makeEntry = (text: string) => JSON.stringify({
+    type: "message",
+    message: { role: "user", content: [{ type: "text", text }] },
+  });
+
+  const entry = makeEntry("conversation with enough text to matter and pass all filters");
+  const lines = Array.from({ length: Math.ceil(MIN_FILE_SIZE / entry.length) + 1 }, () => entry);
+  const content = lines.join("\n");
+
+  fs.writeFileSync(path.join(sessionsDir, "a.jsonl"), content);
+  fs.writeFileSync(path.join(sessionsDir, "b.jsonl"), content);
+
+  const result = extractConversations(sessionsDir, outputDir, 2);
+  assert.equal(result.conversationCount, 2);
+});
+
 test("encodeProjectSessionPath encodes cwd to pi session directory format", () => {
   assert.equal(encodeProjectSessionPath("/Users/a/b/project"), "--Users-a-b-project--");
 });
