@@ -316,6 +316,11 @@ export default function memoryExtension(
         }
       }
 
+      if (signal.aborted) {
+        ctx.ui.notify("Meditate cancelled.", "info");
+        return;
+      }
+
       const summary = [
         "## Meditate Summary",
         `- Auditor findings: ${actionable}`,
@@ -326,11 +331,6 @@ export default function memoryExtension(
       ].join("\n");
 
       ctx.ui.notify(summary, "info");
-
-      if (signal.aborted) {
-        ctx.ui.notify("Meditate cancelled.", "info");
-        return;
-      }
 
       pi.sendMessage({
         content: buildMeditateApplyPrompt(auditor.output, reviewerOutput, globalDir),

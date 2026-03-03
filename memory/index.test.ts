@@ -1403,3 +1403,70 @@ test("session_before_switch waits for aborted task cleanup", async () => {
 
   fs.rmSync(projectSessionsDir, { recursive: true, force: true });
 });
+
+test("meditate cancellation does not emit summary", async () => {
+  const handlers = new Map<string, Function>();
+  const commands = new Map<string, any>();
+  const root = tmpDir();
+  const vaultDir = path.join(root, "vault");
+  fs.mkdirSync(vaultDir, { recursive: true });
+  fs.writeFileSync(path.join(vaultDir, "index.md"), "# Memory\n");
+
+  const notifications: string[] = [];
+
+  const pi = {
+    on(event: string, handler: Function) { handlers.set(event, handler); },
+    registerTool() {},
+    registerCommand(name: string, opts: any) { commands.set(name, opts); },
+    registerShortcut() {},
+    registerFlag() {},
+    getFlag() { return false; },
+    exec: async () => ({ stdout: "", stderr: "", code: 0, killed: false }),
+    sendMessage() {},
+  } as never;
+
+  // Simulate abort arriving while auditor is running but before the reviewer
+  // (actionable < 3 so reviewer is skipped). The abort fires synchronously
+  // between auditor await and the next check, exposing the missing guard.
+  let resolveSubagent!: () => void;
+
+  memoryExtension(pi, {
+    vaultDir,
+    runSubagent: async (_agent, _task, _cwd, _timeout, _onData, signal) => {
+      // Block; test will abort then release
+      await new Promise<void>((resolve) => { resolveSubagent = resolve; });
+      // Return 1 finding (< 3) so reviewer branch is skipped
+      return {
+        output: "# Audit Report\n\n- one finding",
+        exitCode: 0,
+        stderr: "",
+        logFile: "",
+      };
+    },
+  });
+
+  await handlers.get("session_start")!({}, { cwd: root, ui: { notify() {}, setStatus() {} } });
+
+  await commands.get("memory").handler("meditate", {
+    cwd: root,
+    hasUI: false,
+    ui: { notify(msg: string) { notifications.push(msg); }, setStatus() {}, setWidget() {}, editor: async () => "", select: async () => "" },
+  });
+
+  // Wait for subagent to start blocking
+  await waitFor(() => resolveSubagent !== undefined);
+
+  // Abort the task, then immediately release the subagent —
+  // abort is now set when the auditor result is processed
+  await commands.get("memory").handler("cancel meditate", {
+    cwd: root,
+    hasUI: false,
+    ui: { notify(msg: string) { notifications.push(msg); }, setStatus() {}, setWidget() {}, editor: async () => "", select: async () => "" },
+  });
+  resolveSubagent();
+
+  await waitFor(() => notifications.some((n) => /Meditate cancelled/i.test(n)));
+
+  assert.equal(notifications.some((n) => /## Meditate Summary/.test(n)), false,
+    `Expected no summary on cancellation, but got: ${notifications.filter(n => /## Meditate Summary/.test(n)).join(", ")}`);
+});
