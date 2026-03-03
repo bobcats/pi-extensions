@@ -181,7 +181,7 @@ export function formatMemoryDisplay(
     lines.push("  No vault — run /memory init");
   }
   lines.push("");
-  lines.push("Commands: init, reflect, meditate, ruminate, on, off, edit");
+  lines.push("Commands: init, reflect, meditate, ruminate, undo, log, on, off, edit");
   return lines.join("\n");
 }
 

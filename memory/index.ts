@@ -18,7 +18,7 @@ import {
   type MemoryScope,
 } from "./lib.ts";
 import { getInitState, initVault } from "./init.ts";
-import { initGitRepo, commitVaultChanges } from "./git.ts";
+import { initGitRepo, commitVaultChanges, undoLastCommit, getLog } from "./git.ts";
 import { buildMeditateApplyPrompt, buildReflectPrompt, buildRuminateApplyPrompt } from "./prompts.ts";
 import { ProgressWidget } from "./widget.ts";
 import { synthesizeFindings, formatSynthesisTable } from "./ruminate.ts";
@@ -154,6 +154,8 @@ export default function memoryExtension(
     { value: "reflect",   label: "reflect",   description: "Capture learnings from current session" },
     { value: "meditate",  label: "meditate",  description: "Audit and evolve the vault" },
     { value: "ruminate",  label: "ruminate",  description: "Mine past sessions for patterns" },
+    { value: "undo",      label: "undo",      description: "Revert the last memory commit" },
+    { value: "log",       label: "log",       description: "Show recent memory vault history" },
     { value: "on",        label: "on",        description: "Enable memory for this session" },
     { value: "off",       label: "off",       description: "Disable memory for this session" },
     { value: "edit",      label: "edit",      description: "Edit index.md" },
@@ -161,13 +163,35 @@ export default function memoryExtension(
   ];
 
   pi.registerCommand("memory", {
-    description: "View and manage agent memory (init/reflect/meditate/ruminate/on/off/edit)",
+    description: "View and manage agent memory (init/reflect/meditate/ruminate/undo/log/on/off/edit)",
     getArgumentCompletions: (prefix: string): AutocompleteItem[] | null => {
       const filtered = MEMORY_SUBCOMMANDS.filter((c) => c.value.startsWith(prefix));
       return filtered.length > 0 ? filtered : null;
     },
     handler: async (args: string, ctx: ExtensionCommandContext) => {
       const trimmed = args.trim();
+
+      if (trimmed === "undo") {
+        const result = undoLastCommit(globalDir);
+        if (result.success) {
+          refreshScope();
+          updateStatus(ctx);
+          ctx.ui.notify(`Undone: ${result.undoneMessage}`, "info");
+        } else {
+          ctx.ui.notify(`Cannot undo: ${result.error}`, "warning");
+        }
+        return;
+      }
+
+      if (trimmed === "log") {
+        const entries = getLog(globalDir, 20);
+        if (entries.length === 0) {
+          ctx.ui.notify("No vault history found.", "info");
+        } else {
+          ctx.ui.notify(entries.join("\n"), "info");
+        }
+        return;
+      }
 
       if (trimmed === "on") {
         memoryEnabled = true;

@@ -251,7 +251,7 @@ test("/memory getArgumentCompletions returns all subcommands for empty prefix", 
   memoryExtension(pi);
   const completions = commands.get("memory").getArgumentCompletions("");
   assert.ok(Array.isArray(completions));
-  assert.equal(completions.length, 7);
+  assert.equal(completions.length, 9);
   assert.ok(completions.every((c: any) => typeof c.value === "string" && typeof c.label === "string"));
   const values = completions.map((c: any) => c.value);
   assert.ok(values.includes("reflect"));
@@ -911,4 +911,109 @@ test("agent_end clears pendingCommitMessage after commit", async () => {
   const log = getLog(vaultDir, 10);
   const reflectCommits = log.filter(l => l.includes("reflect:"));
   assert.equal(reflectCommits.length, 1);
+});
+
+test("/memory undo reverts the last commit", async () => {
+  const handlers = new Map<string, Function>();
+  const commands = new Map<string, any>();
+  const root = tmpDir();
+  const vaultDir = path.join(root, "memories");
+  fs.mkdirSync(vaultDir, { recursive: true });
+  fs.writeFileSync(path.join(vaultDir, "index.md"), "# Memory\n");
+
+  let notified = "";
+  const pi = {
+    on(event: string, handler: Function) { handlers.set(event, handler); },
+    registerTool() {},
+    registerCommand(name: string, opts: any) { commands.set(name, opts); },
+    registerShortcut() {},
+    registerFlag() {},
+    getFlag() { return false; },
+    exec: async () => ({ stdout: "", stderr: "", code: 0, killed: false }),
+    sendMessage() {},
+    sendUserMessage() {},
+  } as never;
+
+  memoryExtension(pi, { runSubagent: async () => ({ output: "", exitCode: 0, stderr: "", logFile: "" }), vaultDir });
+  await handlers.get("session_start")!({}, { cwd: root, ui: { notify() {}, setStatus() {} } });
+
+  // Create a commit to undo
+  fs.writeFileSync(path.join(vaultDir, "bad.md"), "bad");
+  const { commitVaultChanges: commit } = await import("./git.ts");
+  commit(vaultDir, "meditate: bad changes");
+  assert.ok(fs.existsSync(path.join(vaultDir, "bad.md")));
+
+  await commands.get("memory").handler("undo", {
+    cwd: root,
+    ui: { notify(msg: string) { notified = msg; }, setStatus() {} },
+  });
+
+  assert.ok(!fs.existsSync(path.join(vaultDir, "bad.md")));
+  assert.match(notified, /meditate: bad changes/);
+});
+
+test("/memory undo fails gracefully on initial commit", async () => {
+  const handlers = new Map<string, Function>();
+  const commands = new Map<string, any>();
+  const root = tmpDir();
+  const vaultDir = path.join(root, "memories");
+  fs.mkdirSync(vaultDir, { recursive: true });
+  fs.writeFileSync(path.join(vaultDir, "index.md"), "# Memory\n");
+
+  let notified = "";
+  let notifyLevel = "";
+  const pi = {
+    on(event: string, handler: Function) { handlers.set(event, handler); },
+    registerTool() {},
+    registerCommand(name: string, opts: any) { commands.set(name, opts); },
+    registerShortcut() {},
+    registerFlag() {},
+    getFlag() { return false; },
+    exec: async () => ({ stdout: "", stderr: "", code: 0, killed: false }),
+    sendMessage() {},
+    sendUserMessage() {},
+  } as never;
+
+  memoryExtension(pi, { runSubagent: async () => ({ output: "", exitCode: 0, stderr: "", logFile: "" }), vaultDir });
+  await handlers.get("session_start")!({}, { cwd: root, ui: { notify() {}, setStatus() {} } });
+
+  await commands.get("memory").handler("undo", {
+    cwd: root,
+    ui: { notify(msg: string, level: string) { notified = msg; notifyLevel = level; }, setStatus() {} },
+  });
+
+  assert.match(notified, /cannot undo/i);
+  assert.equal(notifyLevel, "warning");
+});
+
+test("/memory log shows recent history", async () => {
+  const handlers = new Map<string, Function>();
+  const commands = new Map<string, any>();
+  const root = tmpDir();
+  const vaultDir = path.join(root, "memories");
+  fs.mkdirSync(vaultDir, { recursive: true });
+  fs.writeFileSync(path.join(vaultDir, "index.md"), "# Memory\n");
+
+  let notified = "";
+  const pi = {
+    on(event: string, handler: Function) { handlers.set(event, handler); },
+    registerTool() {},
+    registerCommand(name: string, opts: any) { commands.set(name, opts); },
+    registerShortcut() {},
+    registerFlag() {},
+    getFlag() { return false; },
+    exec: async () => ({ stdout: "", stderr: "", code: 0, killed: false }),
+    sendMessage() {},
+    sendUserMessage() {},
+  } as never;
+
+  memoryExtension(pi, { runSubagent: async () => ({ output: "", exitCode: 0, stderr: "", logFile: "" }), vaultDir });
+  await handlers.get("session_start")!({}, { cwd: root, ui: { notify() {}, setStatus() {} } });
+
+  await commands.get("memory").handler("log", {
+    cwd: root,
+    ui: { notify(msg: string) { notified = msg; }, setStatus() {} },
+  });
+
+  assert.match(notified, /init: memory vault/);
 });
