@@ -189,7 +189,7 @@ You are a conversation miner. You are read-only and must return a structured mar
 ## Inputs
 
 - Batch manifest file — lists conversation file paths, one per line. Read the manifest, then read each conversation file listed in it.
-- Existing topics list (already captured in the memory vault)
+- Vault snapshot — full contents of the memory vault. Read this to understand what knowledge is already captured. Skip anything already covered.
 
 ## Task
 
@@ -205,9 +205,10 @@ Extract only high-signal findings not already captured:
 ## Filtering rules
 
 - Filter aggressively; most findings should be discarded
-- Prefer recurring patterns over one-offs
+- **Frequency**: Prefer recurring patterns over one-offs. One-off corrections are usually not worth a brain entry — the brain should capture patterns, not incidents.
+- **Factual accuracy**: If something in the vault is now wrong, always flag it regardless of frequency.
+- **Impact**: Would failing to capture this cause repeated wasted effort in future sessions?
 - Include direct user quotes when available
-- Exclude anything already represented in existing topics
 
 ## Output format
 
