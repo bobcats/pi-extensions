@@ -23,7 +23,7 @@ import { buildMeditateApplyPrompt, buildReflectPrompt, buildRuminateApplyPrompt 
 import { ProgressWidget } from "./widget.ts";
 import { buildVaultSnapshot, runSubagent, extractConversations, encodeProjectSessionPath } from "./subagent.ts";
 import { ActivityOverlay } from "./activity-overlay.ts";
-import type { StreamEvent } from "./subagent.ts";
+import type { DateFilter, StreamEvent } from "./subagent.ts";
 
 function openActivityOverlay(
   ctx: ExtensionCommandContext,
@@ -163,21 +163,23 @@ export default function memoryExtension(
     { value: "init",      label: "init",      description: "Initialize vault with starter principles" },
   ];
 
-  function parseRuminateArgs(args: string): { error?: string; fromDate?: Date; toDate?: Date } {
+  function parseDate(value: string, flag: string): Date | string {
+    const d = new Date(value + "T00:00:00");
+    return isNaN(d.getTime()) ? `Invalid date format for ${flag}: "${value}". Use YYYY-MM-DD.` : d;
+  }
+
+  function parseRuminateArgs(args: string): { error?: string } & DateFilter {
     const parts = args.split(/\s+/);
     let fromDate: Date | undefined;
     let toDate: Date | undefined;
 
     for (let i = 0; i < parts.length; i++) {
-      if (parts[i] === "--from" && parts[i + 1]) {
-        const d = new Date(parts[i + 1] + "T00:00:00");
-        if (isNaN(d.getTime())) return { error: `Invalid date format for --from: "${parts[i + 1]}". Use YYYY-MM-DD.` };
-        fromDate = d;
-        i++;
-      } else if (parts[i] === "--to" && parts[i + 1]) {
-        const d = new Date(parts[i + 1] + "T00:00:00");
-        if (isNaN(d.getTime())) return { error: `Invalid date format for --to: "${parts[i + 1]}". Use YYYY-MM-DD.` };
-        toDate = d;
+      const flag = parts[i];
+      if ((flag === "--from" || flag === "--to") && parts[i + 1]) {
+        const result = parseDate(parts[i + 1], flag);
+        if (typeof result === "string") return { error: result };
+        if (flag === "--from") fromDate = result;
+        else toDate = result;
         i++;
       }
     }

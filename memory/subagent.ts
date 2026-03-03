@@ -110,11 +110,16 @@ export interface ExtractResult {
  * Extract conversations from a sessions directory into per-conversation text files
  * and batch manifests, mirroring brainmaxxing's extract-conversations.py.
  */
+export interface DateFilter {
+  fromDate?: Date;
+  toDate?: Date;
+}
+
 export function extractConversations(
   sessionsDir: string,
   outputDir: string,
   numBatches: number,
-  options?: { fromDate?: Date; toDate?: Date },
+  options?: DateFilter,
 ): ExtractResult {
   // Find JSONL files, filter by min size, sort by mtime descending
   const jsonlFiles: { path: string; mtime: number }[] = [];
