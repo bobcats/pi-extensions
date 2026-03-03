@@ -21,7 +21,6 @@ import { getInitState, initVault } from "./init.ts";
 import { initGitRepo, commitVaultChanges, undoLastCommit, getLog } from "./git.ts";
 import { buildMeditateApplyPrompt, buildReflectPrompt, buildRuminateApplyPrompt } from "./prompts.ts";
 import { ProgressWidget } from "./widget.ts";
-import { synthesizeFindings, formatSynthesisTable } from "./ruminate.ts";
 import { buildVaultSnapshot, runSubagent, extractConversations, encodeProjectSessionPath } from "./subagent.ts";
 import { ActivityOverlay } from "./activity-overlay.ts";
 import type { StreamEvent } from "./subagent.ts";
@@ -154,6 +153,8 @@ export default function memoryExtension(
     { value: "reflect",   label: "reflect",   description: "Capture learnings from current session" },
     { value: "meditate",  label: "meditate",  description: "Audit and evolve the vault" },
     { value: "ruminate",  label: "ruminate",  description: "Mine past sessions for patterns" },
+    { value: "ruminate --from",  label: "ruminate --from",  description: "Mine sessions modified on or after YYYY-MM-DD" },
+    { value: "ruminate --to",    label: "ruminate --to",    description: "Mine sessions modified on or before YYYY-MM-DD" },
     { value: "undo",      label: "undo",      description: "Revert the last memory commit" },
     { value: "log",       label: "log",       description: "Show recent memory vault history" },
     { value: "on",        label: "on",        description: "Enable memory for this session" },
@@ -161,6 +162,28 @@ export default function memoryExtension(
     { value: "edit",      label: "edit",      description: "Edit index.md" },
     { value: "init",      label: "init",      description: "Initialize vault with starter principles" },
   ];
+
+  function parseRuminateArgs(args: string): { error?: string; fromDate?: Date; toDate?: Date } {
+    const parts = args.split(/\s+/);
+    let fromDate: Date | undefined;
+    let toDate: Date | undefined;
+
+    for (let i = 0; i < parts.length; i++) {
+      if (parts[i] === "--from" && parts[i + 1]) {
+        const d = new Date(parts[i + 1] + "T00:00:00");
+        if (isNaN(d.getTime())) return { error: `Invalid date format for --from: "${parts[i + 1]}". Use YYYY-MM-DD.` };
+        fromDate = d;
+        i++;
+      } else if (parts[i] === "--to" && parts[i + 1]) {
+        const d = new Date(parts[i + 1] + "T00:00:00");
+        if (isNaN(d.getTime())) return { error: `Invalid date format for --to: "${parts[i + 1]}". Use YYYY-MM-DD.` };
+        toDate = d;
+        i++;
+      }
+    }
+
+    return { fromDate, toDate };
+  }
 
   pi.registerCommand("memory", {
     description: "View and manage agent memory (init/reflect/meditate/ruminate/undo/log/on/off/edit)",
@@ -311,7 +334,13 @@ export default function memoryExtension(
         return;
       }
 
-      if (trimmed === "ruminate") {
+      if (trimmed === "ruminate" || trimmed.startsWith("ruminate ")) {
+        const { error, fromDate, toDate } = parseRuminateArgs(trimmed);
+        if (error) {
+          ctx.ui.notify(error, "warning");
+          return;
+        }
+
         const minerAgentPath = path.join(import.meta.dirname, "agents", "miner.md");
         const sessionsRoot = path.join(os.homedir(), ".pi", "agent", "sessions");
         const encodedCwd = encodeProjectSessionPath(ctx.cwd);
@@ -328,7 +357,7 @@ export default function memoryExtension(
         const jsonlCount = fs.readdirSync(projectSessionsDir).filter((f) => f.endsWith(".jsonl")).length;
         const numBatches = Math.max(2, Math.min(10, Math.ceil(jsonlCount / 20)));
 
-        const extraction = extractConversations(projectSessionsDir, outputDir, numBatches);
+        const extraction = extractConversations(projectSessionsDir, outputDir, numBatches, { fromDate, toDate });
 
         if (extraction.conversationCount === 0) {
           ctx.ui.notify("No parseable conversation messages found in project sessions.", "info");
@@ -336,9 +365,10 @@ export default function memoryExtension(
           return;
         }
 
-        const existingTopics = listVaultFiles(globalDir).sort();
-        const topicsPath = path.join(outputDir, "existing-topics.txt");
-        fs.writeFileSync(topicsPath, existingTopics.join("\n"));
+        // Build vault snapshot for miners (full content, not just filenames)
+        const snapshot = buildVaultSnapshot(globalDir);
+        const snapshotPath = path.join(outputDir, "vault-snapshot.md");
+        fs.writeFileSync(snapshotPath, snapshot);
 
         const widget = new ProgressWidget(ctx.ui, "ruminate");
         widget.setHeader(`Found ${extraction.conversationCount} conversations in ${extraction.batches.length} batches`);
@@ -352,7 +382,7 @@ export default function memoryExtension(
           if (i > 0) await new Promise((r) => setTimeout(r, i * staggerMs));
           const result = await deps.runSubagent(
             minerAgentPath,
-            `Read the batch manifest at ${manifestPath} — it lists conversation file paths, one per line. Read each conversation file. Also read existing topics at ${topicsPath}. Return high-signal findings in markdown.`,
+            `Read the batch manifest at ${manifestPath} — it lists conversation file paths, one per line. Read each conversation file. Also read the vault snapshot at ${snapshotPath} to see what knowledge is already captured. Return high-signal findings in markdown.`,
             ctx.cwd,
             undefined,
             (event) => {
@@ -382,21 +412,18 @@ export default function memoryExtension(
 
         fs.rmSync(outputDir, { recursive: true, force: true });
 
-        const synthesisRows = synthesizeFindings(minerOutputs);
-        const synthesisTable = formatSynthesisTable(synthesisRows);
-
         activityPanel?.hide();
         widget.clear();
 
-        if (synthesisRows.length === 0) {
-          ctx.ui.notify(`Ruminate complete — processed ${extraction.conversationCount} conversations, no high-signal findings.`, "info");
+        if (minerOutputs.length === 0) {
+          ctx.ui.notify(`Ruminate complete — processed ${extraction.conversationCount} conversations, no findings.`, "info");
           return;
         }
 
-        ctx.ui.notify(`Ruminate complete — ${synthesisRows.length} findings from ${extraction.conversationCount} conversations.`, "info");
+        ctx.ui.notify(`Ruminate complete — ${minerOutputs.length} batches returned findings from ${extraction.conversationCount} conversations.`, "info");
 
         pi.sendMessage({
-          content: buildRuminateApplyPrompt(synthesisTable, globalDir),
+          content: buildRuminateApplyPrompt(minerOutputs, globalDir),
           deliverAs: "followUp",
           triggerTurn: true,
         });

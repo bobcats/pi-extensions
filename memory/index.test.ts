@@ -251,7 +251,7 @@ test("/memory getArgumentCompletions returns all subcommands for empty prefix", 
   memoryExtension(pi);
   const completions = commands.get("memory").getArgumentCompletions("");
   assert.ok(Array.isArray(completions));
-  assert.equal(completions.length, 9);
+  assert.equal(completions.length, 11);
   assert.ok(completions.every((c: any) => typeof c.value === "string" && typeof c.label === "string"));
   const values = completions.map((c: any) => c.value);
   assert.ok(values.includes("reflect"));
@@ -1016,4 +1016,96 @@ test("/memory log shows recent history", async () => {
   });
 
   assert.match(notified, /init: memory vault/);
+});
+
+test("/memory ruminate accepts --from flag", async () => {
+  const handlers = new Map<string, Function>();
+  const commands = new Map<string, any>();
+  const root = tmpDir();
+
+  const encodedCwd = encodeProjectSessionPath(root);
+  const projectSessionsDir = path.join(os.homedir(), ".pi", "agent", "sessions", encodedCwd);
+  fs.mkdirSync(projectSessionsDir, { recursive: true });
+
+  // Create one old session and one new session
+  const makeEntry = (text: string) => JSON.stringify({
+    type: "message",
+    message: { role: "user", content: [{ type: "text", text }] },
+  });
+  const entry = makeEntry("conversation with enough text to matter and pass all filters");
+  const lines = Array.from({ length: 10 }, () => entry);
+  const content = lines.join("\n");
+
+  const oldFile = path.join(projectSessionsDir, "old.jsonl");
+  const newFile = path.join(projectSessionsDir, "new.jsonl");
+  fs.writeFileSync(oldFile, content);
+  fs.writeFileSync(newFile, content);
+  const oldDate = new Date("2025-01-01T00:00:00");
+  fs.utimesSync(oldFile, oldDate, oldDate);
+  const newDate = new Date("2026-02-15T00:00:00");
+  fs.utimesSync(newFile, newDate, newDate);
+
+  let subagentCalls = 0;
+  const pi = {
+    on(event: string, handler: Function) { handlers.set(event, handler); },
+    registerTool() {},
+    registerCommand(name: string, opts: any) { commands.set(name, opts); },
+    registerShortcut() {},
+    registerFlag() {},
+    getFlag() { return false; },
+    exec: async () => ({ stdout: "", stderr: "", code: 0, killed: false }),
+    sendMessage() {},
+    sendUserMessage() {},
+  } as never;
+
+  memoryExtension(pi, {
+    staggerMs: 0,
+    runSubagent: async () => {
+      subagentCalls++;
+      return { output: "# Findings\n\n- finding", exitCode: 0, stderr: "", logFile: "" };
+    },
+  });
+
+  await handlers.get("session_start")!({}, { cwd: root, ui: { notify() {}, setStatus() {} } });
+
+  // Only new session should be processed (from 2026-01-01 onwards)
+  await commands.get("memory").handler("ruminate --from 2026-01-01", {
+    cwd: root,
+    ui: { notify() {}, setStatus() {}, setWidget() {}, editor: async () => "", select: async () => "" },
+  });
+
+  fs.rmSync(projectSessionsDir, { recursive: true, force: true });
+
+  // With only 1 conversation, we get min 2 batches but only 1 has content
+  assert.ok(subagentCalls >= 1, `expected at least 1 subagent call, got ${subagentCalls}`);
+});
+
+test("/memory ruminate rejects invalid date format", async () => {
+  const handlers = new Map<string, Function>();
+  const commands = new Map<string, any>();
+  const root = tmpDir();
+  let notified = "";
+
+  const pi = {
+    on(event: string, handler: Function) { handlers.set(event, handler); },
+    registerTool() {},
+    registerCommand(name: string, opts: any) { commands.set(name, opts); },
+    registerShortcut() {},
+    registerFlag() {},
+    getFlag() { return false; },
+    exec: async () => ({ stdout: "", stderr: "", code: 0, killed: false }),
+    sendMessage() {},
+  } as never;
+
+  memoryExtension(pi, {
+    runSubagent: async () => ({ output: "", exitCode: 0, stderr: "", logFile: "" }),
+  });
+  await handlers.get("session_start")!({}, { cwd: root, ui: { notify() {}, setStatus() {} } });
+
+  await commands.get("memory").handler("ruminate --from not-a-date", {
+    cwd: root,
+    ui: { notify(msg: string) { notified = msg; }, setStatus() {}, editor: async () => "", select: async () => "" },
+  });
+
+  assert.match(notified, /Invalid date/i);
 });
