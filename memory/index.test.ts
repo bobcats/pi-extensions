@@ -5,6 +5,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import memoryExtension from "./index.ts";
 import { encodeProjectSessionPath, MIN_FILE_SIZE } from "./subagent.ts";
+import { isGitRepo, getLog } from "./git.ts";
 
 function tmpDir(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), "memory-index-test-"));
@@ -798,4 +799,116 @@ test("session_start initializes git repo in vault directory", async () => {
   // Verify git repo was initialized
   const { isGitRepo } = await import("./git.ts");
   assert.equal(isGitRepo(vaultDir), true);
+});
+
+test("reflect sets pendingCommitMessage, agent_end commits", async () => {
+  const handlers = new Map<string, Function>();
+  const commands = new Map<string, any>();
+  const root = tmpDir();
+  const vaultDir = path.join(root, "memories");
+  fs.mkdirSync(vaultDir, { recursive: true });
+  fs.writeFileSync(path.join(vaultDir, "index.md"), "# Memory\n");
+
+  let sentUserMessage = "";
+  const pi = {
+    on(event: string, handler: Function) { handlers.set(event, handler); },
+    registerTool() {},
+    registerCommand(name: string, opts: any) { commands.set(name, opts); },
+    registerShortcut() {},
+    registerFlag() {},
+    getFlag() { return false; },
+    exec: async () => ({ stdout: "", stderr: "", code: 0, killed: false }),
+    sendMessage() {},
+    sendUserMessage(msg: string) { sentUserMessage = msg; },
+  } as never;
+
+  memoryExtension(pi, { runSubagent: async () => ({ output: "", exitCode: 0, stderr: "", logFile: "" }), vaultDir });
+  await handlers.get("session_start")!({}, { cwd: root, ui: { notify() {}, setStatus() {} } });
+
+  await commands.get("memory").handler("reflect", {
+    cwd: root,
+    ui: { notify() {}, setStatus() {} },
+  });
+
+  // Simulate agent writing a file during the reflect turn
+  fs.writeFileSync(path.join(vaultDir, "new-learning.md"), "# Learned something");
+
+  // Fire agent_end
+  await handlers.get("agent_end")!({}, { cwd: root, ui: { notify() {}, setStatus() {} } });
+
+  const log = getLog(vaultDir, 5);
+  assert.ok(log.some(l => l.includes("reflect:")));
+});
+
+test("agent_end does not commit when no pendingCommitMessage", async () => {
+  const handlers = new Map<string, Function>();
+  const commands = new Map<string, any>();
+  const root = tmpDir();
+  const vaultDir = path.join(root, "memories");
+  fs.mkdirSync(vaultDir, { recursive: true });
+  fs.writeFileSync(path.join(vaultDir, "index.md"), "# Memory\n");
+
+  const pi = {
+    on(event: string, handler: Function) { handlers.set(event, handler); },
+    registerTool() {},
+    registerCommand(name: string, opts: any) { commands.set(name, opts); },
+    registerShortcut() {},
+    registerFlag() {},
+    getFlag() { return false; },
+    exec: async () => ({ stdout: "", stderr: "", code: 0, killed: false }),
+    sendMessage() {},
+    sendUserMessage() {},
+  } as never;
+
+  memoryExtension(pi, { runSubagent: async () => ({ output: "", exitCode: 0, stderr: "", logFile: "" }), vaultDir });
+  await handlers.get("session_start")!({}, { cwd: root, ui: { notify() {}, setStatus() {} } });
+
+  // Write a file but don't trigger any memory command
+  fs.writeFileSync(path.join(vaultDir, "ad-hoc.md"), "ad hoc edit");
+
+  // Fire agent_end — should not commit
+  await handlers.get("agent_end")!({}, { cwd: root, ui: { notify() {}, setStatus() {} } });
+
+  const log = getLog(vaultDir, 5);
+  assert.equal(log.length, 1); // only the init commit
+});
+
+test("agent_end clears pendingCommitMessage after commit", async () => {
+  const handlers = new Map<string, Function>();
+  const commands = new Map<string, any>();
+  const root = tmpDir();
+  const vaultDir = path.join(root, "memories");
+  fs.mkdirSync(vaultDir, { recursive: true });
+  fs.writeFileSync(path.join(vaultDir, "index.md"), "# Memory\n");
+
+  const pi = {
+    on(event: string, handler: Function) { handlers.set(event, handler); },
+    registerTool() {},
+    registerCommand(name: string, opts: any) { commands.set(name, opts); },
+    registerShortcut() {},
+    registerFlag() {},
+    getFlag() { return false; },
+    exec: async () => ({ stdout: "", stderr: "", code: 0, killed: false }),
+    sendMessage() {},
+    sendUserMessage() {},
+  } as never;
+
+  memoryExtension(pi, { runSubagent: async () => ({ output: "", exitCode: 0, stderr: "", logFile: "" }), vaultDir });
+  await handlers.get("session_start")!({}, { cwd: root, ui: { notify() {}, setStatus() {} } });
+
+  // Trigger reflect
+  await commands.get("memory").handler("reflect", {
+    cwd: root,
+    ui: { notify() {}, setStatus() {} },
+  });
+  fs.writeFileSync(path.join(vaultDir, "learning.md"), "learned");
+  await handlers.get("agent_end")!({}, { cwd: root, ui: { notify() {}, setStatus() {} } });
+
+  // Second agent_end with new changes should NOT commit (flag was cleared)
+  fs.writeFileSync(path.join(vaultDir, "unrelated.md"), "unrelated");
+  await handlers.get("agent_end")!({}, { cwd: root, ui: { notify() {}, setStatus() {} } });
+
+  const log = getLog(vaultDir, 10);
+  const reflectCommits = log.filter(l => l.includes("reflect:"));
+  assert.equal(reflectCommits.length, 1);
 });

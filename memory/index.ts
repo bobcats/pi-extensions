@@ -18,7 +18,7 @@ import {
   type MemoryScope,
 } from "./lib.ts";
 import { getInitState, initVault } from "./init.ts";
-import { initGitRepo } from "./git.ts";
+import { initGitRepo, commitVaultChanges } from "./git.ts";
 import { buildMeditateApplyPrompt, buildReflectPrompt, buildRuminateApplyPrompt } from "./prompts.ts";
 import { ProgressWidget } from "./widget.ts";
 import { synthesizeFindings, formatSynthesisTable } from "./ruminate.ts";
@@ -69,6 +69,7 @@ export default function memoryExtension(
   let globalScope: MemoryScope | null = null;
   let memoryEnabled = true;
   let lastCtx: ExtensionContext | null = null;
+  let pendingCommitMessage: string | null = null;
 
   function loadScope(dir: string): MemoryScope | null {
     const indexContent = readVaultIndex(dir);
@@ -142,6 +143,13 @@ export default function memoryExtension(
     return undefined;
   });
 
+  pi.on("agent_end", async () => {
+    if (!pendingCommitMessage) return;
+    const message = pendingCommitMessage;
+    pendingCommitMessage = null;
+    commitVaultChanges(globalDir, message);
+  });
+
   const MEMORY_SUBCOMMANDS: AutocompleteItem[] = [
     { value: "reflect",   label: "reflect",   description: "Capture learnings from current session" },
     { value: "meditate",  label: "meditate",  description: "Audit and evolve the vault" },
@@ -178,6 +186,7 @@ export default function memoryExtension(
       if (trimmed === "reflect") {
         const prompt = buildReflectPrompt(globalDir);
         pi.sendUserMessage(prompt);
+        pendingCommitMessage = "reflect: capture session learnings";
         return;
       }
 
@@ -270,6 +279,7 @@ export default function memoryExtension(
           deliverAs: "followUp",
           triggerTurn: true,
         });
+        pendingCommitMessage = "meditate: apply audit findings";
 
         fs.rmSync(snapshotPath, { force: true });
         fs.rmSync(auditPath, { force: true });
@@ -366,6 +376,7 @@ export default function memoryExtension(
           deliverAs: "followUp",
           triggerTurn: true,
         });
+        pendingCommitMessage = "ruminate: apply mined findings";
         return;
       }
 
