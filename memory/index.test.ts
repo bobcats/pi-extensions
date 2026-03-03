@@ -577,6 +577,60 @@ test("/memory ruminate starts in background and returns immediately", async () =
   assert.equal(completed, true);
 });
 
+test("/memory ruminate background does not open custom overlay", async () => {
+  const handlers = new Map<string, Function>();
+  const commands = new Map<string, any>();
+  const root = tmpDir();
+
+  const encodedCwd = encodeProjectSessionPath(root);
+  const projectSessionsDir = path.join(os.homedir(), ".pi", "agent", "sessions", encodedCwd);
+  fs.mkdirSync(projectSessionsDir, { recursive: true });
+  writeSessionFile(projectSessionsDir, "session-0.jsonl", "this is conversation text with enough characters to pass parsing filters");
+
+  let customCalls = 0;
+  let sent = false;
+
+  const pi = {
+    on(event: string, handler: Function) { handlers.set(event, handler); },
+    registerTool() {},
+    registerCommand(name: string, opts: any) { commands.set(name, opts); },
+    registerShortcut() {},
+    registerFlag() {},
+    getFlag() { return false; },
+    exec: async () => ({ stdout: "", stderr: "", code: 0, killed: false }),
+    sendMessage() { sent = true; },
+  } as never;
+
+  memoryExtension(pi, {
+    staggerMs: 0,
+    runSubagent: async () => ({
+      output: "# Findings\n\n- recurring pattern",
+      exitCode: 0,
+      stderr: "",
+      logFile: "",
+    }),
+  });
+
+  await handlers.get("session_start")!({}, { cwd: root, ui: { notify() {}, setStatus() {} } });
+
+  await commands.get("memory").handler("ruminate", {
+    cwd: root,
+    hasUI: true,
+    ui: {
+      notify() {},
+      setStatus() {},
+      setWidget() {},
+      custom: async () => { customCalls += 1; return undefined; },
+      editor: async () => "",
+      select: async () => "",
+    },
+  });
+
+  await waitFor(() => sent);
+  fs.rmSync(projectSessionsDir, { recursive: true, force: true });
+  assert.equal(customCalls, 0);
+});
+
 test("/memory cancel ruminate aborts active background run", async () => {
   const handlers = new Map<string, Function>();
   const commands = new Map<string, any>();

@@ -22,42 +22,7 @@ import { initGitRepo, commitVaultChanges, undoLastCommit, getLog } from "./git.t
 import { buildMeditateApplyPrompt, buildReflectPrompt, buildRuminateApplyPrompt } from "./prompts.ts";
 import { ProgressWidget } from "./widget.ts";
 import { buildVaultSnapshot, runSubagent, extractConversations, encodeProjectSessionPath } from "./subagent.ts";
-import { ActivityOverlay } from "./activity-overlay.ts";
 import type { DateFilter } from "./subagent.ts";
-
-function openActivityOverlay(
-  ctx: ExtensionContext,
-  initialAgent: string,
-): { overlay: ActivityOverlay; hide: () => void } | null {
-  if (!ctx.hasUI) return null;
-
-  const overlay = new ActivityOverlay();
-  let handle: { hide: () => void } | undefined;
-
-  ctx.ui.custom(
-    () => {
-      overlay.setAgent(initialAgent);
-      return {
-        render: (w: number) => overlay.render(w),
-        invalidate: () => overlay.invalidate(),
-        handleInput: () => {},
-      };
-    },
-    {
-      overlay: true,
-      overlayOptions: {
-        anchor: "right-center",
-        width: "40%",
-        minWidth: 30,
-        maxHeight: "80%",
-        visible: (tw: number) => tw >= 100,
-      },
-      onHandle: (h) => { handle = h; },
-    },
-  );
-
-  return { overlay, hide: () => handle?.hide() };
-}
 
 export default function memoryExtension(
   pi: ExtensionAPI,
@@ -252,7 +217,6 @@ export default function memoryExtension(
 
     const widget = new ProgressWidget(ctx.ui, "meditate");
     widget.setStep("Auditor", "running");
-    const activityPanel = openActivityOverlay(ctx, "Auditor");
 
     try {
       const auditor = await deps.runSubagent(
@@ -260,11 +224,7 @@ export default function memoryExtension(
         `Read the vault snapshot at ${snapshotPath} and return your audit report in markdown.`,
         cwd,
         undefined,
-        (event) => {
-          if (event.type === "text_delta") {
-            activityPanel?.overlay.appendText(event.text);
-          }
-        },
+        undefined,
         signal,
       );
 
@@ -287,17 +247,12 @@ export default function memoryExtension(
       let reviewerOutput = "";
       if (actionable >= 3) {
         widget.setStep("Reviewer", "running");
-        activityPanel?.overlay.setAgent("Reviewer");
         const reviewer = await deps.runSubagent(
           reviewerAgentPath,
           `Read the vault snapshot at ${snapshotPath} and the audit report at ${auditPath}. Return your review report in markdown.`,
           cwd,
           undefined,
-          (event) => {
-            if (event.type === "text_delta") {
-              activityPanel?.overlay.appendText(event.text);
-            }
-          },
+          undefined,
           signal,
         );
 
@@ -339,7 +294,6 @@ export default function memoryExtension(
       });
       pendingCommitMessages.push("meditate: apply audit findings");
     } finally {
-      activityPanel?.hide();
       widget.clear();
       fs.rmSync(snapshotPath, { force: true });
       fs.rmSync(auditPath, { force: true });
@@ -364,7 +318,6 @@ export default function memoryExtension(
     const ts = Date.now();
     const outputDir = path.join(os.tmpdir(), `memory-ruminate-${ts}`);
     let widget: ProgressWidget | null = null;
-    let activityPanel: { overlay: ActivityOverlay; hide: () => void } | null = null;
 
     try {
       const jsonlCount = fs.readdirSync(projectSessionsDir).filter((f) => f.endsWith(".jsonl")).length;
@@ -387,8 +340,6 @@ export default function memoryExtension(
         widget.setStep(`Miner ${i + 1}`, "running");
       }
 
-      activityPanel = openActivityOverlay(ctx, "Miner 1");
-
       const tasks = extraction.batches.map(async (manifestPath, i) => {
         if (i > 0) await new Promise((r) => setTimeout(r, i * staggerMs));
         if (signal.aborted) return null;
@@ -398,12 +349,7 @@ export default function memoryExtension(
           `Read the batch manifest at ${manifestPath} — it lists conversation file paths, one per line. Read each conversation file. Also read the vault snapshot at ${snapshotPath} to see what knowledge is already captured. Return high-signal findings in markdown.`,
           cwd,
           undefined,
-          (event) => {
-            if (event.type === "text_delta") {
-              activityPanel?.overlay.setLabel(`Miner ${i + 1}`);
-              activityPanel?.overlay.appendText(event.text);
-            }
-          },
+          undefined,
           signal,
         );
 
@@ -445,7 +391,6 @@ export default function memoryExtension(
       });
       pendingCommitMessages.push("ruminate: apply mined findings");
     } finally {
-      activityPanel?.hide();
       widget?.clear();
       fs.rmSync(outputDir, { recursive: true, force: true });
     }
