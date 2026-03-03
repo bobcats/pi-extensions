@@ -18,6 +18,7 @@ import {
   type MemoryScope,
 } from "./lib.ts";
 import { getInitState, initVault } from "./init.ts";
+import { initGitRepo } from "./git.ts";
 import { buildMeditateApplyPrompt, buildReflectPrompt, buildRuminateApplyPrompt } from "./prompts.ts";
 import { ProgressWidget } from "./widget.ts";
 import { synthesizeFindings, formatSynthesisTable } from "./ruminate.ts";
@@ -61,10 +62,10 @@ function openActivityOverlay(
 
 export default function memoryExtension(
   pi: ExtensionAPI,
-  deps: { runSubagent: typeof runSubagent; staggerMs?: number } = { runSubagent },
+  deps: { runSubagent: typeof runSubagent; staggerMs?: number; vaultDir?: string } = { runSubagent },
 ) {
   const staggerMs = deps.staggerMs ?? 2000;
-  let globalDir = path.join(os.homedir(), ".pi", "memories");
+  let globalDir = deps.vaultDir ?? path.join(os.homedir(), ".pi", "memories");
   let globalScope: MemoryScope | null = null;
   let memoryEnabled = true;
   let lastCtx: ExtensionContext | null = null;
@@ -87,6 +88,7 @@ export default function memoryExtension(
   pi.on("session_start", async (_event, ctx) => {
     lastCtx = ctx;
     globalScope = loadScope(globalDir);
+    if (globalScope) initGitRepo(globalDir);
     updateStatus(ctx);
   });
 

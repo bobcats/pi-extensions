@@ -773,3 +773,29 @@ test("/memory ruminate sends apply handoff when findings exist", async () => {
   assert.match(sent.content, /Always run tests/);
   assert.match(sent.content, /approve/i);
 });
+
+test("session_start initializes git repo in vault directory", async () => {
+  const handlers = new Map<string, Function>();
+  const root = tmpDir();
+  const vaultDir = path.join(root, "memories");
+  fs.mkdirSync(vaultDir, { recursive: true });
+  fs.writeFileSync(path.join(vaultDir, "index.md"), "# Memory\n");
+
+  const pi = {
+    on(event: string, handler: Function) { handlers.set(event, handler); },
+    registerTool() {},
+    registerCommand() {},
+    registerShortcut() {},
+    registerFlag() {},
+    getFlag() { return false; },
+    exec: async () => ({ stdout: "", stderr: "", code: 0, killed: false }),
+    sendMessage() {},
+  } as never;
+
+  memoryExtension(pi, { runSubagent: async () => ({ output: "", exitCode: 0, stderr: "", logFile: "" }), vaultDir });
+  await handlers.get("session_start")!({}, { cwd: root, ui: { notify() {}, setStatus() {} } });
+
+  // Verify git repo was initialized
+  const { isGitRepo } = await import("./git.ts");
+  assert.equal(isGitRepo(vaultDir), true);
+});
