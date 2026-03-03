@@ -87,24 +87,30 @@ Apply approved changes directly and keep edits scoped to findings with clear evi
 }
 
 export function buildRuminateApplyPrompt(
-  synthesisTable: string,
+  minerOutputs: string[],
   dir: string,
 ): string {
+  const findings = minerOutputs
+    .map((output, i) => `### Batch ${i + 1}\n\n${output}`)
+    .join("\n\n");
+
   return `# Ruminate Findings
 
-Review the findings below from mining past conversations. Present them to the user and apply approved changes.
+Review the raw findings below from mining past conversations. Deduplicate, filter, and present them to the user.
 
-## Findings
+## Raw Miner Outputs
 
-${synthesisTable || "(no findings)"}
+${findings || "(no findings)"}
 
 ## Apply workflow
 
-1. Present the findings table to the user. Be honest about which are one-offs vs. recurring patterns.
-2. Ask which findings the user wants to persist.
-3. Route each approved finding:
+1. Read all findings across batches. Deduplicate semantically — merge findings that describe the same insight in different words.
+2. Filter by frequency and impact. Prefer recurring patterns over one-offs. Discard aggressively — 3 high-signal findings beats 9 with noise.
+3. Present a consolidated table to the user with columns: finding, frequency/evidence, proposed action. Be honest about which are one-offs vs. recurring patterns.
+4. Ask which findings the user wants to persist.
+5. Route each approved finding:
    - **Memory vault**: Create or update files under \`${dir}/\`. One topic per file, use \`[[wikilinks]]\`, prefer updating existing notes over creating new ones. Project-specific notes go under \`${dir}/projects/<project-name>/\`.
    - **Skill files**: If a finding is about how a specific skill works, update the skill's SKILL.md directly. Read the skill first to avoid duplication.
-4. Update \`${dir}/index.md\` if files were added or removed.
+6. Update \`${dir}/index.md\` if files were added or removed.
 `;
 }
