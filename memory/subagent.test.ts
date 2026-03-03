@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
-import { buildVaultSnapshot, parseSessionMessages, batchConversations, extractConversations, encodeProjectSessionPath, MIN_FILE_SIZE } from "./subagent.ts";
+import { buildVaultSnapshot, parseSessionMessages, batchConversations, extractConversations, encodeProjectSessionPath, MIN_FILE_SIZE, runSubagent } from "./subagent.ts";
 
 function tmpDir(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), "memory-subagent-test-"));
@@ -265,4 +265,34 @@ test("parseJsonEvent returns null for non-streaming events", async () => {
   
   assert.equal(parseJsonEvent(JSON.stringify({ type: "agent_start" })), null);
   assert.equal(parseJsonEvent("not json"), null);
+});
+
+test("runSubagent abort signal cancels spawned process", async () => {
+  const binDir = tmpDir();
+  const cwd = tmpDir();
+  const piPath = path.join(binDir, "pi");
+  fs.writeFileSync(piPath, "#!/bin/sh\nsleep 30\n");
+  fs.chmodSync(piPath, 0o755);
+
+  const oldPath = process.env.PATH;
+  process.env.PATH = `${binDir}:${oldPath}`;
+
+  try {
+    const controller = new AbortController();
+    setTimeout(() => controller.abort(), 30);
+
+    const result = await runSubagent(
+      "/tmp/fake-agent.md",
+      "Task: noop",
+      cwd,
+      10_000,
+      undefined,
+      controller.signal,
+    );
+
+    assert.equal(result.exitCode, 1);
+    assert.match(result.stderr, /cancel/i);
+  } finally {
+    process.env.PATH = oldPath;
+  }
 });

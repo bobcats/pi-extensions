@@ -202,6 +202,7 @@ export async function runSubagent(
   cwd: string,
   timeoutMs: number = DEFAULT_TIMEOUT_MS,
   onData?: (event: StreamEvent) => void,
+  signal?: AbortSignal,
 ): Promise<SubagentResult> {
   const args = [
     "--mode", "json",
@@ -213,6 +214,17 @@ export async function runSubagent(
 
   const logFile = path.join(os.tmpdir(), `pi-subagent-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.log`);
 
+  if (signal?.aborted) {
+    const stderr = "Subagent cancelled";
+    const log = [
+      "=== subagent cancelled before spawn ===",
+      `agent: ${agentPath}`,
+      `cwd: ${cwd}`,
+    ].join("\n");
+    fs.writeFileSync(logFile, log);
+    return { output: "", exitCode: 1, stderr, logFile };
+  }
+
   return new Promise((resolve) => {
     const proc = spawn("pi", args, {
       cwd,
@@ -223,10 +235,37 @@ export async function runSubagent(
     let stdout = "";
     let stderr = "";
     let resolved = false;
+    let timeout: ReturnType<typeof setTimeout> | undefined;
 
-    const timeout = setTimeout(() => {
+    const finish = (result: SubagentResult) => {
       if (resolved) return;
       resolved = true;
+      if (timeout) {
+        clearTimeout(timeout);
+        timeout = undefined;
+      }
+      signal?.removeEventListener("abort", onAbort);
+      resolve(result);
+    };
+
+    const onAbort = () => {
+      proc.kill();
+      const cancelStderr = "Subagent cancelled";
+      const log = [
+        "=== subagent cancelled ===",
+        `agent: ${agentPath}`,
+        `cwd: ${cwd}`,
+        "",
+        "=== stderr ===",
+        stderr || "(empty)",
+      ].join("\n");
+      fs.writeFileSync(logFile, log);
+      finish({ output: "", exitCode: 1, stderr: cancelStderr, logFile });
+    };
+
+    signal?.addEventListener("abort", onAbort, { once: true });
+
+    timeout = setTimeout(() => {
       proc.kill();
       const timeoutStderr = `Subagent timed out after ${Math.round(timeoutMs / 1000)}s`;
       const log = [
@@ -239,7 +278,7 @@ export async function runSubagent(
         stderr || "(empty)",
       ].join("\n");
       fs.writeFileSync(logFile, log);
-      resolve({ output: "", exitCode: 1, stderr: timeoutStderr, logFile });
+      finish({ output: "", exitCode: 1, stderr: timeoutStderr, logFile });
     }, timeoutMs);
     timeout.unref();
 
@@ -261,8 +300,8 @@ export async function runSubagent(
     proc.stderr.on("data", (data) => { stderr += data.toString(); });
 
     proc.on("close", (code) => {
-      clearTimeout(timeout);
       if (resolved) return;
+
       let output = "";
       for (const line of stdout.split("\n")) {
         if (!line.trim()) continue;
@@ -295,14 +334,12 @@ export async function runSubagent(
       ].join("\n");
       fs.writeFileSync(logFile, log);
 
-      resolved = true;
-      resolve({ output, exitCode: code ?? 1, stderr, logFile });
+      finish({ output, exitCode: code ?? 1, stderr, logFile });
     });
 
     proc.on("error", (err) => {
-      clearTimeout(timeout);
       if (resolved) return;
-      resolved = true;
+
       const log = [
         `=== subagent spawn error ===`,
         `agent: ${agentPath}`,
@@ -310,7 +347,7 @@ export async function runSubagent(
       ].join("\n");
       fs.writeFileSync(logFile, log);
 
-      resolve({ output: "", exitCode: 1, stderr: "Failed to spawn pi", logFile });
+      finish({ output: "", exitCode: 1, stderr: "Failed to spawn pi", logFile });
     });
   });
 }
