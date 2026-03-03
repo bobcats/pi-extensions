@@ -122,10 +122,14 @@ export default function memoryExtension(
   });
 
   pi.on("session_before_switch", async (_event, ctx) => {
-    for (const [name, task] of backgroundTasks) {
+    const running = Array.from(backgroundTasks.entries());
+
+    for (const [name, task] of running) {
       task.abortController.abort();
       ctx.ui.notify(`Cancelled running ${name} before session switch.`, "info");
     }
+
+    await Promise.all(running.map(([, task]) => task.promise));
   });
 
   pi.on("before_agent_start", async (event) => {

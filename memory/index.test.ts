@@ -647,8 +647,6 @@ test("session_before_switch aborts running memory background tasks", async () =>
   writeSessionFile(projectSessionsDir, "session-0.jsonl", "this is conversation text with enough characters to pass parsing filters");
 
   let abortCount = 0;
-  let releaseRuminate: (() => void) | undefined;
-  let releaseMeditate: (() => void) | undefined;
 
   const pi = {
     on(event: string, handler: Function) { handlers.set(event, handler); },
@@ -663,12 +661,10 @@ test("session_before_switch aborts running memory background tasks", async () =>
 
   memoryExtension(pi, {
     vaultDir,
-    runSubagent: async (agentPath, _task, _cwd, _timeout, _onData, signal) => {
-      if (signal?.aborted) abortCount += 1;
-      signal?.addEventListener("abort", () => { abortCount += 1; }, { once: true });
+    runSubagent: async (_agentPath, _task, _cwd, _timeout, _onData, signal) => {
       await new Promise<void>((resolve) => {
-        if (agentPath.endsWith("auditor.md")) releaseMeditate = resolve;
-        else releaseRuminate = resolve;
+        if (signal?.aborted) { abortCount += 1; resolve(); return; }
+        signal?.addEventListener("abort", () => { abortCount += 1; resolve(); }, { once: true });
       });
       return { output: "", exitCode: 1, stderr: "Cancelled", logFile: "" };
     },
@@ -698,11 +694,8 @@ test("session_before_switch aborts running memory background tasks", async () =>
 
   await handlers.get("session_before_switch")!({ reason: "new" }, { cwd: root, ui: { notify() {}, setStatus() {} } });
 
-  await waitFor(() => abortCount >= 2);
-  releaseRuminate?.();
-  releaseMeditate?.();
   fs.rmSync(projectSessionsDir, { recursive: true, force: true });
-  assert.equal(abortCount >= 2, true);
+  assert.ok(abortCount >= 2, `expected at least 2 aborts, got ${abortCount}`);
 });
 
 test("/memory meditate runs subagents via runSubagent dependency", async () => {
@@ -1357,6 +1350,56 @@ test("agent_end commits queued messages in order when reflect overlaps with back
   const log = getLog(vaultDir, 10).join("\n");
   assert.match(log, /reflect: capture session learnings/);
   assert.match(log, /ruminate: apply mined findings/);
+
+  fs.rmSync(projectSessionsDir, { recursive: true, force: true });
+});
+
+test("session_before_switch waits for aborted task cleanup", async () => {
+  const handlers = new Map<string, Function>();
+  const commands = new Map<string, any>();
+  const root = tmpDir();
+
+  const encodedCwd = encodeProjectSessionPath(root);
+  const projectSessionsDir = path.join(os.homedir(), ".pi", "agent", "sessions", encodedCwd);
+  fs.mkdirSync(projectSessionsDir, { recursive: true });
+  writeSessionFile(projectSessionsDir, "session-0.jsonl", "message with enough text to pass filters");
+
+  const pi = {
+    on(event: string, handler: Function) { handlers.set(event, handler); },
+    registerTool() {},
+    registerCommand(name: string, opts: any) { commands.set(name, opts); },
+    registerShortcut() {},
+    registerFlag() {},
+    getFlag() { return false; },
+    exec: async () => ({ stdout: "", stderr: "", code: 0, killed: false }),
+    sendMessage() {},
+  } as never;
+
+  memoryExtension(pi, {
+    runSubagent: async (_agent, _task, _cwd, _timeout, _onData, signal) => {
+      if (!signal) return { output: "", exitCode: 1, stderr: "missing signal", logFile: "" };
+      await new Promise<void>((resolve) => {
+        signal.addEventListener("abort", () => {
+          setTimeout(resolve, 40);
+        }, { once: true });
+      });
+      return { output: "", exitCode: 1, stderr: "Cancelled", logFile: "" };
+    },
+  });
+
+  await handlers.get("session_start")!({}, { cwd: root, ui: { notify() {}, setStatus() {} } });
+
+  await commands.get("memory").handler("ruminate", {
+    cwd: root,
+    hasUI: false,
+    ui: { notify() {}, setStatus() {}, setWidget() {}, editor: async () => "", select: async () => "" },
+  });
+
+  const startedAt = Date.now();
+  await handlers.get("session_before_switch")!({ reason: "new" }, { cwd: root, ui: { notify() {}, setStatus() {} } });
+  const elapsed = Date.now() - startedAt;
+
+  assert.ok(elapsed >= 35, `expected switch to await cleanup, elapsed=${elapsed}ms`);
 
   fs.rmSync(projectSessionsDir, { recursive: true, force: true });
 });
