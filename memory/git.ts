@@ -42,15 +42,9 @@ export function commitVaultChanges(dir: string, message: string): boolean {
 export function undoLastCommit(dir: string): { success: true; undoneMessage: string } | { success: false; error: string } {
   if (!isGitRepo(dir)) return { success: false, error: "Not a git repository" };
 
-  let commitCount: number;
   try {
-    const output = git(dir, ["rev-list", "--count", "HEAD"]);
-    commitCount = parseInt(output, 10);
+    git(dir, ["rev-parse", "--verify", "HEAD~1"]);
   } catch {
-    return { success: false, error: "No commits in repository" };
-  }
-
-  if (commitCount <= 1) {
     return { success: false, error: "Cannot undo initial commit" };
   }
 

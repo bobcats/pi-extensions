@@ -424,6 +424,7 @@ export default function memoryExtension(
           }
 
           const result = initVault(globalDir, true);
+          initGitRepo(globalDir);
           refreshScope();
           updateStatus(ctx);
           ctx.ui.notify(`Global memory vault updated with ${result.principlesInstalled} starter principles.`, "success");
@@ -431,6 +432,7 @@ export default function memoryExtension(
         }
 
         const result = initVault(globalDir, true);
+        initGitRepo(globalDir);
         refreshScope();
         updateStatus(ctx);
         ctx.ui.notify(`Global memory vault initialized with ${result.principlesInstalled} starter principles.`, "success");
