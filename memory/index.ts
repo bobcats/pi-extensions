@@ -23,10 +23,10 @@ import { buildMeditateApplyPrompt, buildReflectPrompt, buildRuminateApplyPrompt 
 import { ProgressWidget } from "./widget.ts";
 import { buildVaultSnapshot, runSubagent, extractConversations, encodeProjectSessionPath } from "./subagent.ts";
 import { ActivityOverlay } from "./activity-overlay.ts";
-import type { DateFilter, StreamEvent } from "./subagent.ts";
+import type { DateFilter } from "./subagent.ts";
 
 function openActivityOverlay(
-  ctx: ExtensionCommandContext,
+  ctx: ExtensionContext,
   initialAgent: string,
 ): { overlay: ActivityOverlay; hide: () => void } | null {
   if (!ctx.hasUI) return null;
@@ -64,11 +64,18 @@ export default function memoryExtension(
   deps: { runSubagent: typeof runSubagent; staggerMs?: number; vaultDir?: string } = { runSubagent },
 ) {
   const staggerMs = deps.staggerMs ?? 2000;
-  let globalDir = deps.vaultDir ?? path.join(os.homedir(), ".pi", "memories");
+  const globalDir = deps.vaultDir ?? path.join(os.homedir(), ".pi", "memories");
   let globalScope: MemoryScope | null = null;
   let memoryEnabled = true;
   let lastCtx: ExtensionContext | null = null;
-  let pendingCommitMessage: string | null = null;
+  const pendingCommitMessages: string[] = [];
+
+  interface BackgroundTask {
+    abortController: AbortController;
+    promise: Promise<void>;
+  }
+
+  const backgroundTasks = new Map<string, BackgroundTask>();
 
   function loadScope(dir: string): MemoryScope | null {
     const indexContent = readVaultIndex(dir);
@@ -85,11 +92,40 @@ export default function memoryExtension(
     ctx.ui.setStatus("memory", formatMemoryStatus(memoryEnabled, !!globalScope, globalScope?.fileCount ?? 0));
   }
 
+  function getCurrentCtx(expectedCwd: string): ExtensionContext | null {
+    if (!lastCtx) return null;
+    if (lastCtx.cwd !== expectedCwd) return null;
+    return lastCtx;
+  }
+
+  function launchBackground(name: string, cwd: string, fn: (signal: AbortSignal) => Promise<void>): void {
+    const abortController = new AbortController();
+    const promise = fn(abortController.signal)
+      .catch((error) => {
+        getCurrentCtx(cwd)?.ui.notify(
+          `${name} failed: ${error instanceof Error ? error.message : String(error)}`,
+          "error",
+        );
+      })
+      .finally(() => {
+        const task = backgroundTasks.get(name);
+        if (task?.promise === promise) backgroundTasks.delete(name);
+      });
+    backgroundTasks.set(name, { abortController, promise });
+  }
+
   pi.on("session_start", async (_event, ctx) => {
     lastCtx = ctx;
     globalScope = loadScope(globalDir);
     if (globalScope) initGitRepo(globalDir);
     updateStatus(ctx);
+  });
+
+  pi.on("session_before_switch", async (_event, ctx) => {
+    for (const [name, task] of backgroundTasks) {
+      task.abortController.abort();
+      ctx.ui.notify(`Cancelled running ${name} before session switch.`, "info");
+    }
   });
 
   pi.on("before_agent_start", async (event) => {
@@ -143,9 +179,8 @@ export default function memoryExtension(
   });
 
   pi.on("agent_end", async () => {
-    if (!pendingCommitMessage) return;
-    const message = pendingCommitMessage;
-    pendingCommitMessage = null;
+    const message = pendingCommitMessages.shift();
+    if (!message) return;
     commitVaultChanges(globalDir, message);
   });
 
@@ -155,6 +190,8 @@ export default function memoryExtension(
     { value: "ruminate",  label: "ruminate",  description: "Mine past sessions for patterns" },
     { value: "ruminate --from",  label: "ruminate --from",  description: "Mine sessions modified on or after YYYY-MM-DD" },
     { value: "ruminate --to",    label: "ruminate --to",    description: "Mine sessions modified on or before YYYY-MM-DD" },
+    { value: "cancel ruminate", label: "cancel ruminate", description: "Cancel running ruminate task" },
+    { value: "cancel meditate", label: "cancel meditate", description: "Cancel running meditate task" },
     { value: "undo",      label: "undo",      description: "Revert the last memory commit" },
     { value: "log",       label: "log",       description: "Show recent memory vault history" },
     { value: "on",        label: "on",        description: "Enable memory for this session" },
@@ -187,6 +224,229 @@ export default function memoryExtension(
     return { fromDate, toDate };
   }
 
+  function isCancelledResult(result: { stderr: string }, signal: AbortSignal): boolean {
+    return signal.aborted || /cancel/i.test(result.stderr);
+  }
+
+  async function runMeditateBackground(cwd: string, signal: AbortSignal): Promise<void> {
+    const ctx = getCurrentCtx(cwd);
+    if (!ctx) return;
+
+    const snapshot = buildVaultSnapshot(globalDir);
+    if (!snapshot.trim()) {
+      ctx.ui.notify("No vault content found to audit.", "info");
+      return;
+    }
+
+    const ts = Date.now();
+    const snapshotPath = path.join(os.tmpdir(), `memory-vault-snapshot-${ts}.md`);
+    const auditPath = path.join(os.tmpdir(), `memory-audit-report-${ts}.md`);
+    const reviewPath = path.join(os.tmpdir(), `memory-review-report-${ts}.md`);
+    const auditorAgentPath = path.join(import.meta.dirname, "agents", "auditor.md");
+    const reviewerAgentPath = path.join(import.meta.dirname, "agents", "reviewer.md");
+    fs.writeFileSync(snapshotPath, snapshot);
+
+    const widget = new ProgressWidget(ctx.ui, "meditate");
+    widget.setStep("Auditor", "running");
+    const activityPanel = openActivityOverlay(ctx, "Auditor");
+
+    try {
+      const auditor = await deps.runSubagent(
+        auditorAgentPath,
+        `Read the vault snapshot at ${snapshotPath} and return your audit report in markdown.`,
+        cwd,
+        undefined,
+        (event) => {
+          if (event.type === "text_delta") {
+            activityPanel?.overlay.appendText(event.text);
+          }
+        },
+        signal,
+      );
+
+      if (isCancelledResult(auditor, signal)) {
+        ctx.ui.notify("Meditate cancelled.", "info");
+        return;
+      }
+
+      if (auditor.exitCode !== 0 || !auditor.output.trim()) {
+        const reason = auditor.stderr || (auditor.output.trim() ? "unknown error" : "no output");
+        widget.setStep("Auditor", "error", `${reason.split("\n")[0].slice(0, 80)} — log: ${auditor.logFile}`);
+        ctx.ui.notify(`Meditate failed (auditor): ${reason}\nLog: ${auditor.logFile}`, "error");
+        return;
+      }
+
+      fs.writeFileSync(auditPath, auditor.output);
+      const actionable = (auditor.output.match(/^-\s+/gm) ?? []).length;
+      widget.setStep("Auditor", "done", `${actionable} findings`);
+
+      let reviewerOutput = "";
+      if (actionable >= 3) {
+        widget.setStep("Reviewer", "running");
+        activityPanel?.overlay.setAgent("Reviewer");
+        const reviewer = await deps.runSubagent(
+          reviewerAgentPath,
+          `Read the vault snapshot at ${snapshotPath} and the audit report at ${auditPath}. Return your review report in markdown.`,
+          cwd,
+          undefined,
+          (event) => {
+            if (event.type === "text_delta") {
+              activityPanel?.overlay.appendText(event.text);
+            }
+          },
+          signal,
+        );
+
+        if (isCancelledResult(reviewer, signal)) {
+          ctx.ui.notify("Meditate cancelled.", "info");
+          return;
+        }
+
+        if (reviewer.exitCode !== 0) {
+          widget.setStep("Reviewer", "error", `log: ${reviewer.logFile}`);
+          ctx.ui.notify(`Meditate partial (reviewer failed): ${reviewer.stderr || "unknown error"}\nLog: ${reviewer.logFile}`, "warning");
+        } else {
+          reviewerOutput = reviewer.output;
+          widget.setStep("Reviewer", "done");
+          fs.writeFileSync(reviewPath, reviewerOutput || "# Review Report\n\nNo additional findings.");
+        }
+      }
+
+      const summary = [
+        "## Meditate Summary",
+        `- Auditor findings: ${actionable}`,
+        `- Reviewer run: ${actionable >= 3 ? (reviewerOutput ? "yes" : "failed") : "skipped"}`,
+        "",
+        auditor.output ? `### Audit\n${auditor.output}` : "",
+        reviewerOutput ? `\n### Review\n${reviewerOutput}` : "",
+      ].join("\n");
+
+      ctx.ui.notify(summary, "info");
+
+      if (signal.aborted) {
+        ctx.ui.notify("Meditate cancelled.", "info");
+        return;
+      }
+
+      pi.sendMessage({
+        content: buildMeditateApplyPrompt(auditor.output, reviewerOutput, globalDir),
+        deliverAs: "followUp",
+        triggerTurn: true,
+      });
+      pendingCommitMessages.push("meditate: apply audit findings");
+    } finally {
+      activityPanel?.hide();
+      widget.clear();
+      fs.rmSync(snapshotPath, { force: true });
+      fs.rmSync(auditPath, { force: true });
+      fs.rmSync(reviewPath, { force: true });
+    }
+  }
+
+  async function runRuminateBackground(cwd: string, signal: AbortSignal, options: DateFilter): Promise<void> {
+    const ctx = getCurrentCtx(cwd);
+    if (!ctx) return;
+
+    const minerAgentPath = path.join(import.meta.dirname, "agents", "miner.md");
+    const sessionsRoot = path.join(os.homedir(), ".pi", "agent", "sessions");
+    const encodedCwd = encodeProjectSessionPath(cwd);
+    const projectSessionsDir = path.join(sessionsRoot, encodedCwd);
+
+    if (!fs.existsSync(projectSessionsDir)) {
+      ctx.ui.notify("No sessions found for project.", "info");
+      return;
+    }
+
+    const ts = Date.now();
+    const outputDir = path.join(os.tmpdir(), `memory-ruminate-${ts}`);
+    let widget: ProgressWidget | null = null;
+    let activityPanel: { overlay: ActivityOverlay; hide: () => void } | null = null;
+
+    try {
+      const jsonlCount = fs.readdirSync(projectSessionsDir).filter((f) => f.endsWith(".jsonl")).length;
+      const numBatches = Math.max(2, Math.min(10, Math.ceil(jsonlCount / 20)));
+
+      const extraction = extractConversations(projectSessionsDir, outputDir, numBatches, options);
+
+      if (extraction.conversationCount === 0) {
+        ctx.ui.notify("No parseable conversation messages found in project sessions.", "info");
+        return;
+      }
+
+      const snapshot = buildVaultSnapshot(globalDir);
+      const snapshotPath = path.join(outputDir, "vault-snapshot.md");
+      fs.writeFileSync(snapshotPath, snapshot);
+
+      widget = new ProgressWidget(ctx.ui, "ruminate");
+      widget.setHeader(`Found ${extraction.conversationCount} conversations in ${extraction.batches.length} batches`);
+      for (let i = 0; i < extraction.batches.length; i++) {
+        widget.setStep(`Miner ${i + 1}`, "running");
+      }
+
+      activityPanel = openActivityOverlay(ctx, "Miner 1");
+
+      const tasks = extraction.batches.map(async (manifestPath, i) => {
+        if (i > 0) await new Promise((r) => setTimeout(r, i * staggerMs));
+        if (signal.aborted) return null;
+
+        const result = await deps.runSubagent(
+          minerAgentPath,
+          `Read the batch manifest at ${manifestPath} — it lists conversation file paths, one per line. Read each conversation file. Also read the vault snapshot at ${snapshotPath} to see what knowledge is already captured. Return high-signal findings in markdown.`,
+          cwd,
+          undefined,
+          (event) => {
+            if (event.type === "text_delta") {
+              activityPanel?.overlay.setLabel(`Miner ${i + 1}`);
+              activityPanel?.overlay.appendText(event.text);
+            }
+          },
+          signal,
+        );
+
+        if (isCancelledResult(result, signal)) return null;
+
+        if (result.exitCode !== 0 || !result.output.trim()) {
+          const hint = result.stderr ? result.stderr.split("\n")[0].slice(0, 80) : `exit ${result.exitCode}`;
+          widget?.setStep(`Miner ${i + 1}`, "error", `${hint} — log: ${result.logFile}`);
+          return null;
+        }
+
+        const findings = (result.output.match(/^-\s+/gm) ?? []).length;
+        widget?.setStep(`Miner ${i + 1}`, "done", `${findings} findings`);
+
+        return { index: i, output: result.output };
+      });
+
+      const minerOutputs = (await Promise.all(tasks))
+        .filter((item): item is { index: number; output: string } => item !== null)
+        .sort((a, b) => a.index - b.index)
+        .map((item) => item.output);
+
+      if (signal.aborted) {
+        ctx.ui.notify("Ruminate cancelled.", "info");
+        return;
+      }
+
+      if (minerOutputs.length === 0) {
+        ctx.ui.notify(`Ruminate complete — processed ${extraction.conversationCount} conversations, no findings.`, "info");
+        return;
+      }
+
+      ctx.ui.notify(`Ruminate complete — ${minerOutputs.length} batches returned findings from ${extraction.conversationCount} conversations.`, "info");
+
+      pi.sendMessage({
+        content: buildRuminateApplyPrompt(minerOutputs, globalDir),
+        deliverAs: "followUp",
+        triggerTurn: true,
+      });
+      pendingCommitMessages.push("ruminate: apply mined findings");
+    } finally {
+      activityPanel?.hide();
+      widget?.clear();
+      fs.rmSync(outputDir, { recursive: true, force: true });
+    }
+  }
+
   pi.registerCommand("memory", {
     description: "View and manage agent memory (init/reflect/meditate/ruminate/undo/log/on/off/edit)",
     getArgumentCompletions: (prefix: string): AutocompleteItem[] | null => {
@@ -194,6 +454,7 @@ export default function memoryExtension(
       return filtered.length > 0 ? filtered : null;
     },
     handler: async (args: string, ctx: ExtensionCommandContext) => {
+      lastCtx = ctx;
       const trimmed = args.trim();
 
       if (trimmed === "undo") {
@@ -232,107 +493,33 @@ export default function memoryExtension(
         return;
       }
 
+      if (trimmed === "cancel ruminate" || trimmed === "cancel meditate") {
+        const taskName = trimmed.slice("cancel ".length);
+        const task = backgroundTasks.get(taskName);
+        if (!task) {
+          ctx.ui.notify(`No ${taskName} task is running.`, "info");
+          return;
+        }
+        task.abortController.abort();
+        ctx.ui.notify(`Cancelling ${taskName}...`, "info");
+        return;
+      }
+
       if (trimmed === "reflect") {
         const prompt = buildReflectPrompt(globalDir);
         pi.sendUserMessage(prompt);
-        pendingCommitMessage = "reflect: capture session learnings";
+        pendingCommitMessages.push("reflect: capture session learnings");
         return;
       }
 
       if (trimmed === "meditate") {
-        const snapshot = buildVaultSnapshot(globalDir);
-
-        if (!snapshot.trim()) {
-          ctx.ui.notify("No vault content found to audit.", "info");
+        if (backgroundTasks.has("meditate")) {
+          ctx.ui.notify("Meditate is already running.", "warning");
           return;
         }
 
-        const ts = Date.now();
-        const snapshotPath = path.join(os.tmpdir(), `memory-vault-snapshot-${ts}.md`);
-        const auditPath = path.join(os.tmpdir(), `memory-audit-report-${ts}.md`);
-        const reviewPath = path.join(os.tmpdir(), `memory-review-report-${ts}.md`);
-        const auditorAgentPath = path.join(import.meta.dirname, "agents", "auditor.md");
-        const reviewerAgentPath = path.join(import.meta.dirname, "agents", "reviewer.md");
-        fs.writeFileSync(snapshotPath, snapshot);
-
-        const widget = new ProgressWidget(ctx.ui, "meditate");
-        widget.setStep("Auditor", "running");
-
-        const activityPanel = openActivityOverlay(ctx, "Auditor");
-
-        const auditor = await deps.runSubagent(
-          auditorAgentPath,
-          `Read the vault snapshot at ${snapshotPath} and return your audit report in markdown.`,
-          ctx.cwd,
-          undefined,
-          (event) => {
-            if (event.type === "text_delta") {
-              activityPanel?.overlay.appendText(event.text);
-            }
-          },
-        );
-
-        if (auditor.exitCode !== 0 || !auditor.output.trim()) {
-          const reason = auditor.stderr || (auditor.output.trim() ? "unknown error" : "no output");
-          widget.setStep("Auditor", "error", `${reason.split("\n")[0].slice(0, 80)} — log: ${auditor.logFile}`);
-          activityPanel?.hide();
-          ctx.ui.notify(`Meditate failed (auditor): ${reason}\nLog: ${auditor.logFile}`, "error");
-          fs.rmSync(snapshotPath, { force: true });
-          return;
-        }
-
-        fs.writeFileSync(auditPath, auditor.output);
-        const actionable = (auditor.output.match(/^-\s+/gm) ?? []).length;
-        widget.setStep("Auditor", "done", `${actionable} findings`);
-
-        let reviewerOutput = "";
-        if (actionable >= 3) {
-          widget.setStep("Reviewer", "running");
-          activityPanel?.overlay.setAgent("Reviewer");
-          const reviewer = await deps.runSubagent(
-            reviewerAgentPath,
-            `Read the vault snapshot at ${snapshotPath} and the audit report at ${auditPath}. Return your review report in markdown.`,
-            ctx.cwd,
-            undefined,
-            (event) => {
-              if (event.type === "text_delta") {
-                activityPanel?.overlay.appendText(event.text);
-              }
-            },
-          );
-          if (reviewer.exitCode !== 0) {
-            widget.setStep("Reviewer", "error", `log: ${reviewer.logFile}`);
-            ctx.ui.notify(`Meditate partial (reviewer failed): ${reviewer.stderr || "unknown error"}\nLog: ${reviewer.logFile}`, "warning");
-          } else {
-            reviewerOutput = reviewer.output;
-            widget.setStep("Reviewer", "done");
-            fs.writeFileSync(reviewPath, reviewerOutput || "# Review Report\n\nNo additional findings.");
-          }
-        }
-
-        const summary = [
-          "## Meditate Summary",
-          `- Auditor findings: ${actionable}`,
-          `- Reviewer run: ${actionable >= 3 ? (reviewerOutput ? "yes" : "failed") : "skipped"}`,
-          "",
-          auditor.output ? `### Audit\n${auditor.output}` : "",
-          reviewerOutput ? `\n### Review\n${reviewerOutput}` : "",
-        ].join("\n");
-
-        ctx.ui.notify(summary, "info");
-        activityPanel?.hide();
-        widget.clear();
-
-        pi.sendMessage({
-          content: buildMeditateApplyPrompt(auditor.output, reviewerOutput, globalDir),
-          deliverAs: "followUp",
-          triggerTurn: true,
-        });
-        pendingCommitMessage = "meditate: apply audit findings";
-
-        fs.rmSync(snapshotPath, { force: true });
-        fs.rmSync(auditPath, { force: true });
-        fs.rmSync(reviewPath, { force: true });
+        launchBackground("meditate", ctx.cwd, (signal) => runMeditateBackground(ctx.cwd, signal));
+        ctx.ui.notify("Meditate started in background.", "info");
         return;
       }
 
@@ -343,93 +530,15 @@ export default function memoryExtension(
           return;
         }
 
-        const minerAgentPath = path.join(import.meta.dirname, "agents", "miner.md");
-        const sessionsRoot = path.join(os.homedir(), ".pi", "agent", "sessions");
-        const encodedCwd = encodeProjectSessionPath(ctx.cwd);
-        const projectSessionsDir = path.join(sessionsRoot, encodedCwd);
-
-        if (!fs.existsSync(projectSessionsDir)) {
-          ctx.ui.notify("No sessions found for project.", "info");
+        if (backgroundTasks.has("ruminate")) {
+          ctx.ui.notify("Ruminate is already running.", "warning");
           return;
         }
 
-        const ts = Date.now();
-        const outputDir = path.join(os.tmpdir(), `memory-ruminate-${ts}`);
-
-        const jsonlCount = fs.readdirSync(projectSessionsDir).filter((f) => f.endsWith(".jsonl")).length;
-        const numBatches = Math.max(2, Math.min(10, Math.ceil(jsonlCount / 20)));
-
-        const extraction = extractConversations(projectSessionsDir, outputDir, numBatches, { fromDate, toDate });
-
-        if (extraction.conversationCount === 0) {
-          ctx.ui.notify("No parseable conversation messages found in project sessions.", "info");
-          fs.rmSync(outputDir, { recursive: true, force: true });
-          return;
-        }
-
-        // Build vault snapshot for miners (full content, not just filenames)
-        const snapshot = buildVaultSnapshot(globalDir);
-        const snapshotPath = path.join(outputDir, "vault-snapshot.md");
-        fs.writeFileSync(snapshotPath, snapshot);
-
-        const widget = new ProgressWidget(ctx.ui, "ruminate");
-        widget.setHeader(`Found ${extraction.conversationCount} conversations in ${extraction.batches.length} batches`);
-        for (let i = 0; i < extraction.batches.length; i++) {
-          widget.setStep(`Miner ${i + 1}`, "running");
-        }
-
-        const activityPanel = openActivityOverlay(ctx, "Miner 1");
-
-        const tasks = extraction.batches.map(async (manifestPath, i) => {
-          if (i > 0) await new Promise((r) => setTimeout(r, i * staggerMs));
-          const result = await deps.runSubagent(
-            minerAgentPath,
-            `Read the batch manifest at ${manifestPath} — it lists conversation file paths, one per line. Read each conversation file. Also read the vault snapshot at ${snapshotPath} to see what knowledge is already captured. Return high-signal findings in markdown.`,
-            ctx.cwd,
-            undefined,
-            (event) => {
-              if (event.type === "text_delta") {
-                activityPanel?.overlay.setLabel(`Miner ${i + 1}`);
-                activityPanel?.overlay.appendText(event.text);
-              }
-            },
-          );
-
-          if (result.exitCode !== 0 || !result.output.trim()) {
-            const hint = result.stderr ? result.stderr.split("\n")[0].slice(0, 80) : `exit ${result.exitCode}`;
-            widget.setStep(`Miner ${i + 1}`, "error", `${hint} — log: ${result.logFile}`);
-            return null;
-          }
-
-          const findings = (result.output.match(/^-\s+/gm) ?? []).length;
-          widget.setStep(`Miner ${i + 1}`, "done", `${findings} findings`);
-
-          return { index: i, output: result.output };
-        });
-
-        const minerOutputs = (await Promise.all(tasks))
-          .filter((item): item is { index: number; output: string } => item !== null)
-          .sort((a, b) => a.index - b.index)
-          .map((item) => item.output);
-
-        fs.rmSync(outputDir, { recursive: true, force: true });
-
-        activityPanel?.hide();
-        widget.clear();
-
-        if (minerOutputs.length === 0) {
-          ctx.ui.notify(`Ruminate complete — processed ${extraction.conversationCount} conversations, no findings.`, "info");
-          return;
-        }
-
-        ctx.ui.notify(`Ruminate complete — ${minerOutputs.length} batches returned findings from ${extraction.conversationCount} conversations.`, "info");
-
-        pi.sendMessage({
-          content: buildRuminateApplyPrompt(minerOutputs, globalDir),
-          deliverAs: "followUp",
-          triggerTurn: true,
-        });
-        pendingCommitMessage = "ruminate: apply mined findings";
+        launchBackground("ruminate", ctx.cwd, (signal) =>
+          runRuminateBackground(ctx.cwd, signal, { fromDate, toDate }),
+        );
+        ctx.ui.notify("Ruminate started in background.", "info");
         return;
       }
 

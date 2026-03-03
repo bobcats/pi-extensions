@@ -24,6 +24,15 @@ function writeSessionFile(dir: string, name: string, messageText: string): void 
   fs.writeFileSync(path.join(dir, name), (entry + "\n").repeat(repeats));
 }
 
+async function waitFor(check: () => boolean, timeoutMs: number = 1500): Promise<void> {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    if (check()) return;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  assert.fail(`Timed out after ${timeoutMs}ms waiting for condition`);
+}
+
 test("registers session_start and before_agent_start handlers", () => {
   const handlers = new Map<string, Function[]>();
 
@@ -251,12 +260,14 @@ test("/memory getArgumentCompletions returns all subcommands for empty prefix", 
   memoryExtension(pi);
   const completions = commands.get("memory").getArgumentCompletions("");
   assert.ok(Array.isArray(completions));
-  assert.equal(completions.length, 11);
+  assert.equal(completions.length, 13);
   assert.ok(completions.every((c: any) => typeof c.value === "string" && typeof c.label === "string"));
   const values = completions.map((c: any) => c.value);
   assert.ok(values.includes("reflect"));
   assert.ok(values.includes("meditate"));
   assert.ok(values.includes("ruminate"));
+  assert.ok(values.includes("cancel ruminate"));
+  assert.ok(values.includes("cancel meditate"));
   assert.ok(values.includes("init"));
   assert.ok(values.includes("edit"));
   assert.ok(!values.includes("edit global"));
@@ -526,6 +537,174 @@ test("/memory reflect sends user message with reflect prompt", async () => {
   assert.match(sentUserMessage, new RegExp(os.homedir().replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
 });
 
+test("/memory ruminate starts in background and returns immediately", async () => {
+  const handlers = new Map<string, Function>();
+  const commands = new Map<string, any>();
+  const root = tmpDir();
+
+  const encodedCwd = encodeProjectSessionPath(root);
+  const projectSessionsDir = path.join(os.homedir(), ".pi", "agent", "sessions", encodedCwd);
+  fs.mkdirSync(projectSessionsDir, { recursive: true });
+  writeSessionFile(projectSessionsDir, "session-0.jsonl", "this is conversation text with enough characters to pass parsing filters");
+
+  const pi = {
+    on(event: string, handler: Function) { handlers.set(event, handler); },
+    registerTool() {},
+    registerCommand(name: string, opts: any) { commands.set(name, opts); },
+    registerShortcut() {},
+    registerFlag() {},
+    getFlag() { return false; },
+    exec: async () => ({ stdout: "", stderr: "", code: 0, killed: false }),
+    sendMessage() {},
+  } as never;
+
+  memoryExtension(pi, {
+    runSubagent: async () => await new Promise(() => {}),
+  });
+
+  await handlers.get("session_start")!({}, { cwd: root, ui: { notify() {}, setStatus() {} } });
+
+  const completed = await Promise.race([
+    commands.get("memory").handler("ruminate", {
+      cwd: root,
+      hasUI: false,
+      ui: { notify() {}, setStatus() {}, setWidget() {}, editor: async () => "", select: async () => "" },
+    }).then(() => true),
+    new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 50)),
+  ]);
+
+  fs.rmSync(projectSessionsDir, { recursive: true, force: true });
+  assert.equal(completed, true);
+});
+
+test("/memory cancel ruminate aborts active background run", async () => {
+  const handlers = new Map<string, Function>();
+  const commands = new Map<string, any>();
+  const root = tmpDir();
+
+  const encodedCwd = encodeProjectSessionPath(root);
+  const projectSessionsDir = path.join(os.homedir(), ".pi", "agent", "sessions", encodedCwd);
+  fs.mkdirSync(projectSessionsDir, { recursive: true });
+  writeSessionFile(projectSessionsDir, "session-0.jsonl", "this is conversation text with enough characters to pass parsing filters");
+
+  let aborted = false;
+  let release: (() => void) | undefined;
+  const pi = {
+    on(event: string, handler: Function) { handlers.set(event, handler); },
+    registerTool() {},
+    registerCommand(name: string, opts: any) { commands.set(name, opts); },
+    registerShortcut() {},
+    registerFlag() {},
+    getFlag() { return false; },
+    exec: async () => ({ stdout: "", stderr: "", code: 0, killed: false }),
+    sendMessage() {},
+  } as never;
+
+  memoryExtension(pi, {
+    runSubagent: async (_agent, _task, _cwd, _timeout, _onData, signal) => {
+      if (signal?.aborted) aborted = true;
+      signal?.addEventListener("abort", () => { aborted = true; }, { once: true });
+      await new Promise<void>((resolve) => { release = resolve; });
+      return { output: "", exitCode: 1, stderr: "Cancelled", logFile: "" };
+    },
+  });
+
+  await handlers.get("session_start")!({}, { cwd: root, ui: { notify() {}, setStatus() {} } });
+
+  const started = await Promise.race([
+    commands.get("memory").handler("ruminate", {
+      cwd: root,
+      hasUI: false,
+      ui: { notify() {}, setStatus() {}, setWidget() {}, editor: async () => "", select: async () => "" },
+    }).then(() => true),
+    new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 50)),
+  ]);
+  assert.equal(started, true);
+
+  await commands.get("memory").handler("cancel ruminate", {
+    cwd: root,
+    hasUI: false,
+    ui: { notify() {}, setStatus() {}, setWidget() {}, editor: async () => "", select: async () => "" },
+  });
+
+  await waitFor(() => aborted);
+  release?.();
+  fs.rmSync(projectSessionsDir, { recursive: true, force: true });
+  assert.equal(aborted, true);
+});
+
+test("session_before_switch aborts running memory background tasks", async () => {
+  const handlers = new Map<string, Function>();
+  const commands = new Map<string, any>();
+  const root = tmpDir();
+  const vaultDir = path.join(root, "vault");
+  fs.mkdirSync(vaultDir, { recursive: true });
+  fs.writeFileSync(path.join(vaultDir, "index.md"), "# Memory\n");
+
+  const encodedCwd = encodeProjectSessionPath(root);
+  const projectSessionsDir = path.join(os.homedir(), ".pi", "agent", "sessions", encodedCwd);
+  fs.mkdirSync(projectSessionsDir, { recursive: true });
+  writeSessionFile(projectSessionsDir, "session-0.jsonl", "this is conversation text with enough characters to pass parsing filters");
+
+  let abortCount = 0;
+  let releaseRuminate: (() => void) | undefined;
+  let releaseMeditate: (() => void) | undefined;
+
+  const pi = {
+    on(event: string, handler: Function) { handlers.set(event, handler); },
+    registerTool() {},
+    registerCommand(name: string, opts: any) { commands.set(name, opts); },
+    registerShortcut() {},
+    registerFlag() {},
+    getFlag() { return false; },
+    exec: async () => ({ stdout: "", stderr: "", code: 0, killed: false }),
+    sendMessage() {},
+  } as never;
+
+  memoryExtension(pi, {
+    vaultDir,
+    runSubagent: async (agentPath, _task, _cwd, _timeout, _onData, signal) => {
+      if (signal?.aborted) abortCount += 1;
+      signal?.addEventListener("abort", () => { abortCount += 1; }, { once: true });
+      await new Promise<void>((resolve) => {
+        if (agentPath.endsWith("auditor.md")) releaseMeditate = resolve;
+        else releaseRuminate = resolve;
+      });
+      return { output: "", exitCode: 1, stderr: "Cancelled", logFile: "" };
+    },
+  });
+
+  await handlers.get("session_start")!({}, { cwd: root, ui: { notify() {}, setStatus() {} } });
+
+  const ruminateStarted = await Promise.race([
+    commands.get("memory").handler("ruminate", {
+      cwd: root,
+      hasUI: false,
+      ui: { notify() {}, setStatus() {}, setWidget() {}, editor: async () => "", select: async () => "" },
+    }).then(() => true),
+    new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 50)),
+  ]);
+  assert.equal(ruminateStarted, true);
+
+  const meditateStarted = await Promise.race([
+    commands.get("memory").handler("meditate", {
+      cwd: root,
+      hasUI: false,
+      ui: { notify() {}, setStatus() {}, setWidget() {}, editor: async () => "", select: async () => "" },
+    }).then(() => true),
+    new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 50)),
+  ]);
+  assert.equal(meditateStarted, true);
+
+  await handlers.get("session_before_switch")!({ reason: "new" }, { cwd: root, ui: { notify() {}, setStatus() {} } });
+
+  await waitFor(() => abortCount >= 2);
+  releaseRuminate?.();
+  releaseMeditate?.();
+  fs.rmSync(projectSessionsDir, { recursive: true, force: true });
+  assert.equal(abortCount >= 2, true);
+});
+
 test("/memory meditate runs subagents via runSubagent dependency", async () => {
   const handlers = new Map<string, Function>();
   const commands = new Map<string, any>();
@@ -638,7 +817,7 @@ test("/memory ruminate reports when no project sessions exist", async () => {
   const handlers = new Map<string, Function>();
   const commands = new Map<string, any>();
   const root = tmpDir();
-  let notified = "";
+  const notifications: string[] = [];
 
   const pi = {
     on(event: string, handler: Function) { handlers.set(event, handler); },
@@ -658,10 +837,11 @@ test("/memory ruminate reports when no project sessions exist", async () => {
 
   await commands.get("memory").handler("ruminate", {
     cwd: root,
-    ui: { notify(msg: string) { notified = msg; }, setStatus() {}, editor: async () => "", select: async () => "" },
+    ui: { notify(msg: string) { notifications.push(msg); }, setStatus() {}, editor: async () => "", select: async () => "" },
   });
 
-  assert.match(notified, /No sessions found for project/);
+  await waitFor(() => notifications.some((msg) => /No sessions found for project/.test(msg)));
+  assert.ok(notifications.some((msg) => /No sessions found for project/.test(msg)));
 });
 
 test("/memory ruminate launches miner subagents in parallel", async () => {
@@ -717,6 +897,9 @@ test("/memory ruminate launches miner subagents in parallel", async () => {
     },
   });
 
+  await waitFor(() => maxInFlight >= 1);
+  await waitFor(() => widgetCalls.some((c) => c.key === "ruminate" && c.lines === undefined));
+
   fs.rmSync(projectSessionsDir, { recursive: true, force: true });
   assert.ok(maxInFlight >= 1, `expected miner execution, max in-flight: ${maxInFlight}`);
   assert.ok(widgetCalls.some((c) => c.key === "ruminate" && c.lines?.some((l: string) => l.includes("conversations"))));
@@ -766,6 +949,7 @@ test("/memory ruminate sends apply handoff when findings exist", async () => {
     ui: { notify() {}, setStatus() {}, setWidget() {}, editor: async () => "", select: async () => "" },
   });
 
+  await waitFor(() => sent !== null);
   fs.rmSync(projectSessionsDir, { recursive: true, force: true });
 
   assert.ok(sent, "expected sendMessage to be called");
@@ -1074,6 +1258,7 @@ test("/memory ruminate accepts --from flag", async () => {
     ui: { notify() {}, setStatus() {}, setWidget() {}, editor: async () => "", select: async () => "" },
   });
 
+  await waitFor(() => subagentCalls >= 1);
   fs.rmSync(projectSessionsDir, { recursive: true, force: true });
 
   // With only 1 conversation, we get min 2 batches but only 1 has content
@@ -1108,4 +1293,70 @@ test("/memory ruminate rejects invalid date format", async () => {
   });
 
   assert.match(notified, /Invalid date/i);
+});
+
+test("agent_end commits queued messages in order when reflect overlaps with background ruminate", async () => {
+  const handlers = new Map<string, Function>();
+  const commands = new Map<string, any>();
+  const root = tmpDir();
+  const vaultDir = path.join(root, "memories");
+  fs.mkdirSync(vaultDir, { recursive: true });
+  fs.writeFileSync(path.join(vaultDir, "index.md"), "# Memory\n");
+
+  const encodedCwd = encodeProjectSessionPath(root);
+  const projectSessionsDir = path.join(os.homedir(), ".pi", "agent", "sessions", encodedCwd);
+  fs.mkdirSync(projectSessionsDir, { recursive: true });
+  writeSessionFile(projectSessionsDir, "session-0.jsonl", "message with enough text to pass filters");
+
+  let followUpSent = false;
+
+  const pi = {
+    on(event: string, handler: Function) { handlers.set(event, handler); },
+    registerTool() {},
+    registerCommand(name: string, opts: any) { commands.set(name, opts); },
+    registerShortcut() {},
+    registerFlag() {},
+    getFlag() { return false; },
+    exec: async () => ({ stdout: "", stderr: "", code: 0, killed: false }),
+    sendMessage() { followUpSent = true; },
+    sendUserMessage() {},
+  } as never;
+
+  memoryExtension(pi, {
+    vaultDir,
+    staggerMs: 0,
+    runSubagent: async () => ({
+      output: "# Findings\n\n- recurring preference",
+      exitCode: 0,
+      stderr: "",
+      logFile: "",
+    }),
+  });
+
+  await handlers.get("session_start")!({}, { cwd: root, ui: { notify() {}, setStatus() {} } });
+
+  await commands.get("memory").handler("reflect", {
+    cwd: root,
+    ui: { notify() {}, setStatus() {} },
+  });
+
+  await commands.get("memory").handler("ruminate", {
+    cwd: root,
+    hasUI: false,
+    ui: { notify() {}, setStatus() {}, setWidget() {}, editor: async () => "", select: async () => "" },
+  });
+
+  await waitFor(() => followUpSent);
+
+  fs.writeFileSync(path.join(vaultDir, "reflect.md"), "reflect turn change");
+  await handlers.get("agent_end")!({}, { cwd: root, ui: { notify() {}, setStatus() {} } });
+
+  fs.writeFileSync(path.join(vaultDir, "ruminate.md"), "ruminate turn change");
+  await handlers.get("agent_end")!({}, { cwd: root, ui: { notify() {}, setStatus() {} } });
+
+  const log = getLog(vaultDir, 10).join("\n");
+  assert.match(log, /reflect: capture session learnings/);
+  assert.match(log, /ruminate: apply mined findings/);
+
+  fs.rmSync(projectSessionsDir, { recursive: true, force: true });
 });
