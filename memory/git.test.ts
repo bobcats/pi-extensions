@@ -14,6 +14,15 @@ test("isGitRepo returns false for non-repo directory", () => {
   assert.equal(isGitRepo(dir), false);
 });
 
+test("isGitRepo returns false for subdirectory of a different repo", () => {
+  const parent = tmpDir();
+  fs.writeFileSync(path.join(parent, "dummy.txt"), "x");
+  initGitRepo(parent);
+  const child = path.join(parent, "nested");
+  fs.mkdirSync(child);
+  assert.equal(isGitRepo(child), false);
+});
+
 test("isGitRepo returns true after initGitRepo", () => {
   const dir = tmpDir();
   fs.writeFileSync(path.join(dir, "index.md"), "# Memory\n");

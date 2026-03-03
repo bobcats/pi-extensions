@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
 import * as fs from "node:fs";
+import * as path from "node:path";
 
 function git(dir: string, args: string[]): string {
   return execFileSync("git", args, { cwd: dir, encoding: "utf-8", stdio: ["ignore", "pipe", "pipe"] }).trim();
@@ -7,8 +8,8 @@ function git(dir: string, args: string[]): string {
 
 export function isGitRepo(dir: string): boolean {
   try {
-    git(dir, ["rev-parse", "--is-inside-work-tree"]);
-    return true;
+    const toplevel = git(dir, ["rev-parse", "--show-toplevel"]);
+    return fs.realpathSync(toplevel) === fs.realpathSync(dir);
   } catch {
     return false;
   }
