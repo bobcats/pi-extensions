@@ -1470,3 +1470,121 @@ test("meditate cancellation does not emit summary", async () => {
   assert.equal(notifications.some((n) => /## Meditate Summary/.test(n)), false,
     `Expected no summary on cancellation, but got: ${notifications.filter(n => /## Meditate Summary/.test(n)).join(", ")}`);
 });
+
+test("ruminate warns when already running", async () => {
+  const handlers = new Map<string, Function>();
+  const commands = new Map<string, any>();
+  const root = tmpDir();
+
+  const encodedCwd = encodeProjectSessionPath(root);
+  const projectSessionsDir = path.join(os.homedir(), ".pi", "agent", "sessions", encodedCwd);
+  fs.mkdirSync(projectSessionsDir, { recursive: true });
+  writeSessionFile(projectSessionsDir, "session-0.jsonl", "message with enough text to pass filters");
+
+  let release: (() => void) | undefined;
+  const notices: string[] = [];
+
+  const pi = {
+    on(event: string, handler: Function) { handlers.set(event, handler); },
+    registerTool() {},
+    registerCommand(name: string, opts: any) { commands.set(name, opts); },
+    registerShortcut() {},
+    registerFlag() {},
+    getFlag() { return false; },
+    exec: async () => ({ stdout: "", stderr: "", code: 0, killed: false }),
+    sendMessage() {},
+  } as never;
+
+  memoryExtension(pi, {
+    runSubagent: async (_agent, _task, _cwd, _timeout, _onData, signal) => {
+      await new Promise<void>((resolve) => {
+        release = resolve;
+        signal?.addEventListener("abort", resolve, { once: true });
+      });
+      return { output: "", exitCode: 1, stderr: "Cancelled", logFile: "" };
+    },
+  });
+
+  await handlers.get("session_start")!({}, { cwd: root, ui: { notify() {}, setStatus() {} } });
+
+  await commands.get("memory").handler("ruminate", {
+    cwd: root,
+    hasUI: false,
+    ui: { notify(msg: string) { notices.push(msg); }, setStatus() {}, setWidget() {}, editor: async () => "", select: async () => "" },
+  });
+
+  await commands.get("memory").handler("ruminate", {
+    cwd: root,
+    hasUI: false,
+    ui: { notify(msg: string) { notices.push(msg); }, setStatus() {}, setWidget() {}, editor: async () => "", select: async () => "" },
+  });
+
+  assert.ok(notices.some((n) => /already running/i.test(n)), `expected "already running" notice, got: ${notices.join(", ")}`);
+
+  await commands.get("memory").handler("cancel ruminate", {
+    cwd: root,
+    hasUI: false,
+    ui: { notify() {}, setStatus() {}, setWidget() {}, editor: async () => "", select: async () => "" },
+  });
+
+  release?.();
+  fs.rmSync(projectSessionsDir, { recursive: true, force: true });
+});
+
+test("meditate warns when already running", async () => {
+  const handlers = new Map<string, Function>();
+  const commands = new Map<string, any>();
+  const root = tmpDir();
+  const vaultDir = path.join(root, "vault");
+  fs.mkdirSync(vaultDir, { recursive: true });
+  fs.writeFileSync(path.join(vaultDir, "index.md"), "# Memory\n");
+
+  let release: (() => void) | undefined;
+  const notices: string[] = [];
+
+  const pi = {
+    on(event: string, handler: Function) { handlers.set(event, handler); },
+    registerTool() {},
+    registerCommand(name: string, opts: any) { commands.set(name, opts); },
+    registerShortcut() {},
+    registerFlag() {},
+    getFlag() { return false; },
+    exec: async () => ({ stdout: "", stderr: "", code: 0, killed: false }),
+    sendMessage() {},
+  } as never;
+
+  memoryExtension(pi, {
+    vaultDir,
+    runSubagent: async (_agent, _task, _cwd, _timeout, _onData, signal) => {
+      await new Promise<void>((resolve) => {
+        release = resolve;
+        signal?.addEventListener("abort", resolve, { once: true });
+      });
+      return { output: "", exitCode: 1, stderr: "Cancelled", logFile: "" };
+    },
+  });
+
+  await handlers.get("session_start")!({}, { cwd: root, ui: { notify() {}, setStatus() {} } });
+
+  await commands.get("memory").handler("meditate", {
+    cwd: root,
+    hasUI: false,
+    ui: { notify(msg: string) { notices.push(msg); }, setStatus() {}, setWidget() {}, editor: async () => "", select: async () => "" },
+  });
+
+  await commands.get("memory").handler("meditate", {
+    cwd: root,
+    hasUI: false,
+    ui: { notify(msg: string) { notices.push(msg); }, setStatus() {}, setWidget() {}, editor: async () => "", select: async () => "" },
+  });
+
+  assert.ok(notices.some((n) => /already running/i.test(n)), `expected "already running" notice, got: ${notices.join(", ")}`);
+
+  await commands.get("memory").handler("cancel meditate", {
+    cwd: root,
+    hasUI: false,
+    ui: { notify() {}, setStatus() {}, setWidget() {}, editor: async () => "", select: async () => "" },
+  });
+
+  release?.();
+});
