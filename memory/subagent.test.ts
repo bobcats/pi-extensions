@@ -296,3 +296,38 @@ test("runSubagent abort signal cancels spawned process", async () => {
     process.env.PATH = oldPath;
   }
 });
+
+test("runSubagent surfaces model error when assistant returns no text", async () => {
+  const binDir = tmpDir();
+  const cwd = tmpDir();
+  const piPath = path.join(binDir, "pi");
+  fs.writeFileSync(
+    piPath,
+    `#!/bin/sh
+printf '%s\n' '{"type":"message_end","message":{"role":"assistant","content":[],"stopReason":"error","errorMessage":"Codex error: server_error"}}'
+printf '%s\n' '{"type":"turn_end","message":{"role":"assistant","content":[],"stopReason":"error","errorMessage":"Codex error: server_error"},"toolResults":[]}'
+`,
+  );
+  fs.chmodSync(piPath, 0o755);
+
+  const oldPath = process.env.PATH;
+  process.env.PATH = `${binDir}:${oldPath}`;
+
+  try {
+    const result = await runSubagent(
+      "/tmp/fake-agent.md",
+      "Task: noop",
+      cwd,
+      1_000,
+    );
+
+    assert.equal(result.exitCode, 0);
+    assert.equal(result.output, "");
+    assert.match(result.stderr, /Codex error: server_error/);
+
+    const log = fs.readFileSync(result.logFile, "utf-8");
+    assert.match(log, /Codex error: server_error/);
+  } finally {
+    process.env.PATH = oldPath;
+  }
+});

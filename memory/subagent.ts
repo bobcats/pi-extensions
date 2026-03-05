@@ -303,19 +303,41 @@ export async function runSubagent(
       if (resolved) return;
 
       let output = "";
+      let modelError = "";
       for (const line of stdout.split("\n")) {
         if (!line.trim()) continue;
         try {
           const event = JSON.parse(line);
+
           if (event.type === "message_end" && event.message?.role === "assistant") {
-            for (const part of event.message.content) {
-              if (part.type === "text") output = part.text;
+            const content = event.message?.content;
+            if (Array.isArray(content)) {
+              for (const part of content) {
+                if (part?.type === "text" && typeof part.text === "string") output = part.text;
+              }
+            }
+            if (typeof event.message?.errorMessage === "string" && event.message.errorMessage.trim()) {
+              modelError = event.message.errorMessage.trim();
+            }
+          }
+
+          if (event.type === "turn_end" && typeof event.message?.errorMessage === "string" && event.message.errorMessage.trim()) {
+            modelError = event.message.errorMessage.trim();
+          }
+
+          if (event.type === "agent_end" && Array.isArray(event.messages)) {
+            for (const msg of event.messages) {
+              if (msg?.role === "assistant" && typeof msg.errorMessage === "string" && msg.errorMessage.trim()) {
+                modelError = msg.errorMessage.trim();
+              }
             }
           }
         } catch {
           // ignore malformed lines
         }
       }
+
+      const combinedStderr = [stderr.trim(), modelError].filter(Boolean).join("\n");
 
       const log = [
         `=== subagent log ===`,
@@ -324,17 +346,17 @@ export async function runSubagent(
         `args: ${JSON.stringify(args)}`,
         `exitCode: ${code}`,
         `output length: ${output.length}`,
-        `stderr length: ${stderr.length}`,
+        `stderr length: ${combinedStderr.length}`,
         ``,
         `=== stderr ===`,
-        stderr || "(empty)",
+        combinedStderr || "(empty)",
         ``,
         `=== stdout ===`,
         stdout || "(empty)",
       ].join("\n");
       fs.writeFileSync(logFile, log);
 
-      finish({ output, exitCode: code ?? 1, stderr, logFile });
+      finish({ output, exitCode: code ?? 1, stderr: combinedStderr, logFile });
     });
 
     proc.on("error", (err) => {
