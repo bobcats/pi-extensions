@@ -135,7 +135,8 @@ export function buildMemoryPrompt(
 ): string {
   if (!scope?.indexContent) return "";
 
-  return "\n\n## Agent Memory\n\nMemory vault index — read relevant files with the read tool before acting:\n\n"
+  return "\n\n## Agent Memory\n\n"
+    + "Before starting work, read the memory files relevant to this task. The vault index below shows what's available. Memory files contain past mistakes, project architecture, and patterns — skipping them leads to repeated errors.\n\n"
     + `### Memory vault (${scope.dir}/)\n\n${scope.indexContent}`;
 }
 

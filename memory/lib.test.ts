@@ -12,6 +12,7 @@ import {
   buildVaultIndex,
   buildMemoryPrompt,
   buildWriteInstructions,
+
   isMemoryPath,
   checkLineLimit,
   formatMemoryDisplay,
