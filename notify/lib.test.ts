@@ -1,6 +1,14 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { isTextPart, extractLastAssistantText, formatNotification, simpleMarkdown } from "./lib.ts";
+import {
+	isTextPart,
+	extractLastAssistantText,
+	formatNotification,
+	sanitizeOscField,
+	simpleMarkdown,
+	toOsc777Sequence,
+	toTerminalNotificationSequence,
+} from "./lib.ts";
 
 describe("isTextPart", () => {
 	it("returns true for { type: 'text', text: 'hello' }", () => {
@@ -74,6 +82,37 @@ describe("formatNotification", () => {
 
 	it("returns ready for input for empty string", () => {
 		assert.deepEqual(formatNotification(""), { title: "Ready for input", body: "" });
+	});
+
+	it("drops trailing shell command snippets", () => {
+		const text = "Planning user input points\n\n$ printf '\\033]777;notify;%s;%s\\a' \"buildr-agent\" \"Need your input\"";
+		assert.deepEqual(formatNotification(text), { title: "π", body: "Planning user input points" });
+	});
+});
+
+describe("sanitizeOscField", () => {
+	it("replaces semicolons and control characters", () => {
+		const sanitized = sanitizeOscField("Need;input\u0007 now\nnext");
+		assert.equal(sanitized, "Need,input now next");
+	});
+});
+
+describe("toOsc777Sequence", () => {
+	it("creates sequence with sanitized fields", () => {
+		const sequence = toOsc777Sequence("pi;agent", "printf '%s;%s'\u0007");
+		assert.equal(sequence, "\u001b]777;notify;pi,agent;printf '%s,%s'\u0007");
+	});
+});
+
+describe("toTerminalNotificationSequence", () => {
+	it("returns direct OSC sequence outside tmux", () => {
+		const sequence = toTerminalNotificationSequence("pi", "ready", {});
+		assert.equal(sequence, "\u001b]777;notify;pi;ready\u0007");
+	});
+
+	it("wraps OSC sequence for tmux passthrough", () => {
+		const sequence = toTerminalNotificationSequence("pi", "ready", { TMUX: "/tmp/tmux.sock" });
+		assert.equal(sequence, "\u001bPtmux;\u001b\u001b\u001b]777;notify;pi;ready\u0007\u001b\\");
 	});
 });
 

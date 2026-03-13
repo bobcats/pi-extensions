@@ -13,14 +13,13 @@
  */
 
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
-import { extractLastAssistantText, formatNotification } from "./lib.ts";
+import { extractLastAssistantText, formatNotification, toTerminalNotificationSequence } from "./lib.ts";
 
 /**
  * Send a desktop notification via OSC 777 escape sequence.
  */
 const notify = (title: string, body: string): void => {
-	// OSC 777 format: ESC ] 777 ; notify ; title ; body BEL
-	process.stdout.write(`\x1b]777;notify;${title};${body}\x07`);
+	process.stdout.write(toTerminalNotificationSequence(title, body));
 };
 
 export default function (pi: ExtensionAPI) {
