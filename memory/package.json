@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "tsx --test lib.test.ts index.test.ts"
+    "test": "tsx --test --test-timeout=5000 *.test.ts"
   },
   "devDependencies": {
     "@mariozechner/pi-ai": "*",
