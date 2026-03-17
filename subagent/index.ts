@@ -408,12 +408,12 @@ const SubagentParams = Type.Object({
 });
 
 export default function (pi: ExtensionAPI) {
-	// External agents registered by other extensions via pi.events
+	// Shared agent registry — other extensions push agents here via subagent:register.
+	// We also emit subagent:discover at execute time so late-loading extensions can respond.
 	const externalAgents: AgentConfig[] = [];
 
 	pi.events.on("subagent:register", (agents: AgentConfig[]) => {
 		for (const agent of agents) {
-			// Replace if same name already registered
 			const idx = externalAgents.findIndex((a) => a.name === agent.name);
 			if (idx >= 0) externalAgents[idx] = agent;
 			else externalAgents.push(agent);
@@ -436,6 +436,8 @@ export default function (pi: ExtensionAPI) {
 
 		async execute(_toolCallId, params, signal, onUpdate, ctx) {
 			const agentScope: AgentScope = params.agentScope ?? "user";
+			// Give late-loading extensions a chance to register agents
+			pi.events.emit("subagent:discover", {});
 			const discovery = discoverAgents(ctx.cwd, agentScope, BUNDLED_AGENTS_DIR);
 			// Merge external agents (lowest priority — discovered agents override)
 			const agentMap = new Map<string, AgentConfig>();
