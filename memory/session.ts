@@ -33,8 +33,8 @@ export function encodeProjectSessionPath(cwd: string): string {
   return "--" + cwd.replace(/^[/\\]/, "").replace(/[/\\:]/g, "-") + "--";
 }
 
-export function parseDate(value: string, flag: string): Date | string {
-  const d = new Date(value + "T00:00:00");
+export function parseDate(value: string, flag: string, endOfDay = false): Date | string {
+  const d = new Date(value + (endOfDay ? "T23:59:59.999" : "T00:00:00"));
   return isNaN(d.getTime()) ? `Invalid date format for ${flag}: "${value}". Use YYYY-MM-DD.` : d;
 }
 
@@ -46,7 +46,7 @@ export function parseRuminateArgs(args: string): { error?: string } & DateFilter
   for (let i = 0; i < parts.length; i++) {
     const flag = parts[i];
     if ((flag === "--from" || flag === "--to") && parts[i + 1]) {
-      const result = parseDate(parts[i + 1], flag);
+      const result = parseDate(parts[i + 1], flag, flag === "--to");
       if (typeof result === "string") return { error: result };
       if (flag === "--from") fromDate = result;
       else toDate = result;

@@ -887,6 +887,7 @@ export default function memoryExtension(pi: ExtensionAPI) {
 
           const result = initVault(VAULT_DIR, true);
           initGitRepo(VAULT_DIR);
+          commitVault(VAULT_DIR, "init: update vault with starter principles");
           if (qmdAvailable) {
             qmd.ensureCollection(VAULT_DIR).then(() => qmd.update()).catch(() => {});
           }
