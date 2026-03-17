@@ -408,6 +408,18 @@ const SubagentParams = Type.Object({
 });
 
 export default function (pi: ExtensionAPI) {
+	// External agents registered by other extensions via pi.events
+	const externalAgents: AgentConfig[] = [];
+
+	pi.events.on("subagent:register", (agents: AgentConfig[]) => {
+		for (const agent of agents) {
+			// Replace if same name already registered
+			const idx = externalAgents.findIndex((a) => a.name === agent.name);
+			if (idx >= 0) externalAgents[idx] = agent;
+			else externalAgents.push(agent);
+		}
+	});
+
 	pi.registerTool({
 		name: "subagent",
 		label: "Subagent",
@@ -425,7 +437,11 @@ export default function (pi: ExtensionAPI) {
 		async execute(_toolCallId, params, signal, onUpdate, ctx) {
 			const agentScope: AgentScope = params.agentScope ?? "user";
 			const discovery = discoverAgents(ctx.cwd, agentScope, BUNDLED_AGENTS_DIR);
-			const agents = discovery.agents;
+			// Merge external agents (lowest priority — discovered agents override)
+			const agentMap = new Map<string, AgentConfig>();
+			for (const agent of externalAgents) agentMap.set(agent.name, agent);
+			for (const agent of discovery.agents) agentMap.set(agent.name, agent);
+			const agents = Array.from(agentMap.values());
 			const confirmProjectAgents = params.confirmProjectAgents ?? true;
 
 			const hasChain = (params.chain?.length ?? 0) > 0;
