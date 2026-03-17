@@ -43,6 +43,22 @@ test("parseDate returns error string for invalid date", () => {
   assert.ok((result as string).includes("--from"));
 });
 
+test("parseDate with endOfDay sets time to 23:59:59.999", () => {
+  const result = parseDate("2025-03-15", "--to", true);
+  assert.ok(result instanceof Date);
+  assert.strictEqual((result as Date).getHours(), 23);
+  assert.strictEqual((result as Date).getMinutes(), 59);
+  assert.strictEqual((result as Date).getSeconds(), 59);
+  assert.strictEqual((result as Date).getMilliseconds(), 999);
+});
+
+test("parseDate without endOfDay sets time to 00:00:00", () => {
+  const result = parseDate("2025-03-15", "--from");
+  assert.ok(result instanceof Date);
+  assert.strictEqual((result as Date).getHours(), 0);
+  assert.strictEqual((result as Date).getMinutes(), 0);
+});
+
 // --- parseRuminateArgs ---
 
 test("parseRuminateArgs parses --from and --to flags", () => {
@@ -50,6 +66,15 @@ test("parseRuminateArgs parses --from and --to flags", () => {
   assert.ok(!result.error);
   assert.ok(result.fromDate instanceof Date);
   assert.ok(result.toDate instanceof Date);
+});
+
+test("parseRuminateArgs --to date includes entire day", () => {
+  const result = parseRuminateArgs("ruminate --to 2025-03-15");
+  assert.ok(!result.error);
+  assert.ok(result.toDate instanceof Date);
+  assert.strictEqual(result.toDate!.getHours(), 23);
+  assert.strictEqual(result.toDate!.getMinutes(), 59);
+  assert.strictEqual(result.toDate!.getSeconds(), 59);
 });
 
 test("parseRuminateArgs returns error for invalid date", () => {
@@ -224,6 +249,54 @@ test("extractAndBatch extracts and batches valid sessions", () => {
   assert.strictEqual(result.conversationCount, 1);
   assert.ok(result.batches.length >= 1);
   assert.ok(fs.existsSync(result.snapshotPath));
+});
+
+test("extractAndBatch --to includes sessions modified during that day", () => {
+  const sessionsRoot = tmpDir();
+  const vaultDir = tmpDir();
+  fs.writeFileSync(path.join(vaultDir, "index.md"), "# Memory\n");
+
+  const encoded = encodeProjectSessionPath("/some/project");
+  const projectDir = path.join(sessionsRoot, encoded);
+  fs.mkdirSync(projectDir, { recursive: true });
+
+  const lines = Array.from({ length: 20 }, (_, i) =>
+    JSON.stringify({ message: { role: "user", content: `Message ${i} with enough content to be meaningful and pass the minimum size check.` } })
+  );
+  const filePath = path.join(projectDir, "session1.jsonl");
+  fs.writeFileSync(filePath, lines.join("\n"));
+
+  // Set mtime to midday on 2025-03-15
+  const midday = new Date("2025-03-15T12:00:00");
+  fs.utimesSync(filePath, midday, midday);
+
+  // --to 2025-03-15 should include this file (modified during that day)
+  const result = extractAndBatch("/some/project", { toDate: new Date("2025-03-15T23:59:59.999") }, sessionsRoot, vaultDir);
+  assert.ok(!("error" in result), `Expected success but got error: ${"error" in result ? result.error : ""}`);
+  assert.strictEqual(result.conversationCount, 1);
+});
+
+test("extractAndBatch --to excludes sessions modified after that day", () => {
+  const sessionsRoot = tmpDir();
+  const vaultDir = tmpDir();
+  fs.writeFileSync(path.join(vaultDir, "index.md"), "# Memory\n");
+
+  const encoded = encodeProjectSessionPath("/some/project");
+  const projectDir = path.join(sessionsRoot, encoded);
+  fs.mkdirSync(projectDir, { recursive: true });
+
+  const lines = Array.from({ length: 20 }, (_, i) =>
+    JSON.stringify({ message: { role: "user", content: `Message ${i} with enough content to be meaningful and pass the minimum size check.` } })
+  );
+  const filePath = path.join(projectDir, "session1.jsonl");
+  fs.writeFileSync(filePath, lines.join("\n"));
+
+  // Set mtime to the day after
+  const nextDay = new Date("2025-03-16T10:00:00");
+  fs.utimesSync(filePath, nextDay, nextDay);
+
+  const result = extractAndBatch("/some/project", { toDate: new Date("2025-03-15T23:59:59.999") }, sessionsRoot, vaultDir);
+  assert.ok("error" in result);
 });
 
 test("extractAndBatch prefers compaction summaries over raw messages", () => {

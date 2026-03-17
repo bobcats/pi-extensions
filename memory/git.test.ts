@@ -47,6 +47,18 @@ test("initGitRepo skips if directory does not exist", () => {
   assert.ok(!fs.existsSync(dir));
 });
 
+test("initGitRepo handles empty directory without throwing", () => {
+  const dir = tmpDir();
+  // dir exists but has no files — git commit would fail with nothing to commit
+
+  // Should not throw
+  initGitRepo(dir);
+
+  // Repo should be initialized but with no commits
+  const gitDir = path.join(dir, ".git");
+  assert.ok(fs.existsSync(gitDir), "Expected .git directory to exist");
+});
+
 test("hasChanges returns false on clean repo", () => {
   const dir = tmpDir();
   fs.writeFileSync(path.join(dir, "index.md"), "# Memory\n");

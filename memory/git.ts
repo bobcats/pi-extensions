@@ -13,7 +13,9 @@ export function initGitRepo(dir: string): void {
   if (!fs.existsSync(dir)) return;
   git(dir, ["init"]);
   git(dir, ["add", "-A"]);
-  git(dir, ["-c", "user.name=memory", "-c", "user.email=memory@local", "commit", "-m", "init: memory vault"]);
+  if (hasChanges(dir)) {
+    git(dir, ["-c", "user.name=memory", "-c", "user.email=memory@local", "commit", "-m", "init: memory vault"]);
+  }
 }
 
 export function hasChanges(dir: string): boolean {
