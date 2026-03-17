@@ -58,24 +58,33 @@ function parseResult(r: QmdRawResult): QmdSearchResult {
   };
 }
 
+/** Build the QMD CLI arguments for semantic vault search. */
+export function buildSearchArgs(
+  query: string,
+  options?: { limit?: number; minScore?: number },
+): string[] {
+  const limit = options?.limit ?? 5;
+  const minScore = options?.minScore ?? 0;
+  const args = ["vsearch", query, "--json", "-n", String(limit)];
+  if (minScore > 0) args.push("--min-score", String(minScore));
+  args.push("-c", COLLECTION_NAME);
+  return args;
+}
+
 /**
- * Run `qmd search --json` and parse results.
+ * Run semantic QMD search (`qmd vsearch --json`) and parse results.
  * Returns [] if qmd is not available or the query fails.
  */
 export function search(
   query: string,
   options?: { limit?: number; minScore?: number },
 ): Promise<QmdSearchResult[]> {
-  const limit = options?.limit ?? 5;
-  const minScore = options?.minScore ?? 0;
-  const args = ["search", query, "--json", "-n", String(limit)];
-  if (minScore > 0) args.push("--min-score", String(minScore));
-  args.push("-c", COLLECTION_NAME);
+  const args = buildSearchArgs(query, options);
 
   return new Promise((resolve) => {
-    execFile(QMD_BIN, args, { timeout: 15_000 }, (err, stdout, stderr) => {
+    execFile(QMD_BIN, args, { timeout: 120_000 }, (err, stdout, stderr) => {
       if (stderr?.trim()) {
-        console.warn(`qmd search stderr: ${stderr.trim()}`);
+        console.warn(`qmd vsearch stderr: ${stderr.trim()}`);
       }
       if (err || !stdout.trim()) {
         resolve([]);

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import * as assert from "node:assert";
-import { toVaultPath } from "./qmd.ts";
+import { buildSearchArgs, toVaultPath } from "./qmd.ts";
 
 test("toVaultPath converts qmd:// virtual path to filesystem path", () => {
   assert.strictEqual(
@@ -21,4 +21,16 @@ test("toVaultPath handles root-level files", () => {
     toVaultPath("/vault", "qmd://memory/index.md"),
     "/vault/index.md",
   );
+});
+
+test("buildSearchArgs uses semantic vector search for natural-language queries", () => {
+  assert.deepStrictEqual(buildSearchArgs("advisory lock concurrency race condition", { limit: 3 }), [
+    "vsearch",
+    "advisory lock concurrency race condition",
+    "--json",
+    "-n",
+    "3",
+    "-c",
+    "memory",
+  ]);
 });
