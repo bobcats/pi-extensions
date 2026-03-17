@@ -5,13 +5,7 @@
   "license": "MIT",
   "keywords": ["pi-package"],
   "pi": {
-    "extensions": ["./ext-prof/index.ts", "./confirm-rm/index.ts", "./beads/index.ts", "./memory/index.ts", "./notify/index.ts", "./context/index.ts", "./files/index.ts", "./session-breakdown/index.ts", "./subagent/index.ts", "./tldraw-desktop/index.ts"],
-    "prompts": ["./prompts"],
-    "skills": [
-      "./beads/skills/beads-code/SKILL.md",
-      "./beads/skills/beads-create/SKILL.md",
-      "./beads/skills/beads-plan/SKILL.md",
-      "./beads/skills/beads-storm/SKILL.md"
-    ]
+    "extensions": ["./ext-prof/index.ts", "./confirm-rm/index.ts", "./memory/index.ts", "./notify/index.ts", "./context/index.ts", "./files/index.ts", "./session-breakdown/index.ts", "./subagent/index.ts", "./tldraw-desktop/index.ts"],
+    "prompts": ["./prompts"]
   }
 }

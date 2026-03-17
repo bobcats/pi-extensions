@@ -6,7 +6,6 @@ Extensions and skills for [pi](https://github.com/badlogic/pi-mono).
 
 | Extension | Description |
 |-----------|-------------|
-| [beads](./beads/) | Issue tracking via `br` CLI — tools, commands, hooks, and mode guards |
 | [confirm-rm](./confirm-rm/) | Prompts before any `rm` command |
 | [ext-prof](./ext-prof/) | Profiles extension handler execution time |
 | [memory](./memory/) | Persistent agent memory across sessions |
@@ -32,7 +31,6 @@ All extensions and skills load automatically. Use `pi config` to enable/disable 
 Run tests:
 
 ```bash
-cd beads && npm test
 cd confirm-rm && npm test
 cd ext-prof && npm test
 cd memory && npm test
