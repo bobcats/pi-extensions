@@ -136,7 +136,10 @@ Progress through these phases. Don't stay in explore — move to harder work qui
 - **Reorganize**: Merge overlapping files into one. Split overloaded files. Rename files whose names no longer match their content. Restructure directories.
 - **Synthesize**: Find a pattern that appears in 3+ files across different projects and extract it into a principle. Add cross-references between files that discuss the same concept from different angles. Connect isolated project notes to shared principles.
 - **Simplify**: Delete files that don't earn their keep. Collapse a file that says in 40 lines what could be said in 10. Remove sections that restate what's in a linked file.
-- **Disrupt**: Question the vault's organization from first principles — would you structure it this way from scratch? Propose and execute a reorganization. Rename a directory. Merge an entire section.
+- **Disrupt** (diverge → develop → decide):
+  1. **Wild ideas**: Generate 2-3 radical reorganization ideas. Think big — merge entire directories, flip the hierarchy, eliminate a category, organize by concept instead of project. Write them to \`${journalPath}\`.
+  2. **Yes-and**: Pick the most interesting idea. Build on it 2-3 times — "yes, and if we did that, then..." Develop it into something concrete. Write the developed version.
+  3. **Evaluate**: Would this make the vault more useful to an agent reading it mid-task? If yes, execute it. If no, log why in \`${journalPath}\` — the reasoning is valuable for future disrupt cycles.
 
 If everything looks good in one phase, move to the next. When you've been through all phases, start over — the vault may have changed enough to warrant fresh eyes.
 
