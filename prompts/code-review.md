@@ -1,7 +1,13 @@
 ---
 description: Run code review with language-specific skills loaded
 ---
-Review the code for: $@
+Review the changes on this branch using the diff against the merge base with main:
+
+```bash
+git diff $(git merge-base HEAD main)..HEAD
+```
+
+Focus on: $@
 
 Before reviewing, load the relevant skills:
 1. Load the `code-review` skill and follow its instructions.
