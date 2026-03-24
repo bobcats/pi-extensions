@@ -13,17 +13,28 @@ export function shellEscape(s: string): string {
 }
 
 /**
+ * Get the pane ID of the current pi session.
+ * Falls back to undefined if not available (split will target focused pane).
+ */
+export function getParentPane(): string | undefined {
+	return process.env.TMUX_PANE || undefined;
+}
+
+/**
  * Create a horizontal split pane that runs a bash command directly.
+ * Targets the parent pi pane (via TMUX_PANE) so the split always opens
+ * next to pi regardless of which pane the user has focused.
  * Uses `remain-on-exit on` so the pane stays alive after the command finishes,
  * giving the watcher time to read the sentinel. closePane() kills it after.
  * Returns the pane ID (e.g. "%12").
  */
 export function createPaneWithCommand(name: string, command: string): string {
-	const pane = execFileSync("tmux", [
-		"split-window", "-h", "-d",
-		"-P", "-F", "#{pane_id}",
-		"bash", "-c", command,
-	], {
+	const parentPane = getParentPane();
+	const args = ["split-window", "-h", "-d", "-P", "-F", "#{pane_id}"];
+	if (parentPane) args.push("-t", parentPane);
+	args.push("bash", "-c", command);
+
+	const pane = execFileSync("tmux", args, {
 		encoding: "utf8",
 	}).trim();
 	try {
