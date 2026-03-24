@@ -731,7 +731,7 @@ Start pi inside tmux. Run a sync subagent call — confirm it still works. Then 
 - Widget shows the running agent
 - On completion, pane closes, widget updates, steer-back message arrives
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add subagent/index.ts
@@ -745,7 +745,7 @@ git commit -m "feat(subagent): add async execution with tmux panes, widget, and 
 **Files:**
 - Modify: `subagent/index.ts` (tool description, promptGuidelines)
 
-- [ ] **Step 1: Update the tool description**
+- [x] **Step 1: Update the tool description**
 
 Update the `description` array in `registerTool` to mention async mode:
 

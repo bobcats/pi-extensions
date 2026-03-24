@@ -3,6 +3,8 @@ name: librarian
 description: Research agent for documentation lookup, GitHub code search, and implementation examples. Read-only, evidence-based answers with permalinks.
 tools: read, grep, find, ls, bash
 model: anthropic/claude-sonnet-4-6
+spawning: false
+skills: brave-search
 ---
 
 # THE LIBRARIAN
