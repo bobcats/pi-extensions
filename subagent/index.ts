@@ -293,7 +293,7 @@ function runAsyncAgent(
 		tempFiles.push(tmp.dir);
 	}
 
-	args.push(`Task: ${task}`);
+	args.push("-p", `Task: ${task}`);
 
 	let effectiveCwd = cwd ?? (agent.cwd ? (path.isAbsolute(agent.cwd) ? agent.cwd : path.resolve(defaultCwd, agent.cwd)) : defaultCwd);
 
