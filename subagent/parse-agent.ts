@@ -52,17 +52,21 @@ export function parseAgentContent(
 		.map((t: string) => t.trim())
 		.filter(Boolean);
 
-	const thinking = frontmatter.thinking?.trim() || undefined;
+	const thinkingRaw = frontmatter.thinking;
+	const thinking = typeof thinkingRaw === "string" ? thinkingRaw.trim() || undefined : undefined;
 
-	const spawningRaw = frontmatter.spawning?.trim();
-	const spawning = spawningRaw === "false" ? false : spawningRaw === "true" ? true : undefined;
+	const spawningRaw = frontmatter.spawning;
+	const spawning = typeof spawningRaw === "boolean" ? spawningRaw
+		: typeof spawningRaw === "string" ? (spawningRaw.trim() === "false" ? false : spawningRaw.trim() === "true" ? true : undefined)
+		: undefined;
 
-	const skills = frontmatter.skills
-		?.split(",")
-		.map((s: string) => s.trim())
-		.filter(Boolean);
+	const skillsRaw = frontmatter.skills;
+	const skills = typeof skillsRaw === "string"
+		? skillsRaw.split(",").map((s: string) => s.trim()).filter(Boolean)
+		: undefined;
 
-	const cwd = frontmatter.cwd?.trim() || undefined;
+	const cwdRaw = frontmatter.cwd;
+	const cwd = typeof cwdRaw === "string" ? cwdRaw.trim() || undefined : undefined;
 
 	return {
 		name: frontmatter.name,
