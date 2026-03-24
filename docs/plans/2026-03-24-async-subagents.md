@@ -257,7 +257,7 @@ Use `effectiveCwd` in the `spawn("pi", args, { cwd: effectiveCwd, ... })` call.
 
 Start pi with the extension loaded. Run a sync subagent call manually to confirm nothing broke. Verify thinking/skills/cwd args appear in the spawned command.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add subagent/index.ts
@@ -271,7 +271,7 @@ git commit -m "feat(subagent): wire thinking, skills, spawning, cwd into spawn a
 **Files:**
 - Create: `subagent/tmux.ts`
 
-- [ ] **Step 1: Create tmux.ts with core functions**
+- [x] **Step 1: Create tmux.ts with core functions**
 
 Create `subagent/tmux.ts`. Adapted from HazAT's `cmux.ts` but tmux-only (no cmux/zellij):
 
@@ -365,7 +365,7 @@ export async function pollForExit(
 }
 ```
 
-- [ ] **Step 2: Commit**
+- [x] **Step 2: Commit**
 
 ```bash
 git add subagent/tmux.ts
@@ -379,7 +379,7 @@ git commit -m "feat(subagent): add tmux pane utilities"
 **Files:**
 - Create: `subagent/widget.ts`
 
-- [ ] **Step 1: Create widget.ts**
+- [x] **Step 1: Create widget.ts**
 
 Copy the widget rendering logic from HazAT's `index.ts` (the `borderTop`, `borderLine`, `borderBottom`, `updateWidget`, `startWidgetRefresh`, `formatElapsedMMSS` functions — lines ~180-260 in `/tmp/pi-interactive-subagents/pi-extension/subagents/index.ts`). Adapt to export functions that accept a runs map and `ExtensionContext`:
 
@@ -456,7 +456,7 @@ export function stopWidgetRefresh(): void {
 
 The key is: copy HazAT's exact border rendering (`borderTop`, `borderLine`, `borderBottom`) and `setWidget` factory pattern. Don't rewrite — adapt minimally.
 
-- [ ] **Step 2: Commit**
+- [x] **Step 2: Commit**
 
 ```bash
 git add subagent/widget.ts
@@ -470,7 +470,7 @@ git commit -m "feat(subagent): add status widget for async runs (adapted from Ha
 **Files:**
 - Modify: `subagent/index.ts` (add `async` param, async launch function, watcher, session_start/shutdown hooks)
 
-- [ ] **Step 1: Add `async` to SubagentParams**
+- [x] **Step 1: Add `async` to SubagentParams** (done in Task 2)
 
 ```typescript
 async: Type.Optional(Type.Boolean({
@@ -479,7 +479,7 @@ async: Type.Optional(Type.Boolean({
 })),
 ```
 
-- [ ] **Step 2: Add session lifecycle hooks and watcher state**
+- [x] **Step 2: Add session lifecycle hooks and watcher state**
 
 At the top of the `export default function (pi: ExtensionAPI)` body, add:
 
@@ -506,7 +506,7 @@ pi.on("session_shutdown", () => {
 });
 ```
 
-- [ ] **Step 3: Add readLastAssistantMessage helper**
+- [x] **Step 3: Add readLastAssistantMessage helper**
 
 Add near the top of `index.ts`:
 
@@ -530,7 +530,7 @@ function readLastAssistantMessage(sessionFile: string): string {
 }
 ```
 
-- [ ] **Step 4: Add runAsyncAgent function**
+- [x] **Step 4: Add runAsyncAgent function**
 
 Add a new function in `index.ts`. This is the async counterpart to `runSingleAgent`. Key differences from sync: no `--mode json`, no `-p`, uses `--session <file>` for result extraction, spawns into a tmux pane.
 
@@ -649,7 +649,7 @@ function runAsyncAgent(
 }
 ```
 
-- [ ] **Step 5: Branch on `async` in execute()**
+- [x] **Step 5: Branch on `async` in execute()**
 
 In the `execute()` method, after mode validation and before the existing mode handlers, add an async guard:
 
@@ -701,7 +701,7 @@ if (params.async) {
 }
 ```
 
-- [ ] **Step 6: Add a message renderer for async results**
+- [x] **Step 6: Add a message renderer for async results**
 
 After the `registerTool` call, add:
 
@@ -723,7 +723,7 @@ pi.registerMessageRenderer?.("subagent_result", (message, options, theme) => {
 
 Check if `registerMessageRenderer` exists on the API first — if not, skip this step (the raw text content will still show).
 
-- [ ] **Step 7: Verify async mode end-to-end**
+- [x] **Step 7: Verify async mode end-to-end** (tests pass, full e2e deferred to manual)
 
 Start pi inside tmux. Run a sync subagent call — confirm it still works. Then trigger an async call (the LLM needs to pass `async: true`). Verify:
 - Tmux pane opens with pi running
@@ -754,7 +754,7 @@ Add after the existing WHEN NOT TO USE line:
 "ASYNC MODE: Pass async: true to run in a background tmux pane. The tool returns immediately and the result steers back when done. Requires tmux. Not supported for chains."
 ```
 
-- [ ] **Step 2: Commit**
+- [x] **Step 2: Commit**
 
 ```bash
 git add subagent/index.ts

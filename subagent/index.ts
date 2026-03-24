@@ -19,12 +19,33 @@ import * as path from "node:path";
 import type { AgentToolResult } from "@mariozechner/pi-agent-core";
 import type { Message } from "@mariozechner/pi-ai";
 import { StringEnum } from "@mariozechner/pi-ai";
+import type { ExtensionContext } from "@mariozechner/pi-coding-agent";
 import { type ExtensionAPI, getMarkdownTheme } from "@mariozechner/pi-coding-agent";
 import { Container, Markdown, Spacer, Text } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
 import { type AgentConfig, type AgentScope, discoverAgents } from "./agents.js";
+import { isTmuxAvailable, createPane, sendCommand as tmuxSendCommand, closePane, pollForExit, shellEscape } from "./tmux.js";
+import { type AsyncRun, updateWidget, startWidgetRefresh, stopWidgetRefresh } from "./widget.js";
 
 const BUNDLED_AGENTS_DIR = path.join(import.meta.dirname, "agents");
+
+function readLastAssistantMessage(sessionFile: string): string {
+	try {
+		const raw = fs.readFileSync(sessionFile, "utf8");
+		const lines = raw.split("\n").filter((l) => l.trim());
+		for (let i = lines.length - 1; i >= 0; i--) {
+			try {
+				const entry = JSON.parse(lines[i]);
+				if (entry.type === "message" && entry.message?.role === "assistant") {
+					for (const part of entry.message.content) {
+						if (part.type === "text") return part.text;
+					}
+				}
+			} catch {}
+		}
+	} catch {}
+	return "(no output)";
+}
 
 function resolveSkillPath(skillName: string, cwd: string): string | null {
 	const candidates = [
@@ -229,6 +250,117 @@ function writePromptToTempFile(agentName: string, prompt: string): { dir: string
 }
 
 type OnUpdateCallback = (partial: AgentToolResult<SubagentDetails>) => void;
+
+function runAsyncAgent(
+	pi: ExtensionAPI,
+	asyncRuns: Map<string, AsyncRun>,
+	latestCtx: ExtensionContext | null,
+	defaultCwd: string,
+	agent: AgentConfig,
+	task: string,
+	cwd: string | undefined,
+	thinking: string | undefined,
+): { runId: string } {
+	const runId = crypto.randomUUID().slice(0, 8);
+	const sessionFile = path.join(os.tmpdir(), `pi-subagent-${runId}.jsonl`);
+
+	// Build pi args — interactive mode (no --mode json, no -p)
+	const args: string[] = ["--session", sessionFile];
+	if (agent.model) args.push("--model", agent.model);
+	if (agent.tools && agent.tools.length > 0) args.push("--tools", agent.tools.join(","));
+
+	const effectiveThinking = thinking ?? agent.thinking;
+	if (effectiveThinking) args.push("--thinking", effectiveThinking);
+
+	if (agent.skills && agent.skills.length > 0) {
+		for (const skillName of agent.skills) {
+			const skillPath = resolveSkillPath(skillName, defaultCwd);
+			if (skillPath) args.push("--skill", skillPath);
+		}
+	}
+
+	if (agent.spawning === false) {
+		args.push("--no-extensions");
+	}
+
+	// Track temp files for cleanup
+	const tempFiles: string[] = [sessionFile];
+
+	if (agent.systemPrompt.trim()) {
+		const tmp = writePromptToTempFile(agent.name, agent.systemPrompt);
+		args.push("--append-system-prompt", tmp.filePath);
+		tempFiles.push(tmp.filePath);
+		tempFiles.push(tmp.dir);
+	}
+
+	args.push("-p", `Task: ${task}`);
+
+	let effectiveCwd = cwd ?? (agent.cwd ? (path.isAbsolute(agent.cwd) ? agent.cwd : path.resolve(defaultCwd, agent.cwd)) : defaultCwd);
+
+	// Create tmux pane (doesn't steal focus) and send command
+	const pane = createPane(`${agent.name}: ${task.slice(0, 30)}`);
+	const piCmd = `cd ${shellEscape(effectiveCwd)} && pi ${args.map(shellEscape).join(" ")}; echo '__SUBAGENT_DONE_'$?'__'`;
+	tmuxSendCommand(pane, piCmd);
+
+	// Register run
+	const run: AsyncRun = {
+		id: runId,
+		agent: agent.name,
+		task,
+		startedAt: Date.now(),
+		pane,
+		sessionFile,
+		tempFiles,
+	};
+	asyncRuns.set(runId, run);
+	startWidgetRefresh(latestCtx, asyncRuns);
+
+	// Cleanup helper
+	const cleanup = () => {
+		for (const f of tempFiles) {
+			try { fs.unlinkSync(f); } catch {}
+		}
+	};
+
+	// Fire-and-forget watcher
+	const watcherAbort = new AbortController();
+	pollForExit(pane, watcherAbort.signal, {
+		interval: 1000,
+		onTick: () => updateWidget(latestCtx, asyncRuns),
+	})
+		.then((exitCode) => {
+			const summary = readLastAssistantMessage(sessionFile);
+
+			asyncRuns.delete(runId);
+			updateWidget(latestCtx, asyncRuns);
+			closePane(pane);
+			cleanup();
+
+			const status = exitCode === 0 ? "completed" : `failed (exit ${exitCode})`;
+			pi.sendMessage(
+				{
+					customType: "subagent_result",
+					content: `Async subagent "${agent.name}" ${status} (run: ${runId}).\n\n${summary}`,
+					display: true,
+					details: { runId, agent: agent.name, task, exitCode },
+				},
+				{ triggerTurn: true, deliverAs: "steer" },
+			);
+
+			pi.events.emit("notify", {
+				title: `Subagent done: ${agent.name}`,
+				body: exitCode === 0 ? "Completed" : "Failed",
+			});
+		})
+		.catch(() => {
+			asyncRuns.delete(runId);
+			updateWidget(latestCtx, asyncRuns);
+			try { closePane(pane); } catch {}
+			cleanup();
+		});
+
+	return { runId };
+}
 
 async function runSingleAgent(
 	defaultCwd: string,
@@ -446,6 +578,23 @@ const SubagentParams = Type.Object({
 });
 
 export default function (pi: ExtensionAPI) {
+	// Async run tracking
+	const asyncRuns = new Map<string, AsyncRun>();
+	let latestCtx: ExtensionContext | null = null;
+
+	pi.on("session_start", (_event: any, ctx: ExtensionContext) => {
+		latestCtx = ctx;
+	});
+
+	pi.on("session_shutdown", () => {
+		for (const run of asyncRuns.values()) {
+			try { closePane(run.pane); } catch {}
+		}
+		stopWidgetRefresh();
+		asyncRuns.clear();
+		latestCtx = null;
+	});
+
 	// Shared agent registry — other extensions push agents here via subagent:register.
 	// We also emit subagent:discover at execute time so late-loading extensions can respond.
 	const externalAgents: AgentConfig[] = [];
@@ -533,6 +682,52 @@ export default function (pi: ExtensionAPI) {
 							content: [{ type: "text", text: "Canceled: project-local agents not approved." }],
 							details: makeDetails(hasChain ? "chain" : hasTasks ? "parallel" : "single")([]),
 						};
+				}
+			}
+
+			// Async mode — spawn into tmux panes, return immediately
+			if (params.async) {
+				if (!isTmuxAvailable()) {
+					return {
+						content: [{ type: "text", text: "async: true requires tmux. Start pi inside a tmux session." }],
+						details: makeDetails("single")([]),
+					};
+				}
+
+				if (hasChain) {
+					return {
+						content: [{ type: "text", text: "async: true is not supported for chains (steps depend on {previous})." }],
+						details: makeDetails("chain")([]),
+					};
+				}
+
+				if (hasSingle && params.agent && params.task) {
+					const agent = agents.find((a) => a.name === params.agent);
+					if (!agent) {
+						return {
+							content: [{ type: "text", text: `Unknown agent: "${params.agent}"` }],
+							details: makeDetails("single")([]),
+						};
+					}
+					const { runId } = runAsyncAgent(pi, asyncRuns, latestCtx, ctx.cwd, agent, params.task, params.cwd, params.thinking);
+					return {
+						content: [{ type: "text", text: `Started async subagent "${params.agent}" (run: ${runId})` }],
+						details: makeDetails("single")([]),
+					};
+				}
+
+				if (hasTasks && params.tasks) {
+					const runIds: string[] = [];
+					for (const t of params.tasks) {
+						const agent = agents.find((a) => a.name === t.agent);
+						if (!agent) continue;
+						const { runId } = runAsyncAgent(pi, asyncRuns, latestCtx, ctx.cwd, agent, t.task, t.cwd, params.thinking);
+						runIds.push(runId);
+					}
+					return {
+						content: [{ type: "text", text: `Started ${runIds.length} async subagents` }],
+						details: makeDetails("parallel")([]),
+					};
 				}
 			}
 
@@ -1026,5 +1221,20 @@ export default function (pi: ExtensionAPI) {
 			const text = result.content[0];
 			return new Text(text?.type === "text" ? text.text : "(no output)", 0, 0);
 		},
+	});
+
+	// Renderer for async subagent completion messages
+	pi.registerMessageRenderer("subagent_result", (message: any, _options: any, theme: any) => {
+		const details = message.details as any;
+		if (!details) return undefined;
+		const icon = details.exitCode === 0 ? theme.fg("success", "✓") : theme.fg("error", "✗");
+		const status = details.exitCode === 0 ? "completed" : `failed (exit ${details.exitCode})`;
+		const header = `${icon} ${theme.fg("toolTitle", theme.bold(details.agent))} — ${status}`;
+		const content = typeof message.content === "string" ? message.content : "";
+		// Strip the header line from content since we render it ourselves
+		const body = content.replace(/^Async subagent "[^"]*" [^\n]*\n\n/, "");
+		const preview = body.length > 200 ? body.slice(0, 200) + "…" : body;
+		const lines = [header, "", ...preview.split("\n")];
+		return new Text(lines.join("\n"), 0, 0);
 	});
 }
