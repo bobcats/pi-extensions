@@ -773,7 +773,7 @@ git commit -m "docs(subagent): update tool description for async mode and new pa
 - Modify: `subagent/agents/librarian.md`
 - Modify: `subagent/agents/oracle.md`
 
-- [ ] **Step 1: Add thinking and spawning to bundled agents**
+- [x] **Step 1: Add thinking and spawning to bundled agents**
 
 Add appropriate defaults:
 
@@ -811,11 +811,11 @@ spawning: false
 ---
 ```
 
-- [ ] **Step 2: Add skills to librarian**
+- [x] **Step 2: Add skills to librarian**
 
 The librarian agent currently hardcodes brave-search usage in its system prompt body. Add `skills: brave-search` to its frontmatter so the skill gets injected properly.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add subagent/agents/
