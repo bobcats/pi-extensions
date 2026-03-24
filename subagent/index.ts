@@ -24,7 +24,7 @@ import { type ExtensionAPI, getMarkdownTheme } from "@mariozechner/pi-coding-age
 import { Container, Markdown, Spacer, Text } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
 import { type AgentConfig, type AgentScope, discoverAgents } from "./agents.js";
-import { isTmuxAvailable, createPane, sendCommand as tmuxSendCommand, closePane, pollForExit, shellEscape } from "./tmux.js";
+import { isTmuxAvailable, createPaneWithCommand, closePane, pollForExit, shellEscape } from "./tmux.js";
 import { type AsyncRun, updateWidget, startWidgetRefresh, stopWidgetRefresh } from "./widget.js";
 
 const BUNDLED_AGENTS_DIR = path.join(import.meta.dirname, "agents");
@@ -297,10 +297,9 @@ function runAsyncAgent(
 
 	let effectiveCwd = cwd ?? (agent.cwd ? (path.isAbsolute(agent.cwd) ? agent.cwd : path.resolve(defaultCwd, agent.cwd)) : defaultCwd);
 
-	// Create tmux pane (doesn't steal focus) and send command
-	const pane = createPane(`${agent.name}: ${task.slice(0, 30)}`);
+	// Create tmux pane with bash -c so we control the shell (avoids fish $? issues)
 	const piCmd = `cd ${shellEscape(effectiveCwd)} && pi ${args.map(shellEscape).join(" ")}; echo '__SUBAGENT_DONE_'$?'__'`;
-	tmuxSendCommand(pane, piCmd);
+	const pane = createPaneWithCommand(`${agent.name}: ${task.slice(0, 30)}`, piCmd);
 
 	// Register run
 	const run: AsyncRun = {

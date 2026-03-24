@@ -13,25 +13,26 @@ export function shellEscape(s: string): string {
 }
 
 /**
- * Create a horizontal split pane without stealing focus.
+ * Create a horizontal split pane that runs a bash command directly.
+ * Uses `remain-on-exit on` so the pane stays alive after the command finishes,
+ * giving the watcher time to read the sentinel. closePane() kills it after.
  * Returns the pane ID (e.g. "%12").
  */
-export function createPane(name: string): string {
-	const pane = execFileSync("tmux", ["split-window", "-h", "-d", "-P", "-F", "#{pane_id}"], {
+export function createPaneWithCommand(name: string, command: string): string {
+	const pane = execFileSync("tmux", [
+		"split-window", "-h", "-d",
+		"-P", "-F", "#{pane_id}",
+		"bash", "-c", command,
+	], {
 		encoding: "utf8",
 	}).trim();
+	try {
+		execFileSync("tmux", ["set-option", "-t", pane, "remain-on-exit", "on"]);
+	} catch {}
 	try {
 		execFileSync("tmux", ["select-pane", "-t", pane, "-T", name]);
 	} catch {}
 	return pane;
-}
-
-/**
- * Send a command to a pane and press Enter.
- */
-export function sendCommand(pane: string, command: string): void {
-	execFileSync("tmux", ["send-keys", "-t", pane, "-l", command]);
-	execFileSync("tmux", ["send-keys", "-t", pane, "Enter"]);
 }
 
 /**
