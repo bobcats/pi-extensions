@@ -19,7 +19,7 @@
 - Modify: `subagent/agents.ts:26-80` (loadAgentsFromDir)
 - Test: `subagent/agents.test.ts` (new)
 
-- [ ] **Step 1: Add fields to AgentConfig interface**
+- [x] **Step 1: Add fields to AgentConfig interface**
 
 In `subagent/agents.ts`, add four fields to `AgentConfig`:
 
@@ -40,7 +40,7 @@ export interface AgentConfig {
 }
 ```
 
-- [ ] **Step 2: Write tests for frontmatter parsing**
+- [x] **Step 2: Write tests for frontmatter parsing** (moved to parse-agent.ts for testability)
 
 Create `subagent/agents.test.ts`:
 
@@ -103,12 +103,12 @@ describe("frontmatter parsing", () => {
 });
 ```
 
-- [ ] **Step 3: Run tests to verify they fail**
+- [x] **Step 3: Run tests to verify they fail** (passed immediately — extracted to parse-agent.ts)
 
 Run: `node --test subagent/agents.test.ts`
 Expected: FAIL — AgentConfig doesn't have the new fields being parsed yet.
 
-- [ ] **Step 4: Parse new fields in loadAgentsFromDir**
+- [x] **Step 4: Parse new fields in loadAgentsFromDir** (done in parse-agent.ts)
 
 In `subagent/agents.ts`, inside the `for (const entry of entries)` loop in `loadAgentsFromDir`, after `tools` parsing, add:
 
@@ -144,7 +144,7 @@ agents.push({
 });
 ```
 
-- [ ] **Step 5: Run tests to verify they pass**
+- [x] **Step 5: Run tests to verify they pass**
 
 Run: `node --test subagent/agents.test.ts`
 Expected: PASS

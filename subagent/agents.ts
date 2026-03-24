@@ -5,18 +5,14 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { getAgentDir, parseFrontmatter } from "@mariozechner/pi-coding-agent";
+import { parseAgentContent } from "./parse-agent.ts";
+
+export type { AgentConfig } from "./parse-agent.ts";
+export { parseAgentContent } from "./parse-agent.ts";
+
+import type { AgentConfig } from "./parse-agent.ts";
 
 export type AgentScope = "user" | "project" | "both";
-
-export interface AgentConfig {
-	name: string;
-	description: string;
-	tools?: string[];
-	model?: string;
-	systemPrompt: string;
-	source: "bundled" | "user" | "project";
-	filePath: string;
-}
 
 export interface AgentDiscoveryResult {
 	agents: AgentConfig[];
@@ -49,26 +45,8 @@ function loadAgentsFromDir(dir: string, source: AgentConfig["source"]): AgentCon
 			continue;
 		}
 
-		const { frontmatter, body } = parseFrontmatter<Record<string, string>>(content);
-
-		if (!frontmatter.name || !frontmatter.description) {
-			continue;
-		}
-
-		const tools = frontmatter.tools
-			?.split(",")
-			.map((t: string) => t.trim())
-			.filter(Boolean);
-
-		agents.push({
-			name: frontmatter.name,
-			description: frontmatter.description,
-			tools: tools && tools.length > 0 ? tools : undefined,
-			model: frontmatter.model,
-			systemPrompt: body,
-			source,
-			filePath,
-		});
+		const agent = parseAgentContent(content, source, filePath, parseFrontmatter);
+		if (agent) agents.push(agent);
 	}
 
 	return agents;
