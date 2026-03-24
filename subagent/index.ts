@@ -618,6 +618,8 @@ export default function (pi: ExtensionAPI) {
 			"",
 			"WHEN TO USE: Subagents are worth the overhead for tasks that require independent reasoning, analysis, or multi-step work (code review, planning, research, implementation).",
 			"WHEN NOT TO USE: Do NOT use subagents just to read files in parallel. Reading files is fast and cheap — use the read tool directly. Spawning a subagent process for simple reads wastes time and tokens.",
+			"",
+			"ASYNC MODE: Pass async: true to run in a background tmux pane. The tool returns immediately and the result steers back when done. Requires tmux. Not supported for chains.",
 		].join(" "),
 		parameters: SubagentParams,
 
