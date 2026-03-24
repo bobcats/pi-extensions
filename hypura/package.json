@@ -1,0 +1,9 @@
+{
+  "name": "@bobcats/hypura",
+  "version": "0.1.0",
+  "private": true,
+  "devDependencies": {
+    "@mariozechner/pi-coding-agent": "*",
+    "@mariozechner/pi-ai": "*"
+  }
+}

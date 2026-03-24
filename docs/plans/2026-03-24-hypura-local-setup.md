@@ -127,7 +127,7 @@ curl -L -O https://huggingface.co/TheBloke/Mixtral-8x7B-Instruct-v0.1-GGUF/resol
 
 Start with Option A. You can always download Option B later.
 
-- [ ] **Step 3: Verify the download**
+- [x] **Step 3: Verify the download**
 
 Run: `ls -lh ~/code/bobcats/hypura/test-models/`
 Expected: The `.gguf` file at the expected size (~8.4 GB for Qwen, ~31 GB for Mixtral).
@@ -136,7 +136,7 @@ Expected: The `.gguf` file at the expected size (~8.4 GB for Qwen, ~31 GB for Mi
 
 ### Task 6: Run inference
 
-- [ ] **Step 1: Inspect the model placement plan (dry run)**
+- [x] **Step 1: Inspect the model placement plan (dry run)**
 
 This shows how hypura would place tensors without actually loading the model.
 
@@ -147,7 +147,7 @@ cd ~/code/bobcats/hypura
 
 Expected: A table showing tensor placement across GPU/RAM/NVMe tiers. For the 8.4 GB Qwen on 64 GB, everything should be GPU-resident.
 
-- [ ] **Step 2: Test with a short prompt (safety first)**
+- [x] **Step 2: Test with a short prompt (safety first)**
 
 ```bash
 ./target/release/hypura run ./test-models/qwen2.5-14b-instruct-q4_k_m.gguf \
@@ -156,7 +156,7 @@ Expected: A table showing tensor placement across GPU/RAM/NVMe tiers. For the 8.
 
 Expected: A short generated response, ~20+ tok/s on your M4 Max.
 
-- [ ] **Step 3: Try interactive chat**
+- [x] **Step 3: Try interactive chat** *(skipped — needs TTY, run manually)*
 
 ```bash
 ./target/release/hypura run ./test-models/qwen2.5-14b-instruct-q4_k_m.gguf --interactive
@@ -170,7 +170,7 @@ Expected: An interactive prompt where you can chat with the model. Ctrl+C to exi
 
 This is the key feature for integration — any tool that speaks Ollama protocol can use hypura as a backend.
 
-- [ ] **Step 1: Start the server**
+- [x] **Step 1: Start the server**
 
 ```bash
 cd ~/code/bobcats/hypura
@@ -184,7 +184,7 @@ Endpoint: http://127.0.0.1:8080
 Ollama-compatible API: /api/generate, /api/chat, /api/tags
 ```
 
-- [ ] **Step 2: Test the API from another terminal**
+- [x] **Step 2: Test the API from another terminal**
 
 ```bash
 curl http://127.0.0.1:8080/api/tags
@@ -200,7 +200,7 @@ curl -X POST http://127.0.0.1:8080/api/generate \
 
 Expected: A JSON response with the model's answer.
 
-- [ ] **Step 3: Stop the server**
+- [x] **Step 3: Stop the server** *(running in tmux — stop with: tmux kill-session -t hypura-serve)*
 
 Ctrl+C in the terminal running `hypura serve`.
 
