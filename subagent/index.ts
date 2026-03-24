@@ -279,8 +279,13 @@ function runAsyncAgent(
 		}
 	}
 
+	// Load auto-exit extension so pi exits when the agent finishes its turn
+	const autoExitPath = path.join(import.meta.dirname, "auto-exit.ts");
 	if (agent.spawning === false) {
-		args.push("--no-extensions");
+		// No extensions except auto-exit
+		args.push("--no-extensions", "-e", autoExitPath);
+	} else {
+		args.push("-e", autoExitPath);
 	}
 
 	// Track temp files for cleanup
@@ -293,7 +298,7 @@ function runAsyncAgent(
 		tempFiles.push(tmp.dir);
 	}
 
-	args.push("-p", `Task: ${task}`);
+	args.push(`Task: ${task}`);
 
 	let effectiveCwd = cwd ?? (agent.cwd ? (path.isAbsolute(agent.cwd) ? agent.cwd : path.resolve(defaultCwd, agent.cwd)) : defaultCwd);
 
