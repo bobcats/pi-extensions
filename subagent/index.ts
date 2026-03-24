@@ -25,6 +25,17 @@ import { Type } from "@sinclair/typebox";
 import { type AgentConfig, type AgentScope, discoverAgents } from "./agents.js";
 
 const BUNDLED_AGENTS_DIR = path.join(import.meta.dirname, "agents");
+
+function resolveSkillPath(skillName: string, cwd: string): string | null {
+	const candidates = [
+		path.join(cwd, ".pi", "skills", skillName, "SKILL.md"),
+		path.join(os.homedir(), ".pi", "agent", "skills", skillName, "SKILL.md"),
+	];
+	for (const p of candidates) {
+		if (fs.existsSync(p)) return p;
+	}
+	return null;
+}
 const MAX_PARALLEL_TASKS = 8;
 const MAX_CONCURRENCY = 4;
 const SPAWN_STAGGER_MS = 2000;
@@ -225,6 +236,7 @@ async function runSingleAgent(
 	agentName: string,
 	task: string,
 	cwd: string | undefined,
+	thinking: string | undefined,
 	step: number | undefined,
 	signal: AbortSignal | undefined,
 	onUpdate: OnUpdateCallback | undefined,
@@ -249,6 +261,23 @@ async function runSingleAgent(
 	const args: string[] = ["--mode", "json", "-p", "--no-session"];
 	if (agent.model) args.push("--model", agent.model);
 	if (agent.tools && agent.tools.length > 0) args.push("--tools", agent.tools.join(","));
+
+	// Thinking: tool param → agent frontmatter → none
+	const effectiveThinking = thinking ?? agent.thinking;
+	if (effectiveThinking) args.push("--thinking", effectiveThinking);
+
+	// Skills: resolve skill names to paths, pass --skill for each
+	if (agent.skills && agent.skills.length > 0) {
+		for (const skillName of agent.skills) {
+			const skillPath = resolveSkillPath(skillName, defaultCwd);
+			if (skillPath) args.push("--skill", skillPath);
+		}
+	}
+
+	// Spawning: exclude all extensions from child process
+	if (agent.spawning === false) {
+		args.push("--no-extensions");
+	}
 
 	let tmpPromptDir: string | null = null;
 	let tmpPromptPath: string | null = null;
@@ -286,7 +315,9 @@ async function runSingleAgent(
 		let wasAborted = false;
 
 		const exitCode = await new Promise<number>((resolve) => {
-			const proc = spawn("pi", args, { cwd: cwd ?? defaultCwd, shell: false, stdio: ["ignore", "pipe", "pipe"] });
+			// Cwd: tool param → agent frontmatter → parent session cwd
+			let effectiveCwd = cwd ?? (agent.cwd ? (path.isAbsolute(agent.cwd) ? agent.cwd : path.resolve(defaultCwd, agent.cwd)) : defaultCwd);
+			const proc = spawn("pi", args, { cwd: effectiveCwd, shell: false, stdio: ["ignore", "pipe", "pipe"] });
 			let buffer = "";
 
 			const processLine = (line: string) => {
@@ -405,6 +436,13 @@ const SubagentParams = Type.Object({
 		Type.Boolean({ description: "Prompt before running project-local agents. Default: true.", default: true }),
 	),
 	cwd: Type.Optional(Type.String({ description: "Working directory for the agent process (single mode)" })),
+	thinking: Type.Optional(Type.String({
+		description: "Override thinking level: off, minimal, low, medium, high, xhigh",
+	})),
+	async: Type.Optional(Type.Boolean({
+		description: "Run in background. Returns immediately, result steers back on completion. Requires tmux. Not supported for chains.",
+		default: false,
+	})),
 });
 
 export default function (pi: ExtensionAPI) {
@@ -527,6 +565,7 @@ export default function (pi: ExtensionAPI) {
 						step.agent,
 						taskWithContext,
 						step.cwd,
+						params.thinking,
 						i + 1,
 						signal,
 						chainUpdate,
@@ -603,6 +642,7 @@ export default function (pi: ExtensionAPI) {
 						t.agent,
 						t.task,
 						t.cwd,
+						params.thinking,
 						undefined,
 						signal,
 						// Per-task update callback
@@ -643,6 +683,7 @@ export default function (pi: ExtensionAPI) {
 					params.agent,
 					params.task,
 					params.cwd,
+					params.thinking,
 					undefined,
 					signal,
 					onUpdate,

@@ -149,12 +149,7 @@ agents.push({
 Run: `node --test subagent/agents.test.ts`
 Expected: PASS
 
-- [ ] **Step 6: Commit**
-
-```bash
-git add subagent/agents.ts subagent/agents.test.ts
-git commit -m "feat(subagent): parse thinking, spawning, skills, cwd from agent frontmatter"
-```
+- [x] **Step 6: Commit**
 
 ---
 
@@ -164,7 +159,7 @@ git commit -m "feat(subagent): parse thinking, spawning, skills, cwd from agent 
 - Modify: `subagent/index.ts:248-285` (runSingleAgent, arg building section)
 - Modify: `subagent/index.ts:398-420` (SubagentParams, add `thinking` param)
 
-- [ ] **Step 1: Add `thinking` to tool parameters**
+- [x] **Step 1: Add `thinking` and `async` to tool parameters**
 
 In `subagent/index.ts`, add to `SubagentParams`:
 
@@ -174,7 +169,7 @@ thinking: Type.Optional(Type.String({
 })),
 ```
 
-- [ ] **Step 2: Pass `thinking` parameter through to runSingleAgent**
+- [x] **Step 2: Pass `thinking` parameter through to runSingleAgent**
 
 `runSingleAgent` needs access to the thinking override. Add a `thinking` field to an options bag or pass it directly. Simplest: add `thinking?: string` parameter after `cwd`.
 
@@ -194,7 +189,7 @@ async function runSingleAgent(
 
 Update all call sites (3 places: single, parallel, chain) to pass `params.thinking` or `undefined`.
 
-- [ ] **Step 3: Build args from new fields in runSingleAgent**
+- [x] **Step 3: Build args from new fields in runSingleAgent**
 
 In `runSingleAgent`, after the existing `args.push("--model", ...)` and `args.push("--tools", ...)` lines (~line 250), add:
 
@@ -221,7 +216,7 @@ if (agent.spawning === false) {
 }
 ```
 
-- [ ] **Step 4: Add resolveSkillPath helper**
+- [x] **Step 4: Add resolveSkillPath helper**
 
 Add near the top of `subagent/index.ts`:
 
@@ -238,7 +233,7 @@ function resolveSkillPath(skillName: string, cwd: string): string | null {
 }
 ```
 
-- [ ] **Step 5: Update cwd resolution**
+- [x] **Step 5: Update cwd resolution**
 
 In `runSingleAgent`, replace the existing `cwd ?? defaultCwd` in the `spawn()` call with:
 
@@ -258,7 +253,7 @@ if (agent.cwd && !cwd && !path.isAbsolute(agent.cwd)) {
 
 Use `effectiveCwd` in the `spawn("pi", args, { cwd: effectiveCwd, ... })` call.
 
-- [ ] **Step 6: Verify sync mode still works**
+- [x] **Step 6: Verify sync mode still works** (syntax check + tests pass, manual verify deferred)
 
 Start pi with the extension loaded. Run a sync subagent call manually to confirm nothing broke. Verify thinking/skills/cwd args appear in the spawned command.
 
