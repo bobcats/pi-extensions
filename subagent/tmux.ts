@@ -71,6 +71,29 @@ export function createPaneWithCommand(name: string, command: string): string {
 	return pane;
 }
 
+export function getWindowPanes(windowId: string): string[] {
+	try {
+		return execFileSync("tmux", ["list-panes", "-t", windowId, "-F", "#{pane_id}"], {
+			encoding: "utf8",
+		})
+			.split("\n")
+			.map((line) => line.trim())
+			.filter(Boolean);
+	} catch {
+		return [];
+	}
+}
+
+export function runCommandInPane(pane: string, name: string, command: string): void {
+	execFileSync("tmux", ["respawn-pane", "-k", "-t", pane, "bash", "-c", command]);
+	try {
+		execFileSync("tmux", ["set-option", "-t", pane, "remain-on-exit", "on"]);
+	} catch {}
+	try {
+		execFileSync("tmux", ["select-pane", "-t", pane, "-T", name]);
+	} catch {}
+}
+
 export function createPaneInWindow(windowId: string, name: string, command: string): string {
 	const pane = execFileSync(
 		"tmux",
