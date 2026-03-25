@@ -20,6 +20,18 @@ export function getParentPane(): string | undefined {
 	return process.env.TMUX_PANE || undefined;
 }
 
+export function getParentSession(): string | undefined {
+	const parentPane = getParentPane();
+	if (!parentPane) return undefined;
+	try {
+		return execFileSync("tmux", ["display-message", "-p", "-t", parentPane, "#{session_id}"], {
+			encoding: "utf8",
+		}).trim();
+	} catch {
+		return undefined;
+	}
+}
+
 /**
  * Create a horizontal split pane that runs a bash command directly.
  * Targets the parent pi pane (via TMUX_PANE) so the split always opens
@@ -47,9 +59,9 @@ export function makeBatchWindowName(batchId: string): string {
 }
 
 export function createWindow(name: string): string {
-	const parentPane = getParentPane();
+	const parentSession = getParentSession();
 	const args = ["new-window", "-d", "-P", "-F", "#{window_id}", "-n", name];
-	if (parentPane) args.push("-t", parentPane);
+	if (parentSession) args.push("-t", parentSession);
 	return execFileSync("tmux", args, { encoding: "utf8" }).trim();
 }
 
