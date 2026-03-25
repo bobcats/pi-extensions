@@ -68,6 +68,8 @@ export default function (pi: ExtensionAPI) {
 			if (!name) return;
 
 			pi.setSessionName(name);
+			const cwdBasename = ctx.cwd.split("/").pop() ?? ctx.cwd;
+			ctx.ui.setTitle(`π - ${name} - ${cwdBasename}`);
 		} catch {
 			// Best-effort
 		}
