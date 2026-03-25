@@ -16,7 +16,7 @@
 - Modify: `subagent/tmux.ts`
 - Test: manual tmux smoke checks from a pi session running inside tmux
 
-- [ ] **Step 1: Add a helper to derive a source-specific window name**
+- [x] **Step 1: Add a helper to derive a source-specific window name**
 
 In `subagent/tmux.ts`, add a helper that derives a readable, source-specific name from the spawning pane.
 
@@ -40,7 +40,7 @@ export function makeBatchWindowName(batchId: string): string {
 }
 ```
 
-- [ ] **Step 2: Add a tmux helper to create a dedicated window in the parent session**
+- [x] **Step 2: Add a tmux helper to create a dedicated window in the parent session**
 
 In `subagent/tmux.ts`, add:
 
@@ -55,7 +55,7 @@ export function createWindow(name: string): string {
 
 This must create the window in the same tmux session as the spawning pi pane.
 
-- [ ] **Step 3: Add a helper to create a pane inside an existing window**
+- [x] **Step 3: Add a helper to create a pane inside an existing window**
 
 In `subagent/tmux.ts`, add:
 
@@ -76,7 +76,7 @@ export function createPaneInWindow(windowId: string, name: string, command: stri
 }
 ```
 
-- [ ] **Step 4: Add helpers to tile and close a batch window**
+- [x] **Step 4: Add helpers to tile and close a batch window**
 
 In `subagent/tmux.ts`, add:
 
@@ -94,11 +94,11 @@ export function closeWindow(windowId: string): void {
 }
 ```
 
-- [ ] **Step 5: Keep `createPaneWithCommand()` for single async only**
+- [x] **Step 5: Keep `createPaneWithCommand()` for single async only**
 
 Do not remove `createPaneWithCommand()`. It remains the single-task async path.
 
-- [ ] **Step 6: Manual smoke test the new tmux helpers**
+- [x] **Step 6: Manual smoke test the new tmux helpers**
 
 From a pi session running inside tmux, manually verify:
 
@@ -112,7 +112,7 @@ node --input-type=module -e "import('./subagent/tmux.ts').then(m => console.log(
 
 Expected: output includes `createWindow`, `createPaneInWindow`, `tileWindow`, and `closeWindow`.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add subagent/tmux.ts
@@ -127,7 +127,7 @@ git commit -m "feat(subagent): add tmux window helpers for async batches"
 - Modify: `subagent/widget.ts`
 - Modify: `subagent/index.ts`
 
-- [ ] **Step 1: Add a batch type for parallel async orchestration**
+- [x] **Step 1: Add a batch type for parallel async orchestration**
 
 In `subagent/index.ts`, define a new interface near the existing async structures:
 
@@ -141,7 +141,7 @@ interface AsyncBatch {
 }
 ```
 
-- [ ] **Step 2: Add batch tracking maps inside the extension factory**
+- [x] **Step 2: Add batch tracking maps inside the extension factory**
 
 In `export default function (pi: ExtensionAPI)`, add:
 
@@ -152,7 +152,7 @@ const asyncBatches = new Map<string, AsyncBatch>();
 
 Keep `asyncRuns` as the source for widget rendering. Batches exist only for window lifecycle.
 
-- [ ] **Step 3: Extend AsyncRun with optional batch fields**
+- [x] **Step 3: Extend AsyncRun with optional batch fields**
 
 In `subagent/widget.ts`, extend `AsyncRun`:
 
@@ -170,7 +170,7 @@ export interface AsyncRun {
 }
 ```
 
-- [ ] **Step 4: Update shutdown cleanup to close windows before clearing state**
+- [x] **Step 4: Update shutdown cleanup to close windows before clearing state**
 
 In `subagent/index.ts`, update `session_shutdown`:
 
@@ -189,7 +189,7 @@ latestCtx = null;
 
 This avoids orphaned windows if pi shuts down while a parallel async batch is running.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add subagent/index.ts subagent/widget.ts
@@ -203,13 +203,13 @@ git commit -m "refactor(subagent): add async batch state for parallel tmux windo
 **Files:**
 - Modify: `subagent/index.ts`
 
-- [ ] **Step 1: Rename the single-run async helper for clarity**
+- [x] **Step 1: Rename the single-run async helper for clarity**
 
 Rename `runAsyncAgent(...)` to `runSingleAsyncAgent(...)` in `subagent/index.ts`.
 
 Update the function signature and all call sites.
 
-- [ ] **Step 2: Keep the implementation behavior unchanged**
+- [x] **Step 2: Keep the implementation behavior unchanged**
 
 Single async should still:
 - create a split next to the spawning pi pane
@@ -221,14 +221,14 @@ Single async should still:
 
 No batching logic belongs here.
 
-- [ ] **Step 3: Verify the single async path still compiles mentally after rename**
+- [x] **Step 3: Verify the single async path still compiles mentally after rename**
 
 Review the renamed helper and ensure it still calls:
 - `createPaneWithCommand(...)`
 - `pollForExit(...)`
 - `closePane(...)`
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add subagent/index.ts
@@ -243,7 +243,7 @@ git commit -m "refactor(subagent): separate single async helper from batch flow"
 - Modify: `subagent/index.ts`
 - Modify: `subagent/tmux.ts`
 
-- [ ] **Step 1: Write a helper to build the interactive pi command for one async child**
+- [x] **Step 1: Write a helper to build the interactive pi command for one async child**
 
 In `subagent/index.ts`, extract the shared async command construction into a helper so single and parallel async can reuse it.
 
@@ -265,7 +265,7 @@ function buildAsyncPiCommand(
 
 This removes duplication and keeps the single/parallel paths consistent.
 
-- [ ] **Step 2: Write a helper to register one async child run watcher**
+- [x] **Step 2: Write a helper to register one async child run watcher**
 
 In `subagent/index.ts`, extract the watcher logic into a reusable function:
 
@@ -288,7 +288,7 @@ function watchAsyncRun(
 }
 ```
 
-- [ ] **Step 3: Implement a new `runParallelAsyncBatch(...)` helper**
+- [x] **Step 3: Implement a new `runParallelAsyncBatch(...)` helper**
 
 Add a new helper to `subagent/index.ts`:
 
@@ -340,7 +340,7 @@ function runParallelAsyncBatch(
 
 Keep it simple. Build the whole window first, tile it, then start watchers.
 
-- [ ] **Step 4: Use the batch helper in the async `tasks` branch**
+- [x] **Step 4: Use the batch helper in the async `tasks` branch**
 
 In the `if (params.async)` block inside `subagent/index.ts`, replace the current loop-based async `tasks` branch with a call to `runParallelAsyncBatch(...)`.
 
@@ -353,11 +353,11 @@ return {
 };
 ```
 
-- [ ] **Step 5: Remove stagger from async parallel mode**
+- [x] **Step 5: Remove stagger from async parallel mode**
 
 The new parallel batch logic creates a dedicated window and spawns panes inside it. Remove the current async parallel stagger loop in this path. Keep the existing stagger in sync JSON-mode parallel execution untouched.
 
-- [ ] **Step 6: Verify batch cleanup logic by inspection**
+- [x] **Step 6: Verify batch cleanup logic by inspection**
 
 Read through `watchAsyncRun(...)` and confirm:
 - child completion never closes the window early
@@ -365,7 +365,7 @@ Read through `watchAsyncRun(...)` and confirm:
 - temp files are cleaned per child
 - failed child tasks still count toward batch completion
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add subagent/index.ts subagent/tmux.ts
@@ -379,7 +379,7 @@ git commit -m "feat(subagent): run parallel async tasks in dedicated tmux window
 **Files:**
 - Modify: `subagent/index.ts`
 
-- [ ] **Step 1: Update the tool description to reflect split vs window behavior**
+- [x] **Step 1: Update the tool description to reflect split vs window behavior**
 
 In the `registerTool` description for `subagent`, replace the current async wording with something more precise:
 
@@ -387,11 +387,11 @@ In the `registerTool` description for `subagent`, replace the current async word
 "ASYNC MODE: Pass async: true to run in tmux. Single async tasks open a temporary split beside the current pi pane. Parallel async tasks open a dedicated tmux window with one pane per task. Results steer back when done. Requires tmux. Not supported for chains."
 ```
 
-- [ ] **Step 2: Update any async start messages to mention windows for parallel batches**
+- [x] **Step 2: Update any async start messages to mention windows for parallel batches**
 
 Ensure the returned tool message for async parallel includes the tmux window name.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add subagent/index.ts
@@ -405,13 +405,13 @@ git commit -m "docs(subagent): clarify tmux split vs window async behavior"
 **Files:**
 - Verify runtime behavior manually
 
-- [ ] **Step 1: Reload pi so the extension changes take effect**
+- [x] **Step 1: Reload pi so the extension changes take effect**
 
 Use your normal pi reload flow.
 
 Expected: the updated subagent tool is available in the current session.
 
-- [ ] **Step 2: Verify single async still opens a split next to the spawning pi pane**
+- [x] **Step 2: Verify single async still opens a split next to the spawning pi pane**
 
 Trigger a single async scout run, for example:
 
@@ -425,7 +425,7 @@ Expected:
 - the pane auto-closes when done
 - the result steers back into the conversation
 
-- [ ] **Step 3: Verify parallel async opens a dedicated window**
+- [x] **Step 3: Verify parallel async opens a dedicated window**
 
 Trigger a parallel async run with at least 3 tasks, for example:
 
@@ -445,7 +445,7 @@ Expected:
 - each result steers back independently
 - the window closes automatically after the last task finishes
 
-- [ ] **Step 4: Verify failure handling in a batch**
+- [x] **Step 4: Verify failure handling in a batch**
 
 Trigger one good task and one intentionally bad one:
 
@@ -462,7 +462,7 @@ Expected:
 - the batch window closes only after all child runs have resolved
 - the conversation receives both outcomes
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add -A
