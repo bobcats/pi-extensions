@@ -24,6 +24,7 @@ import { type ExtensionAPI, getMarkdownTheme } from "@mariozechner/pi-coding-age
 import { Container, Markdown, Spacer, Text } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
 import { type AgentConfig, type AgentScope, discoverAgents } from "./agents.js";
+import { getSavedScopedModelIds, resolveModelOverride } from "./model-selection.js";
 import { isTmuxAvailable, createPaneWithCommand, closePane, pollForExit, shellEscape } from "./tmux.js";
 import { type AsyncRun, updateWidget, startWidgetRefresh, stopWidgetRefresh } from "./widget.js";
 
@@ -260,13 +261,14 @@ function runAsyncAgent(
 	task: string,
 	cwd: string | undefined,
 	thinking: string | undefined,
+	model: string | undefined,
 ): { runId: string } {
 	const runId = crypto.randomUUID().slice(0, 8);
 	const sessionFile = path.join(os.tmpdir(), `pi-subagent-${runId}.jsonl`);
 
 	// Build pi args — interactive mode (no --mode json, no -p)
 	const args: string[] = ["--session", sessionFile];
-	if (agent.model) args.push("--model", agent.model);
+	if (model) args.push("--model", model);
 	if (agent.tools && agent.tools.length > 0) args.push("--tools", agent.tools.join(","));
 
 	const effectiveThinking = thinking ?? agent.thinking;
@@ -373,6 +375,7 @@ async function runSingleAgent(
 	task: string,
 	cwd: string | undefined,
 	thinking: string | undefined,
+	model: string | undefined,
 	step: number | undefined,
 	signal: AbortSignal | undefined,
 	onUpdate: OnUpdateCallback | undefined,
@@ -395,7 +398,7 @@ async function runSingleAgent(
 	}
 
 	const args: string[] = ["--mode", "json", "-p", "--no-session"];
-	if (agent.model) args.push("--model", agent.model);
+	if (model) args.push("--model", model);
 	if (agent.tools && agent.tools.length > 0) args.push("--tools", agent.tools.join(","));
 
 	// Thinking: tool param → agent frontmatter → none
@@ -426,7 +429,7 @@ async function runSingleAgent(
 		messages: [],
 		stderr: "",
 		usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 0, turns: 0 },
-		model: agent.model,
+		model,
 		step,
 	};
 
@@ -575,6 +578,9 @@ const SubagentParams = Type.Object({
 	thinking: Type.Optional(Type.String({
 		description: "Override thinking level: off, minimal, low, medium, high, xhigh",
 	})),
+	model: Type.Optional(Type.String({
+		description: "Override the agent frontmatter model. Must match one of the saved scoped models (enabledModels) in provider/model-id format, e.g. anthropic/claude-sonnet-4-6.",
+	})),
 	async: Type.Optional(Type.Boolean({
 		description: "Run in background. Returns immediately, result steers back on completion. Requires tmux. Not supported for chains.",
 		default: false,
@@ -617,6 +623,7 @@ export default function (pi: ExtensionAPI) {
 		description: [
 			"Delegate tasks to specialized subagents with isolated context.",
 			"Modes: single (agent + task), parallel (tasks array), chain (sequential with {previous} placeholder).",
+			"Optional model parameter overrides the agent frontmatter model and is validated against saved scoped models from settings (enabledModels).",
 			'Default agent scope is "user" (from ~/.pi/agent/agents).',
 			'To enable project-local agents in .pi/agents, set agentScope: "both" (or "project").',
 			"",
@@ -638,6 +645,25 @@ export default function (pi: ExtensionAPI) {
 			for (const agent of discovery.agents) agentMap.set(agent.name, agent);
 			const agents = Array.from(agentMap.values());
 			const confirmProjectAgents = params.confirmProjectAgents ?? true;
+			const scopedModelIds = getSavedScopedModelIds(ctx.cwd);
+			const { model: selectedModel, error: modelError } = resolveModelOverride(
+				scopedModelIds,
+				params.model,
+				undefined,
+			);
+
+			if (modelError) {
+				return {
+					content: [{ type: "text", text: modelError }],
+					details: {
+						mode: "single",
+						agentScope,
+						projectAgentsDir: discovery.projectAgentsDir,
+						results: [],
+					},
+					isError: true,
+				};
+			}
 
 			const hasChain = (params.chain?.length ?? 0) > 0;
 			const hasTasks = (params.tasks?.length ?? 0) > 0;
@@ -715,7 +741,17 @@ export default function (pi: ExtensionAPI) {
 							details: makeDetails("single")([]),
 						};
 					}
-					const { runId } = runAsyncAgent(pi, asyncRuns, latestCtx, ctx.cwd, agent, params.task, params.cwd, params.thinking);
+					const { runId } = runAsyncAgent(
+						pi,
+						asyncRuns,
+						latestCtx,
+						ctx.cwd,
+						agent,
+						params.task,
+						params.cwd,
+						params.thinking,
+						selectedModel ?? agent.model,
+					);
 					return {
 						content: [{ type: "text", text: `Started async subagent "${params.agent}" (run: ${runId})` }],
 						details: makeDetails("single")([]),
@@ -727,7 +763,17 @@ export default function (pi: ExtensionAPI) {
 					for (const t of params.tasks) {
 						const agent = agents.find((a) => a.name === t.agent);
 						if (!agent) continue;
-						const { runId } = runAsyncAgent(pi, asyncRuns, latestCtx, ctx.cwd, agent, t.task, t.cwd, params.thinking);
+						const { runId } = runAsyncAgent(
+							pi,
+							asyncRuns,
+							latestCtx,
+							ctx.cwd,
+							agent,
+							t.task,
+							t.cwd,
+							params.thinking,
+							selectedModel ?? agent.model,
+						);
 						runIds.push(runId);
 					}
 					return {
@@ -767,6 +813,7 @@ export default function (pi: ExtensionAPI) {
 						taskWithContext,
 						step.cwd,
 						params.thinking,
+						selectedModel ?? agents.find((a) => a.name === step.agent)?.model,
 						i + 1,
 						signal,
 						chainUpdate,
@@ -844,6 +891,7 @@ export default function (pi: ExtensionAPI) {
 						t.task,
 						t.cwd,
 						params.thinking,
+						selectedModel ?? agents.find((a) => a.name === t.agent)?.model,
 						undefined,
 						signal,
 						// Per-task update callback
@@ -885,6 +933,7 @@ export default function (pi: ExtensionAPI) {
 					params.task,
 					params.cwd,
 					params.thinking,
+					selectedModel ?? agents.find((a) => a.name === params.agent)?.model,
 					undefined,
 					signal,
 					onUpdate,

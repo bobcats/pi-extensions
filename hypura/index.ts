@@ -4,7 +4,7 @@
  * Bridges pi to a local Hypura instance via its Ollama-compatible API.
  * Hypura runs GGUF models on Apple Silicon with GPU/RAM/NVMe tiered scheduling.
  *
- * Start hypura:  hypura serve ./model.gguf --port 8080 --context 262144
+ * Start hypura:  hypura serve ./model.gguf --port 8080 --context 131072
  * Select model:  /model → hypura/<model-name>
  *
  * Env: HYPURA_BASE_URL (default: http://127.0.0.1:8080)
@@ -75,6 +75,119 @@ function buildOllamaMessages(context: Context): OllamaChatMessage[] {
 	return messages;
 }
 
+/**
+ * Parse streaming text that may contain <think>...</think> blocks.
+ * Returns structured content events for pi's thinking display.
+ */
+interface ParseState {
+	inThinking: boolean;
+	buffer: string;
+}
+
+function processChunk(
+	delta: string,
+	state: ParseState,
+	stream: AssistantMessageEventStream,
+	output: AssistantMessage,
+): void {
+	state.buffer += delta;
+
+	while (state.buffer.length > 0) {
+		if (state.inThinking) {
+			const endIdx = state.buffer.indexOf("</think>");
+			if (endIdx === -1) {
+				// Still in thinking, emit what we have (keep last 8 chars in case </think> is split)
+				if (state.buffer.length > 8) {
+					const emit = state.buffer.substring(0, state.buffer.length - 8);
+					state.buffer = state.buffer.substring(state.buffer.length - 8);
+					const block = output.content[output.content.length - 1];
+					if (block.type === "thinking") {
+						block.thinking += emit;
+						stream.push({ type: "thinking_delta", contentIndex: output.content.length - 1, delta: emit, partial: output });
+					}
+				}
+				return;
+			}
+			// Found end of thinking
+			const thinkText = state.buffer.substring(0, endIdx);
+			state.buffer = state.buffer.substring(endIdx + 8);
+			state.inThinking = false;
+
+			const block = output.content[output.content.length - 1];
+			if (block.type === "thinking") {
+				block.thinking += thinkText;
+				if (thinkText) {
+					stream.push({ type: "thinking_delta", contentIndex: output.content.length - 1, delta: thinkText, partial: output });
+				}
+				stream.push({ type: "thinking_end", contentIndex: output.content.length - 1, content: block.thinking, partial: output });
+			}
+
+			// Start a text block for the response
+			output.content.push({ type: "text", text: "" });
+			stream.push({ type: "text_start", contentIndex: output.content.length - 1, partial: output });
+		} else {
+			const startIdx = state.buffer.indexOf("<think>");
+			if (startIdx === -1) {
+				// No thinking tag, emit as text (keep last 7 chars in case <think> is split)
+				if (state.buffer.length > 7) {
+					const emit = state.buffer.substring(0, state.buffer.length - 7);
+					state.buffer = state.buffer.substring(state.buffer.length - 7);
+					const block = output.content[output.content.length - 1];
+					if (block.type === "text") {
+						block.text += emit;
+						stream.push({ type: "text_delta", contentIndex: output.content.length - 1, delta: emit, partial: output });
+					}
+				}
+				return;
+			}
+			if (startIdx > 0) {
+				// Text before the tag
+				const textBefore = state.buffer.substring(0, startIdx);
+				const block = output.content[output.content.length - 1];
+				if (block.type === "text") {
+					block.text += textBefore;
+					stream.push({ type: "text_delta", contentIndex: output.content.length - 1, delta: textBefore, partial: output });
+				}
+			}
+			state.buffer = state.buffer.substring(startIdx + 7);
+			state.inThinking = true;
+
+			// End current text block if it has content, start thinking block
+			const lastBlock = output.content[output.content.length - 1];
+			if (lastBlock.type === "text" && lastBlock.text.trim()) {
+				stream.push({ type: "text_end", contentIndex: output.content.length - 1, content: lastBlock.text, partial: output });
+			} else if (lastBlock.type === "text") {
+				// Remove empty text block
+				output.content.pop();
+			}
+
+			output.content.push({ type: "thinking", thinking: "" } as any);
+			stream.push({ type: "thinking_start", contentIndex: output.content.length - 1, partial: output });
+		}
+	}
+}
+
+function flushParseState(
+	state: ParseState,
+	stream: AssistantMessageEventStream,
+	output: AssistantMessage,
+): void {
+	if (!state.buffer) return;
+
+	const block = output.content[output.content.length - 1];
+	if (state.inThinking && block.type === "thinking") {
+		(block as any).thinking += state.buffer;
+		stream.push({ type: "thinking_delta", contentIndex: output.content.length - 1, delta: state.buffer, partial: output });
+		stream.push({ type: "thinking_end", contentIndex: output.content.length - 1, content: (block as any).thinking, partial: output });
+		output.content.push({ type: "text", text: "" });
+		stream.push({ type: "text_start", contentIndex: output.content.length - 1, partial: output });
+	} else if (block.type === "text") {
+		block.text += state.buffer;
+		stream.push({ type: "text_delta", contentIndex: output.content.length - 1, delta: state.buffer, partial: output });
+	}
+	state.buffer = "";
+}
+
 function streamHypura(
 	model: Model<Api>,
 	context: Context,
@@ -105,6 +218,9 @@ function streamHypura(
 			const baseUrl = model.baseUrl || DEFAULT_BASE_URL;
 			const ollamaMessages = buildOllamaMessages(context);
 
+			// Enable thinking if pi requests reasoning
+			const enableThinking = !!(options?.reasoning && model.reasoning);
+
 			const response = await fetch(`${baseUrl}/api/chat`, {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
@@ -112,6 +228,7 @@ function streamHypura(
 					model: model.id,
 					messages: ollamaMessages,
 					stream: true,
+					...(enableThinking ? { think: true } : {}),
 				}),
 				signal: options?.signal,
 			});
@@ -120,12 +237,20 @@ function streamHypura(
 				throw new Error(`Hypura API error ${response.status}: ${await response.text()}`);
 			}
 
-			output.content.push({ type: "text", text: "" });
+			// Set up initial content block and parse state
+			const parseState: ParseState = { inThinking: false, buffer: "" };
+
+			if (enableThinking) {
+				// When thinking is enabled, Qwen3.5 wraps reasoning in <think>...</think>
+				// Start with a text block; processChunk will create thinking blocks as needed
+				output.content.push({ type: "text", text: "" });
+			} else {
+				output.content.push({ type: "text", text: "" });
+			}
 			stream.push({ type: "start", partial: output });
 			stream.push({ type: "text_start", contentIndex: 0, partial: output });
 
 			const body = response.body;
-			let fullText = "";
 
 			if (body && typeof body[Symbol.asyncIterator] === "function") {
 				const decoder = new TextDecoder();
@@ -140,10 +265,15 @@ function streamHypura(
 						try {
 							const parsed: OllamaChatResponse = JSON.parse(line.trim());
 							if (parsed.message?.content) {
-								fullText += parsed.message.content;
-								const block = output.content[0];
-								if (block.type === "text") block.text = fullText;
-								stream.push({ type: "text_delta", contentIndex: 0, delta: parsed.message.content, partial: output });
+								if (enableThinking) {
+									processChunk(parsed.message.content, parseState, stream, output);
+								} else {
+									const block = output.content[0];
+									if (block.type === "text") {
+										block.text += parsed.message.content;
+										stream.push({ type: "text_delta", contentIndex: 0, delta: parsed.message.content, partial: output });
+									}
+								}
 							}
 							if (parsed.done) {
 								if (parsed.prompt_eval_count) output.usage.input = parsed.prompt_eval_count;
@@ -158,10 +288,15 @@ function streamHypura(
 					try {
 						const parsed: OllamaChatResponse = JSON.parse(buffer.trim());
 						if (parsed.message?.content) {
-							fullText += parsed.message.content;
-							const block = output.content[0];
-							if (block.type === "text") block.text = fullText;
-							stream.push({ type: "text_delta", contentIndex: 0, delta: parsed.message.content, partial: output });
+							if (enableThinking) {
+								processChunk(parsed.message.content, parseState, stream, output);
+							} else {
+								const block = output.content[0];
+								if (block.type === "text") {
+									block.text += parsed.message.content;
+									stream.push({ type: "text_delta", contentIndex: 0, delta: parsed.message.content, partial: output });
+								}
+							}
 						}
 						if (parsed.done) {
 							if (parsed.prompt_eval_count) output.usage.input = parsed.prompt_eval_count;
@@ -178,8 +313,13 @@ function streamHypura(
 					try {
 						const parsed: OllamaChatResponse = JSON.parse(line.trim());
 						if (parsed.message?.content) {
-							fullText += parsed.message.content;
-							stream.push({ type: "text_delta", contentIndex: 0, delta: parsed.message.content, partial: output });
+							if (enableThinking) {
+								processChunk(parsed.message.content, parseState, stream, output);
+							} else {
+								const block = output.content[0];
+								if (block.type === "text") block.text += parsed.message.content;
+								stream.push({ type: "text_delta", contentIndex: 0, delta: parsed.message.content, partial: output });
+							}
 						}
 						if (parsed.done) {
 							if (parsed.prompt_eval_count) output.usage.input = parsed.prompt_eval_count;
@@ -189,13 +329,17 @@ function streamHypura(
 						}
 					} catch {}
 				}
-				const block = output.content[0];
-				if (block.type === "text") block.text = fullText;
 			}
 
-			const textBlock = output.content[0];
-			if (textBlock.type === "text") {
-				stream.push({ type: "text_end", contentIndex: 0, content: textBlock.text, partial: output });
+			// Flush any remaining parse state
+			if (enableThinking) {
+				flushParseState(parseState, stream, output);
+			}
+
+			// End the last content block
+			const lastBlock = output.content[output.content.length - 1];
+			if (lastBlock?.type === "text") {
+				stream.push({ type: "text_end", contentIndex: output.content.length - 1, content: lastBlock.text, partial: output });
 			}
 
 			stream.push({
@@ -227,12 +371,12 @@ export default async function (pi: ExtensionAPI) {
 			models = tags.models.map((m) => ({
 				id: m.name,
 				name: m.name,
-				reasoning: false as const,
+				reasoning: true as const,
 				input: ["text"] as "text"[],
 				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-				// Qwen3.5 supports 262K native context; default high for any model
 				contextWindow: 262144,
 				maxTokens: 32768,
+				compat: { supportsDeveloperRole: false },
 			}));
 		}
 	} catch {}
@@ -241,11 +385,12 @@ export default async function (pi: ExtensionAPI) {
 		models = [{
 			id: "default",
 			name: "Hypura Local Model",
-			reasoning: false as const,
+			reasoning: true as const,
 			input: ["text"] as "text"[],
 			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
 			contextWindow: 262144,
 			maxTokens: 32768,
+			compat: { supportsDeveloperRole: false },
 		}];
 	}
 
