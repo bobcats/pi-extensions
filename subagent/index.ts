@@ -212,8 +212,8 @@ interface AsyncBatch {
 	id: string;
 	windowId: string;
 	windowName: string;
-	runIds: string[];
-	completedCount: number;
+	paneIds: string[];
+	pendingRunIds: Set<string>;
 }
 
 function getFinalOutput(messages: Message[]): string {
@@ -324,6 +324,18 @@ function cleanupAsyncTempFiles(tempFiles: string[]): void {
 	}
 }
 
+function finishBatchRun(asyncBatches: Map<string, AsyncBatch>, run: AsyncRun): void {
+	if (!run.batchId) return;
+	const batch = asyncBatches.get(run.batchId);
+	if (!batch) return;
+
+	batch.pendingRunIds.delete(run.id);
+	if (batch.pendingRunIds.size === 0) {
+		closeWindow(batch.windowId);
+		asyncBatches.delete(batch.id);
+	}
+}
+
 function watchAsyncRun(
 	pi: ExtensionAPI,
 	asyncRuns: Map<string, AsyncRun>,
@@ -342,18 +354,8 @@ function watchAsyncRun(
 			asyncRuns.delete(run.id);
 			updateWidget(latestCtx, asyncRuns);
 
-			if (run.batchId) {
-				const batch = asyncBatches.get(run.batchId);
-				if (batch) {
-					batch.completedCount += 1;
-					if (batch.completedCount === batch.runIds.length) {
-						closeWindow(batch.windowId);
-						asyncBatches.delete(batch.id);
-					}
-				}
-			} else {
-				closePane(run.pane);
-			}
+			if (run.batchId) finishBatchRun(asyncBatches, run);
+			else closePane(run.pane);
 
 			cleanupAsyncTempFiles(run.tempFiles);
 
@@ -376,7 +378,8 @@ function watchAsyncRun(
 		.catch(() => {
 			asyncRuns.delete(run.id);
 			updateWidget(latestCtx, asyncRuns);
-			if (!run.batchId) {
+			if (run.batchId) finishBatchRun(asyncBatches, run);
+			else {
 				try { closePane(run.pane); } catch {}
 			}
 			cleanupAsyncTempFiles(run.tempFiles);
@@ -431,6 +434,7 @@ function runParallelAsyncBatch(
 	const windowName = makeBatchWindowName(batchId);
 	const windowId = createWindow(windowName);
 	const initialPane = getWindowPanes(windowId)[0];
+	const paneIds: string[] = initialPane ? [initialPane] : [];
 	const runIds: string[] = [];
 
 	for (let i = 0; i < tasks.length; i++) {
@@ -455,6 +459,7 @@ function runParallelAsyncBatch(
 			pane = initialPane;
 		} else {
 			pane = createPaneInWindow(windowId, name, command);
+			paneIds.push(pane);
 		}
 
 		const run: AsyncRun = {
@@ -477,8 +482,8 @@ function runParallelAsyncBatch(
 		id: batchId,
 		windowId,
 		windowName,
-		runIds,
-		completedCount: 0,
+		paneIds,
+		pendingRunIds: new Set(runIds),
 	});
 
 	for (const runId of runIds) {
