@@ -25,7 +25,14 @@ import { Container, Markdown, Spacer, Text } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
 import { type AgentConfig, type AgentScope, discoverAgents } from "./agents.js";
 import { getSavedScopedModelIds, resolveModelOverride } from "./model-selection.js";
-import { isTmuxAvailable, createPaneWithCommand, closePane, pollForExit, shellEscape } from "./tmux.js";
+import {
+	isTmuxAvailable,
+	createPaneWithCommand,
+	closePane,
+	closeWindow,
+	pollForExit,
+	shellEscape,
+} from "./tmux.js";
 import { type AsyncRun, updateWidget, startWidgetRefresh, stopWidgetRefresh } from "./widget.js";
 
 const BUNDLED_AGENTS_DIR = path.join(import.meta.dirname, "agents");
@@ -193,6 +200,14 @@ interface SubagentDetails {
 	agentScope: AgentScope;
 	projectAgentsDir: string | null;
 	results: SingleResult[];
+}
+
+interface AsyncBatch {
+	id: string;
+	windowId: string;
+	windowName: string;
+	runIds: string[];
+	completedCount: number;
 }
 
 function getFinalOutput(messages: Message[]): string {
@@ -590,6 +605,7 @@ const SubagentParams = Type.Object({
 export default function (pi: ExtensionAPI) {
 	// Async run tracking
 	const asyncRuns = new Map<string, AsyncRun>();
+	const asyncBatches = new Map<string, AsyncBatch>();
 	let latestCtx: ExtensionContext | null = null;
 
 	pi.on("session_start", (_event: any, ctx: ExtensionContext) => {
@@ -597,11 +613,15 @@ export default function (pi: ExtensionAPI) {
 	});
 
 	pi.on("session_shutdown", () => {
+		for (const batch of asyncBatches.values()) {
+			try { closeWindow(batch.windowId); } catch {}
+		}
 		for (const run of asyncRuns.values()) {
 			try { closePane(run.pane); } catch {}
 		}
 		stopWidgetRefresh();
 		asyncRuns.clear();
+		asyncBatches.clear();
 		latestCtx = null;
 	});
 

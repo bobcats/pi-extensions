@@ -14,6 +14,8 @@ export interface AsyncRun {
 	pane: string;
 	sessionFile: string;
 	tempFiles: string[];
+	batchId?: string;
+	windowId?: string;
 }
 
 const ACCENT = "\x1b[38;2;77;163;255m";
