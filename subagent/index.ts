@@ -267,7 +267,7 @@ function writePromptToTempFile(agentName: string, prompt: string): { dir: string
 
 type OnUpdateCallback = (partial: AgentToolResult<SubagentDetails>) => void;
 
-function runAsyncAgent(
+function runSingleAsyncAgent(
 	pi: ExtensionAPI,
 	asyncRuns: Map<string, AsyncRun>,
 	latestCtx: ExtensionContext | null,
@@ -761,7 +761,7 @@ export default function (pi: ExtensionAPI) {
 							details: makeDetails("single")([]),
 						};
 					}
-					const { runId } = runAsyncAgent(
+					const { runId } = runSingleAsyncAgent(
 						pi,
 						asyncRuns,
 						latestCtx,
@@ -786,7 +786,7 @@ export default function (pi: ExtensionAPI) {
 						if (i > 0) await new Promise((r) => setTimeout(r, SPAWN_STAGGER_MS));
 						const agent = agents.find((a) => a.name === t.agent);
 						if (!agent) continue;
-						const { runId } = runAsyncAgent(
+						const { runId } = runSingleAsyncAgent(
 							pi,
 							asyncRuns,
 							latestCtx,
