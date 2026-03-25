@@ -1,8 +1,8 @@
 /**
  * Auto-name sessions after the first completed exchange.
  *
- * Uses the cheapest model from the current provider to generate a short name
- * from the user message + assistant response. Skips aborted turns.
+ * Uses the cheapest model from the current provider to generate a short
+ * description from the user message + assistant response. Skips aborted turns.
  */
 
 import { complete, type Message, type Model, type Api } from "@mariozechner/pi-ai";
@@ -57,7 +57,7 @@ export default function (pi: ExtensionAPI) {
 				content: [
 					{
 						type: "text",
-						text: `Give this coding session a short name (2-3 words, lowercase, no quotes, no punctuation). The name should describe the actual task or topic being worked on, not just the tool or skill being used. Be specific enough to distinguish from other sessions.\n\n${context}`,
+						text: `Summarize this coding session in a short phrase (3-6 words, natural casing, no quotes). Describe the task or topic, not the tool or skill used. Be specific enough to distinguish from other sessions.\n\n${context}`,
 					},
 				],
 				timestamp: Date.now(),
@@ -68,7 +68,6 @@ export default function (pi: ExtensionAPI) {
 			if (!name) return;
 
 			pi.setSessionName(name);
-			ctx.ui.setTitle(`π ${name}`);
 		} catch {
 			// Best-effort
 		}
