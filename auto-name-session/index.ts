@@ -5,6 +5,7 @@
  * description from the user message + assistant response. Skips aborted turns.
  */
 
+import path from "path";
 import { complete, type Message, type Model, type Api } from "@mariozechner/pi-ai";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 
@@ -68,7 +69,7 @@ export default function (pi: ExtensionAPI) {
 			if (!name) return;
 
 			pi.setSessionName(name);
-			const cwdBasename = ctx.cwd.split("/").pop() ?? ctx.cwd;
+			const cwdBasename = path.basename(ctx.cwd);
 			ctx.ui.setTitle(`π - ${name} - ${cwdBasename}`);
 		} catch {
 			// Best-effort
