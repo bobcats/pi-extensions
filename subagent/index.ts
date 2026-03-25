@@ -760,7 +760,10 @@ export default function (pi: ExtensionAPI) {
 
 				if (hasTasks && params.tasks) {
 					const runIds: string[] = [];
-					for (const t of params.tasks) {
+					for (let i = 0; i < params.tasks.length; i++) {
+						const t = params.tasks[i];
+						// Stagger spawns to avoid lock contention
+						if (i > 0) await new Promise((r) => setTimeout(r, SPAWN_STAGGER_MS));
 						const agent = agents.find((a) => a.name === t.agent);
 						if (!agent) continue;
 						const { runId } = runAsyncAgent(
