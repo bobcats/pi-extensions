@@ -28,6 +28,31 @@ export function getParentPane(): string | undefined {
  * giving the watcher time to read the sentinel. closePane() kills it after.
  * Returns the pane ID (e.g. "%12").
  */
+export function getSourceWindowToken(): string {
+	const parentPane = getParentPane();
+	if (!parentPane) return "unknown";
+	try {
+		return execFileSync(
+			"tmux",
+			["display-message", "-p", "-t", parentPane, "#{window_index}"],
+			{ encoding: "utf8" },
+		).trim();
+	} catch {
+		return "unknown";
+	}
+}
+
+export function makeBatchWindowName(batchId: string): string {
+	return `subagents-${getSourceWindowToken()}-${batchId}`;
+}
+
+export function createWindow(name: string): string {
+	const parentPane = getParentPane();
+	const args = ["new-window", "-d", "-P", "-F", "#{window_id}", "-n", name];
+	if (parentPane) args.push("-t", parentPane);
+	return execFileSync("tmux", args, { encoding: "utf8" }).trim();
+}
+
 export function createPaneWithCommand(name: string, command: string): string {
 	const parentPane = getParentPane();
 	const args = ["split-window", "-h", "-d", "-P", "-F", "#{pane_id}"];
@@ -44,6 +69,33 @@ export function createPaneWithCommand(name: string, command: string): string {
 		execFileSync("tmux", ["select-pane", "-t", pane, "-T", name]);
 	} catch {}
 	return pane;
+}
+
+export function createPaneInWindow(windowId: string, name: string, command: string): string {
+	const pane = execFileSync(
+		"tmux",
+		["split-window", "-t", windowId, "-d", "-P", "-F", "#{pane_id}", "bash", "-c", command],
+		{ encoding: "utf8" },
+	).trim();
+	try {
+		execFileSync("tmux", ["set-option", "-t", pane, "remain-on-exit", "on"]);
+	} catch {}
+	try {
+		execFileSync("tmux", ["select-pane", "-t", pane, "-T", name]);
+	} catch {}
+	return pane;
+}
+
+export function tileWindow(windowId: string): void {
+	try {
+		execFileSync("tmux", ["select-layout", "-t", windowId, "tiled"]);
+	} catch {}
+}
+
+export function closeWindow(windowId: string): void {
+	try {
+		execFileSync("tmux", ["kill-window", "-t", windowId]);
+	} catch {}
 }
 
 /**
