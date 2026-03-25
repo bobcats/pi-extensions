@@ -6,6 +6,7 @@ Extensions and prompt templates for [pi](https://github.com/badlogic/pi-mono).
 
 | Extension | Description |
 |-----------|-------------|
+| [auto-name-session](./auto-name-session/) | Auto-names sessions after the first completed exchange using the cheapest model |
 | [confirm-rm](./confirm-rm/) | Confirms before any `rm` command |
 | [context](./context/) | Shows loaded extensions, context files, and token/cost usage |
 | [ext-prof](./ext-prof/) | Profiles extension handler execution time |
