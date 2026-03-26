@@ -295,7 +295,7 @@ test("exa_answer forwards answer options and formats citations", async () => {
   });
 });
 
-test("exa_answer streams chunks when stream is requested", async () => {
+test("exa_answer stream mode sends labeled progressive updates and final citations", async () => {
   const harness = createPiHarness();
   const updates: unknown[] = [];
 
@@ -330,9 +330,10 @@ test("exa_answer streams chunks when stream is requested", async () => {
   );
 
   assert.equal(updates.length, 2);
-  assert.match((updates[0] as { content: Array<{ text: string }> }).content[0].text, /Pi /);
+  assert.match((updates[0] as { content: Array<{ text: string }> }).content[0].text, /^Exa answer \(streaming\)/);
+  assert.match(result.content[0].text, /Citations:/);
+  assert.doesNotMatch(result.content[0].text, /\[object Object\]/);
   assert.match(result.content[0].text, /Pi streams\./);
-  assert.match(result.content[0].text, /Citation/);
 });
 
 test("research tools create, poll, get, and list research tasks", async () => {

@@ -208,6 +208,14 @@ function formatResearch(research: ExaResearch): string {
   ].filter(Boolean).join("\n\n") || "No research data.");
 }
 
+function formatStreamedAnswer(answerText: string, citations: ExaResult[]): string {
+  return [
+    "Exa answer (streaming)",
+    answerText,
+    citations.length ? `Citations:\n${formatCitations(citations)}` : null,
+  ].filter(Boolean).join("\n\n");
+}
+
 function stringArray(description: string) {
   return Type.Array(Type.String(), { description });
 }
@@ -407,7 +415,9 @@ export function createExaExtension(createClient = (apiKey: string): ExaClient =>
           for await (const chunk of client.streamAnswer(params.query, options)) {
             if (chunk.content) {
               answerText += chunk.content;
-              onUpdate?.({ content: [{ type: "text", text: answerText }] });
+              onUpdate?.({
+                content: [{ type: "text", text: `Exa answer (streaming)\n\n${answerText}` }],
+              });
             }
             if (chunk.citations?.length) citations = chunk.citations;
           }
@@ -415,11 +425,7 @@ export function createExaExtension(createClient = (apiKey: string): ExaClient =>
           return {
             content: [{
               type: "text",
-              text: [
-                "Exa answer",
-                answerText || "",
-                citations.length ? `Citations:\n${formatCitations(citations)}` : null,
-              ].filter(Boolean).join("\n\n"),
+              text: formatStreamedAnswer(answerText, citations),
             }],
             details: {
               answer: answerText,

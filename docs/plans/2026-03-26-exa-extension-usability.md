@@ -216,7 +216,7 @@ cd exa && npm test
 
 Expected: all tests pass.
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add exa/index.ts exa/index.test.ts exa/README.md
@@ -231,7 +231,7 @@ git commit -m "refactor(exa): clarify tool selection guidance"
 - Modify: `exa/index.ts`
 - Test: `exa/index.test.ts`
 
-- [ ] **Step 1: Write the failing test for streamed answer formatting**
+- [x] **Step 1: Write the failing test for streamed answer formatting**
 
 Add a test that verifies streamed updates are labeled and the final result includes citations after the full answer body.
 
@@ -248,7 +248,7 @@ test("exa_answer stream mode sends labeled progressive updates and final citatio
 });
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run:
 
@@ -290,11 +290,11 @@ onUpdate?.({
 
 This keeps the live output understandable in the tool UI.
 
-- [ ] **Step 5: Use the formatter for the final streamed result**
+- [x] **Step 5: Use the formatter for the final streamed result**
 
 Return the final content using `formatStreamedAnswer(answerText, citations)` and keep the existing structured `details` payload.
 
-- [ ] **Step 6: Run the focused streaming test**
+- [x] **Step 6: Run the focused streaming test**
 
 Run:
 
@@ -304,7 +304,7 @@ cd exa && npx tsx --test --test-timeout=5000 index.test.ts --test-name-pattern "
 
 Expected: PASS.
 
-- [ ] **Step 7: Run the full Exa test suite**
+- [x] **Step 7: Run the full Exa test suite**
 
 Run:
 
