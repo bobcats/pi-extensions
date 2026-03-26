@@ -314,7 +314,7 @@ cd exa && npm test
 
 Expected: all tests pass.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add exa/index.ts exa/index.test.ts
@@ -330,7 +330,7 @@ git commit -m "refactor(exa): polish streamed answer output"
 - Test: `exa/index.test.ts`
 - Modify: `exa/README.md`
 
-- [ ] **Step 1: Write the failing test for `/exa` live status behavior**
+- [x] **Step 1: Write the failing test for `/exa` live status behavior**
 
 Add a test that invokes the registered `/exa` command and asserts it uses the Exa client to perform a minimal live request when `EXA_API_KEY` is present.
 
@@ -362,7 +362,7 @@ test("/exa performs a live sanity check when configured", async () => {
 });
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run:
 
@@ -403,7 +403,7 @@ Use notification text like:
 
 In `exa/README.md`, update the `/exa` command description from “Show whether `EXA_API_KEY` is configured” to “Check configuration and perform a live API sanity check”.
 
-- [ ] **Step 6: Run the focused `/exa` test**
+- [x] **Step 6: Run the focused `/exa` test**
 
 Run:
 

@@ -208,6 +208,15 @@ function formatResearch(research: ExaResearch): string {
   ].filter(Boolean).join("\n\n") || "No research data.");
 }
 
+async function runHealthCheck(client: ExaClient): Promise<{ requestId?: string; ok: boolean }> {
+  if (!client.search) throw new Error("Installed exa-js client does not support search().");
+  const response = await client.search("Exa", {
+    numResults: 1,
+    contents: { highlights: false, text: false },
+  });
+  return { ok: true, requestId: response.requestId };
+}
+
 function formatStreamedAnswer(answerText: string, citations: ExaResult[]): string {
   return [
     "Exa answer (streaming)",
@@ -577,15 +586,25 @@ export function createExaExtension(createClient = (apiKey: string): ExaClient =>
     });
 
     pi.registerCommand("exa", {
-      description: "Show Exa setup status",
+      description: "Check Exa configuration and API health",
       handler: async (_args, ctx) => {
-        const configured = !!process.env.EXA_API_KEY;
-        ctx.ui.notify(
-          configured
-            ? "Exa is configured. Tools: exa_search, exa_find_similar, exa_get_contents, exa_answer, exa_research_*"
-            : "Exa is not configured. Set EXA_API_KEY to use the Exa tools.",
-          configured ? "success" : "error",
-        );
+        if (!process.env.EXA_API_KEY) {
+          ctx.ui.notify("Exa is not configured. Set EXA_API_KEY to use the Exa tools.", "error");
+          return;
+        }
+
+        try {
+          const status = await runHealthCheck(getClient());
+          ctx.ui.notify(
+            `Exa is configured and passed a live check${status.requestId ? ` (request ${status.requestId})` : ""}. Core tools: ${CORE_TOOL_NAMES.join(", ")}. Advanced tools: ${ADVANCED_TOOL_NAMES.join(", ")}.`,
+            "success",
+          );
+        } catch (error) {
+          ctx.ui.notify(
+            `Exa is configured but the live check failed: ${error instanceof Error ? error.message : String(error)}`,
+            "error",
+          );
+        }
       },
     });
 

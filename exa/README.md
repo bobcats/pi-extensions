@@ -19,7 +19,7 @@ Pi extension for Exa web search, answers, and research.
 
 | Command | Description |
 |---------|-------------|
-| `/exa` | Show whether `EXA_API_KEY` is configured |
+| `/exa` | Check configuration and perform a live API sanity check |
 
 ## Setup
 

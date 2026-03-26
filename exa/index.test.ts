@@ -412,6 +412,38 @@ test("research tools create, poll, get, and list research tasks", async () => {
   assert.equal(listResult.details.count, 1);
 });
 
+test("/exa performs a live sanity check when configured", async () => {
+  let called = false;
+  const notifications: Array<{ message: string; level: string }> = [];
+  const harness = createPiHarness();
+  const previousApiKey = process.env.EXA_API_KEY;
+  process.env.EXA_API_KEY = "test-key";
+
+  try {
+    createExaExtension(() => ({
+      search: async () => {
+        called = true;
+        return { requestId: "req_health", results: [] };
+      },
+      getContents: async () => ({ results: [] }),
+    }))(harness.pi);
+
+    await harness.commands.get("exa")?.handler("", {
+      ui: {
+        notify(message: string, level: string) {
+          notifications.push({ message, level });
+        },
+      },
+    });
+
+    assert.equal(called, true);
+    assert.match(notifications[0]?.message ?? "", /live check/i);
+  } finally {
+    if (previousApiKey === undefined) delete process.env.EXA_API_KEY;
+    else process.env.EXA_API_KEY = previousApiKey;
+  }
+});
+
 test("exa_search throws when EXA_API_KEY is missing", async () => {
   const harness = createPiHarness();
   const previousApiKey = process.env.EXA_API_KEY;
