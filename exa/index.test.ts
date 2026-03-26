@@ -59,6 +59,20 @@ test("enables only the core Exa tools by default", async () => {
   ]]);
 });
 
+test("core tool definitions explain when to use each workflow", async () => {
+  const harness = createPiHarness();
+
+  createExaExtension(() => ({ getContents: async () => ({ results: [] }) }))(harness.pi);
+
+  const search = harness.tools.find((tool) => tool.name === "exa_search") as { description?: string; promptGuidelines?: string[] } | undefined;
+  const contents = harness.tools.find((tool) => tool.name === "exa_get_contents") as { description?: string; promptGuidelines?: string[] } | undefined;
+  const answer = harness.tools.find((tool) => tool.name === "exa_answer") as { description?: string; promptGuidelines?: string[] } | undefined;
+
+  assert.match(search?.description ?? "", /exploratory/i);
+  assert.match(contents?.description ?? "", /known urls?/i);
+  assert.match(answer?.description ?? "", /direct answer/i);
+});
+
 test("exa_search uses EXA_API_KEY env and forwards search options", async () => {
   const harness = createPiHarness();
   let receivedApiKey: string | undefined;

@@ -245,11 +245,12 @@ export function createExaExtension(createClient = (apiKey: string): ExaClient =>
     pi.registerTool({
       name: "exa_search",
       label: "Exa Search",
-      description: "Search the web with Exa and return ranked results with highlights and optional full text.",
+      description: "Explore the web with Exa when you do not yet know the right URL. Best for exploratory search, current info, broad discovery, and short ranked excerpts.",
       promptSnippet: "Search the web with Exa for high-quality results and excerpts.",
       promptGuidelines: [
-        "Use exa_search for web research when the user needs live or semantic search.",
-        "Prefer highlights-only mode first; request text when deeper context is needed.",
+        "Use exa_search when the right source is not known yet or when the user needs current web information.",
+        "Write Exa queries as natural language, not keyword fragments.",
+        "Start with highlights-only output; request text only when the excerpt is insufficient.",
       ],
       parameters: searchParameters("Natural-language search query."),
 
@@ -331,10 +332,11 @@ export function createExaExtension(createClient = (apiKey: string): ExaClient =>
     pi.registerTool({
       name: "exa_get_contents",
       label: "Exa Get Contents",
-      description: "Fetch page contents for known URLs using Exa crawling.",
+      description: "Fetch clean page contents from known URLs you already know you want to inspect.",
       promptSnippet: "Fetch page contents from specific URLs with Exa.",
       promptGuidelines: [
-        "Use exa_get_contents after you already know which URLs you want to inspect.",
+        "Use exa_get_contents only after you already have the target URL or list of URLs.",
+        "Prefer exa_search first when you still need to discover the right source.",
       ],
       parameters: Type.Object({
         urls: Type.Array(Type.String({ description: "URL to fetch." }), {
@@ -369,10 +371,12 @@ export function createExaExtension(createClient = (apiKey: string): ExaClient =>
     pi.registerTool({
       name: "exa_answer",
       label: "Exa Answer",
-      description: "Ask Exa to answer a question with citations.",
+      description: "Get a direct answer with citations when the user wants the conclusion, not a list of candidate links.",
       promptSnippet: "Get a synthesized answer with citations from Exa.",
       promptGuidelines: [
         "Use exa_answer when the user wants a direct answer backed by web citations rather than raw search results.",
+        "Use exa_search instead when the user wants to browse or compare candidate sources.",
+        "Use exa_research_* for longer-running synthesis jobs that may need to be revisited later.",
       ],
       parameters: Type.Object({
         query: Type.String({ description: "Question to answer." }),

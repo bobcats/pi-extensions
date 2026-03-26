@@ -95,7 +95,7 @@ cd exa && npm test
 
 Expected: all tests pass.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add exa/index.ts exa/index.test.ts
@@ -111,7 +111,7 @@ git commit -m "feat(exa): default to core active tools"
 - Test: `exa/index.test.ts`
 - Modify: `exa/README.md`
 
-- [ ] **Step 1: Write the failing test for the key tool descriptions**
+- [x] **Step 1: Write the failing test for the key tool descriptions**
 
 Add a test that captures the registered tool definitions and asserts the three core tools have stronger descriptions/guidelines.
 
@@ -135,7 +135,7 @@ test("core tool definitions explain when to use each workflow", async () => {
 });
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run:
 
@@ -145,7 +145,7 @@ cd exa && npx tsx --test --test-timeout=5000 index.test.ts --test-name-pattern "
 
 Expected: FAIL because the current descriptions are generic.
 
-- [ ] **Step 3: Rewrite the `exa_search` tool text around exploratory search**
+- [x] **Step 3: Rewrite the `exa_search` tool text around exploratory search**
 
 In `exa/index.ts`, update `exa_search` so the description and guidelines explicitly say:
 - use it for exploratory search, current information, and when the right URL is not yet known
@@ -163,7 +163,7 @@ promptGuidelines: [
 ],
 ```
 
-- [ ] **Step 4: Rewrite the `exa_get_contents` tool text around known URLs**
+- [x] **Step 4: Rewrite the `exa_get_contents` tool text around known URLs**
 
 In `exa/index.ts`, update `exa_get_contents` so it explicitly says it is for URLs already chosen via search or provided by the user.
 
@@ -175,14 +175,14 @@ promptGuidelines: [
 ],
 ```
 
-- [ ] **Step 5: Rewrite the `exa_answer` tool text around direct answers vs raw results**
+- [x] **Step 5: Rewrite the `exa_answer` tool text around direct answers vs raw results**
 
 In `exa/index.ts`, update `exa_answer` so it explicitly says:
 - use it when the user wants a direct answer with citations
 - use `exa_search` instead when the user wants to browse candidate sources
 - use `exa_research_*` for long-running synthesis
 
-- [ ] **Step 6: Add README guidance matching the tool-selection policy**
+- [x] **Step 6: Add README guidance matching the tool-selection policy**
 
 In `exa/README.md`, add a short “Which tool should I use?” section:
 
@@ -196,7 +196,7 @@ In `exa/README.md`, add a short “Which tool should I use?” section:
 - `exa_research_*` — longer-running research jobs
 ```
 
-- [ ] **Step 7: Run the focused definition test**
+- [x] **Step 7: Run the focused definition test**
 
 Run:
 
@@ -206,7 +206,7 @@ cd exa && npx tsx --test --test-timeout=5000 index.test.ts --test-name-pattern "
 
 Expected: PASS.
 
-- [ ] **Step 8: Run the full Exa test suite**
+- [x] **Step 8: Run the full Exa test suite**
 
 Run:
 
