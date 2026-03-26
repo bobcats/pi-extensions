@@ -423,7 +423,7 @@ cd exa && npm test
 
 Expected: all tests pass.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add exa/index.ts exa/index.test.ts exa/README.md
@@ -448,7 +448,7 @@ cd exa && npm test
 
 Expected: all tests pass.
 
-- [ ] **Step 2: Verify the package still exposes the Exa extension entry**
+- [x] **Step 2: Verify the package still exposes the Exa extension entry**
 
 Run:
 
@@ -478,7 +478,7 @@ Expected:
 - streamed answers show labeled progressive text
 - advanced tools remain available for later activation if needed
 
-- [ ] **Step 4: Commit the final verification checkpoint**
+- [x] **Step 4: Commit the final verification checkpoint**
 
 ```bash
 git add -A

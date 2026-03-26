@@ -9,6 +9,7 @@ Extensions and prompt templates for [pi](https://github.com/badlogic/pi-mono).
 | [auto-name-session](./auto-name-session/) | Auto-names sessions after the first completed exchange using the cheapest model |
 | [confirm-rm](./confirm-rm/) | Confirms before any `rm` command |
 | [context](./context/) | Shows loaded extensions, context files, and token/cost usage |
+| [exa](./exa/) | Adds Exa-powered web search, answers, and research tools |
 | [ext-prof](./ext-prof/) | Profiles extension handler execution time |
 | [files](./files/) | Lists git-tracked and session-referenced files with quick actions |
 | [memory](./memory/) | Persists agent learnings across sessions — reflect, ruminate, dream |
@@ -49,6 +50,7 @@ Run tests:
 
 ```bash
 cd confirm-rm && npm test
+cd exa && npm test
 cd ext-prof && npm test
 cd memory && npm test
 cd tldraw-desktop && npm test

@@ -1064,14 +1064,14 @@ export default function (pi: ExtensionAPI) {
 				const successCount = results.filter((r) => r.exitCode === 0).length;
 				const summaries = results.map((r) => {
 					const output = getFinalOutput(r.messages);
-					const preview = output.slice(0, 100) + (output.length > 100 ? "..." : "");
-					return `[${r.agent}] ${r.exitCode === 0 ? "completed" : "failed"}: ${preview || "(no output)"}`;
+					const status = r.exitCode === 0 ? "completed" : "failed";
+					return `## [${r.agent}] ${status}\n\n${output || "(no output)"}`;
 				});
 				return {
 					content: [
 						{
 							type: "text",
-							text: `Parallel: ${successCount}/${results.length} succeeded\n\n${summaries.join("\n\n")}`,
+							text: `Parallel: ${successCount}/${results.length} succeeded\n\n${summaries.join("\n\n---\n\n")}`,
 						},
 					],
 					details: makeDetails("parallel")(results),

@@ -1,0 +1,17 @@
+{
+  "name": "pi-exa",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "tsx --test --test-timeout=5000 *.test.ts"
+  },
+  "dependencies": {
+    "exa-js": "^2.10.1"
+  },
+  "devDependencies": {
+    "@mariozechner/pi-coding-agent": "*",
+    "@mariozechner/pi-ai": "*",
+    "@sinclair/typebox": "*",
+    "tsx": "^4.20.0"
+  }
+}

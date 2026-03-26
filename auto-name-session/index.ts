@@ -1,20 +1,16 @@
 /**
  * Auto-name sessions after the first completed exchange.
  *
- * Uses the cheapest model from the current provider to generate a short
- * description from the user message + assistant response. Skips aborted turns.
+ * Uses a hardcoded cheap model to generate a short description from the user
+ * message + assistant response. Skips aborted turns.
  */
 
 import path from "path";
-import { complete, type Message, type Model, type Api } from "@mariozechner/pi-ai";
+import { complete, type Message } from "@mariozechner/pi-ai";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 
-function cheapestModel(models: Model<Api>[], provider: string): Model<Api> | undefined {
-	return models
-		.filter((m) => m.provider === provider)
-		.sort((a, b) => a.cost.input - b.cost.input)
-		.at(0);
-}
+const AUTO_NAME_PROVIDER = "anthropic";
+const AUTO_NAME_MODEL = "claude-haiku-4-5";
 
 function textOf(msg: any): string {
 	if (!Array.isArray(msg?.content)) return "";
@@ -48,7 +44,9 @@ export default function (pi: ExtensionAPI) {
 		if (userText) context += `User's message:\n${truncate(userText, 500)}`;
 		if (assistantText) context += `\n\nAssistant's response:\n${truncate(assistantText, 1000)}`;
 
-		const model = cheapestModel(ctx.modelRegistry.getAll(), ctx.model.provider) ?? ctx.model;
+		const model = ctx.modelRegistry.find(AUTO_NAME_PROVIDER, AUTO_NAME_MODEL);
+		if (!model) return;
+
 		const apiKey = await ctx.modelRegistry.getApiKey(model);
 		if (!apiKey) return;
 
