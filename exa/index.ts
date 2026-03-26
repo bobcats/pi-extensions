@@ -608,7 +608,6 @@ export function createExaExtension(createClient = (apiKey: string): ExaClient =>
       },
     });
 
-    pi.setActiveTools([...CORE_TOOL_NAMES]);
   };
 }
 

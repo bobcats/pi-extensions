@@ -5,11 +5,13 @@ import exaExtension, { createExaExtension } from "./index.ts";
 function createPiHarness() {
   const tools: Array<{ name: string; execute: Function }> = [];
   const commands = new Map<string, { handler: Function }>();
+  const handlers = new Map<string, Function>();
   const activeToolCalls: string[][] = [];
 
   return {
     tools,
     commands,
+    handlers,
     activeToolCalls,
     pi: {
       registerTool(tool: { name: string; execute: Function }) {
@@ -17,6 +19,9 @@ function createPiHarness() {
       },
       registerCommand(name: string, command: { handler: Function }) {
         commands.set(name, command);
+      },
+      on(event: string, handler: Function) {
+        handlers.set(event, handler);
       },
       setActiveTools(names: string[]) {
         activeToolCalls.push(names);
@@ -45,18 +50,16 @@ test("registers exa tools and command", async () => {
   assert.ok(harness.commands.has("exa"));
 });
 
-test("enables only the core Exa tools by default", async () => {
+test("does not override pi active tools during load or session start", async () => {
   const harness = createPiHarness();
 
   createExaExtension(() => ({
     getContents: async () => ({ results: [] }),
   }))(harness.pi);
 
-  assert.deepEqual(harness.activeToolCalls, [[
-    "exa_search",
-    "exa_get_contents",
-    "exa_answer",
-  ]]);
+  assert.deepEqual(harness.activeToolCalls, []);
+  await harness.handlers.get("session_start")?.({}, {});
+  assert.deepEqual(harness.activeToolCalls, []);
 });
 
 test("core tool definitions explain when to use each workflow", async () => {
