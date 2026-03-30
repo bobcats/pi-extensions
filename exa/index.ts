@@ -354,6 +354,7 @@ export function createExaExtension(createClient = (apiKey: string): ExaClient =>
       promptGuidelines: [
         "Use exa_get_contents only after you already have the target URL or list of URLs.",
         "Prefer exa_search first when you still need to discover the right source.",
+        "Do NOT use as a general-purpose URL fetcher. Only use when following up on Exa search results or when Exa's cleaned parsing is specifically needed.",
       ],
       parameters: Type.Object({
         urls: Type.Array(Type.String({ description: "URL to fetch." }), {
