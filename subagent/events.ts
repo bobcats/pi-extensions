@@ -3,7 +3,7 @@ export const SUBAGENT_RUN_END_EVENT = "subagent:run_end";
 
 export type SubagentExecutionMode = "sync" | "async";
 export type SubagentRunStatus = "completed" | "failed";
-export type SubagentAgentSource = "user" | "project" | "unknown";
+export type SubagentAgentSource = "bundled" | "user" | "project" | "unknown";
 
 export interface SubagentRunStartEvent {
 	id: string;

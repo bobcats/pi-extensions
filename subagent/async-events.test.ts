@@ -31,6 +31,26 @@ describe("subagent async lifecycle events", () => {
 		});
 	});
 
+	it("builds a run_start payload for bundled agents", () => {
+		const event = buildSubagentRunStartEvent({
+			id: "run-456",
+			agent: "worker",
+			agentSource: "bundled",
+			task: "Do the built-in thing",
+			execution: "sync",
+			startedAt: 789,
+		});
+
+		assert.deepEqual(event, {
+			id: "run-456",
+			agent: "worker",
+			agentSource: "bundled",
+			task: "Do the built-in thing",
+			execution: "sync",
+			startedAt: 789,
+		});
+	});
+
 	it("builds a run_end payload with completion status", () => {
 		const event = buildSubagentRunEndEvent({
 			id: "run-123",

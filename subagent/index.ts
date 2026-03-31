@@ -45,6 +45,7 @@ import {
 	buildSubagentRunEndEvent,
 	buildSubagentRunStartEvent,
 } from "./events.js";
+import type { SubagentAgentSource } from "./events.js";
 import { type AsyncRun, updateWidget, startWidgetRefresh, stopWidgetRefresh } from "./widget.js";
 
 const BUNDLED_AGENTS_DIR = path.join(import.meta.dirname, "agents");
@@ -220,7 +221,7 @@ interface UsageStats {
 
 interface SingleResult {
 	agent: string;
-	agentSource: "user" | "project" | "unknown";
+	agentSource: SubagentAgentSource;
 	task: string;
 	exitCode: number;
 	messages: Message[];
@@ -372,7 +373,7 @@ function watchAsyncRun(
 	asyncRuns: Map<string, AsyncRun>,
 	asyncBatches: Map<string, AsyncBatch>,
 	latestCtx: ExtensionContext | null,
-	run: AsyncRun & { agentSource: "user" | "project" | "unknown" },
+	run: AsyncRun,
 ): void {
 	const watcherAbort = new AbortController();
 	pollForExit(run.pane, watcherAbort.signal, {

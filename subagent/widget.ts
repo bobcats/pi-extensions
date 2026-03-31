@@ -5,11 +5,12 @@
 
 import type { ExtensionContext } from "@mariozechner/pi-coding-agent";
 import { truncateToWidth, visibleWidth } from "@mariozechner/pi-tui";
+import type { SubagentAgentSource } from "./events.js";
 
 export interface AsyncRun {
 	id: string;
 	agent: string;
-	agentSource: "user" | "project" | "unknown";
+	agentSource: SubagentAgentSource;
 	task: string;
 	startedAt: number;
 	pane: string;
