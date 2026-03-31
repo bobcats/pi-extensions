@@ -9,6 +9,7 @@ import { truncateToWidth, visibleWidth } from "@mariozechner/pi-tui";
 export interface AsyncRun {
 	id: string;
 	agent: string;
+	agentSource: "user" | "project" | "unknown";
 	task: string;
 	startedAt: number;
 	pane: string;

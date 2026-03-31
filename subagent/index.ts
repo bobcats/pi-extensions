@@ -39,6 +39,12 @@ import {
 	shellEscape,
 	tileWindow,
 } from "./tmux.js";
+import {
+	SUBAGENT_RUN_END_EVENT,
+	SUBAGENT_RUN_START_EVENT,
+	buildSubagentRunEndEvent,
+	buildSubagentRunStartEvent,
+} from "./events.js";
 import { type AsyncRun, updateWidget, startWidgetRefresh, stopWidgetRefresh } from "./widget.js";
 
 const BUNDLED_AGENTS_DIR = path.join(import.meta.dirname, "agents");
@@ -75,6 +81,31 @@ const MAX_PARALLEL_TASKS = 8;
 const MAX_CONCURRENCY = 4;
 const SPAWN_STAGGER_MS = 2000;
 const COLLAPSED_ITEM_COUNT = 10;
+
+function emitSubagentRunStart(
+	pi: ExtensionAPI,
+	event: Parameters<typeof buildSubagentRunStartEvent>[0],
+): void {
+	pi.events.emit(SUBAGENT_RUN_START_EVENT, buildSubagentRunStartEvent(event));
+}
+
+function emitSubagentRunEnd(
+	pi: ExtensionAPI,
+	event: Parameters<typeof buildSubagentRunEndEvent>[0],
+): void {
+	pi.events.emit(SUBAGENT_RUN_END_EVENT, buildSubagentRunEndEvent(event));
+}
+
+function getSubagentRunStatus(result: {
+	exitCode: number;
+	stopReason?: string;
+	errorMessage?: string;
+}): "completed" | "failed" {
+	if (result.exitCode !== 0) return "failed";
+	if (result.stopReason === "error" || result.stopReason === "aborted") return "failed";
+	if (result.errorMessage) return "failed";
+	return "completed";
+}
 
 function formatTokens(count: number): string {
 	if (count < 1000) return count.toString();
@@ -341,7 +372,7 @@ function watchAsyncRun(
 	asyncRuns: Map<string, AsyncRun>,
 	asyncBatches: Map<string, AsyncBatch>,
 	latestCtx: ExtensionContext | null,
-	run: AsyncRun,
+	run: AsyncRun & { agentSource: "user" | "project" | "unknown" },
 ): void {
 	const watcherAbort = new AbortController();
 	pollForExit(run.pane, watcherAbort.signal, {
@@ -350,6 +381,19 @@ function watchAsyncRun(
 	})
 		.then((exitCode) => {
 			const summary = readLastAssistantMessage(run.sessionFile);
+
+			emitSubagentRunEnd(pi, {
+				id: run.id,
+				agent: run.agent,
+				agentSource: run.agentSource,
+				task: run.task,
+				execution: "async",
+				startedAt: run.startedAt,
+				finishedAt: Date.now(),
+				status: exitCode === 0 ? "completed" : "failed",
+				exitCode,
+				batchId: run.batchId,
+			});
 
 			asyncRuns.delete(run.id);
 			updateWidget(latestCtx, asyncRuns);
@@ -376,6 +420,19 @@ function watchAsyncRun(
 			});
 		})
 		.catch(() => {
+			emitSubagentRunEnd(pi, {
+				id: run.id,
+				agent: run.agent,
+				agentSource: run.agentSource,
+				task: run.task,
+				execution: "async",
+				startedAt: run.startedAt,
+				finishedAt: Date.now(),
+				status: "failed",
+				exitCode: 1,
+				errorMessage: "Async subagent watcher failed",
+				batchId: run.batchId,
+			});
 			asyncRuns.delete(run.id);
 			updateWidget(latestCtx, asyncRuns);
 			if (run.batchId) finishBatchRun(asyncBatches, run);
@@ -407,6 +464,7 @@ function runSingleAsyncAgent(
 	const run: AsyncRun = {
 		id: runId,
 		agent: agent.name,
+		agentSource: agent.source,
 		task,
 		startedAt: Date.now(),
 		pane,
@@ -414,6 +472,14 @@ function runSingleAsyncAgent(
 		tempFiles,
 	};
 	asyncRuns.set(runId, run);
+	emitSubagentRunStart(pi, {
+		id: run.id,
+		agent: run.agent,
+		agentSource: run.agentSource,
+		task: run.task,
+		execution: "async",
+		startedAt: run.startedAt,
+	});
 	startWidgetRefresh(latestCtx, asyncRuns);
 	watchAsyncRun(pi, asyncRuns, asyncBatches, latestCtx, run);
 
@@ -465,6 +531,7 @@ function runParallelAsyncBatch(
 		const run: AsyncRun = {
 			id: runId,
 			agent: t.agent.name,
+			agentSource: t.agent.source,
 			task: t.task,
 			startedAt: Date.now(),
 			pane,
@@ -474,6 +541,15 @@ function runParallelAsyncBatch(
 			windowId,
 		};
 		asyncRuns.set(runId, run);
+		emitSubagentRunStart(pi, {
+			id: run.id,
+			agent: run.agent,
+			agentSource: run.agentSource,
+			task: run.task,
+			execution: "async",
+			startedAt: run.startedAt,
+			batchId: run.batchId,
+		});
 		runIds.push(runId);
 	}
 
@@ -495,6 +571,7 @@ function runParallelAsyncBatch(
 }
 
 async function runSingleAgent(
+	pi: ExtensionAPI,
 	defaultCwd: string,
 	agents: AgentConfig[],
 	agentName: string,
@@ -522,6 +599,17 @@ async function runSingleAgent(
 			step,
 		};
 	}
+
+	const runId = crypto.randomUUID().slice(0, 8);
+	const startedAt = Date.now();
+	emitSubagentRunStart(pi, {
+		id: runId,
+		agent: agentName,
+		agentSource: agent.source,
+		task,
+		execution: "sync",
+		startedAt,
+	});
 
 	const args: string[] = ["--mode", "json", "-p", "--no-session"];
 	if (model) args.push("--model", model);
@@ -656,6 +744,20 @@ async function runSingleAgent(
 		});
 
 		currentResult.exitCode = exitCode;
+		if (wasAborted) currentResult.errorMessage ??= "Subagent was aborted";
+		emitSubagentRunEnd(pi, {
+			id: runId,
+			agent: agentName,
+			agentSource: agent.source,
+			task,
+			execution: "sync",
+			startedAt,
+			finishedAt: Date.now(),
+			status: getSubagentRunStatus(currentResult),
+			exitCode: currentResult.exitCode,
+			stopReason: currentResult.stopReason,
+			errorMessage: currentResult.errorMessage,
+		});
 		if (wasAborted) throw new Error("Subagent was aborted");
 		return currentResult;
 	} finally {
@@ -960,6 +1062,7 @@ export default function (pi: ExtensionAPI) {
 						: undefined;
 
 					const result = await runSingleAgent(
+						pi,
 						ctx.cwd,
 						agents,
 						step.agent,
@@ -1038,6 +1141,7 @@ export default function (pi: ExtensionAPI) {
 					// Stagger spawns to avoid pi settings file lock contention (proper-lockfile sync, no retries)
 					if (index > 0) await new Promise((r) => setTimeout(r, index * SPAWN_STAGGER_MS));
 					const result = await runSingleAgent(
+						pi,
 						ctx.cwd,
 						agents,
 						t.agent,
@@ -1080,6 +1184,7 @@ export default function (pi: ExtensionAPI) {
 
 			if (params.agent && params.task) {
 				const result = await runSingleAgent(
+					pi,
 					ctx.cwd,
 					agents,
 					params.agent,
