@@ -4,8 +4,10 @@ description: Run code review with language-specific skills loaded
 Review the changes on this branch using the diff against the merge base with main:
 
 ```bash
-git diff $(git merge-base HEAD main)..HEAD
+git diff $(git merge-base HEAD origin/main)..HEAD
 ```
+
+Be careful to review only the changes that the branch is introducing. Check main and origin/main to be sure you're reviewing the right changes.
 
 Focus on: $@
 
