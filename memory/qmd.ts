@@ -58,21 +58,22 @@ function parseResult(r: QmdRawResult): QmdSearchResult {
   };
 }
 
-/** Build the QMD CLI arguments for semantic vault search. */
+/** Build the QMD CLI arguments for hybrid vault search. */
 export function buildSearchArgs(
   query: string,
   options?: { limit?: number; minScore?: number },
 ): string[] {
   const limit = options?.limit ?? 5;
   const minScore = options?.minScore ?? 0;
-  const args = ["vsearch", query, "--json", "-n", String(limit)];
+  const args = ["query", query, "--json", "-n", String(limit)];
   if (minScore > 0) args.push("--min-score", String(minScore));
   args.push("-c", COLLECTION_NAME);
   return args;
 }
 
 /**
- * Run semantic QMD search (`qmd vsearch --json`) and parse results.
+ * Run hybrid QMD search (`qmd query --json`) and parse results.
+ * `qmd query` uses auto-expansion + reranking for better relevance.
  * Returns [] if qmd is not available or the query fails.
  */
 export function search(
@@ -84,14 +85,21 @@ export function search(
   return new Promise((resolve) => {
     execFile(QMD_BIN, args, { timeout: 120_000 }, (err, stdout, stderr) => {
       if (stderr?.trim()) {
-        console.warn(`qmd vsearch stderr: ${stderr.trim()}`);
+        console.warn(`qmd query stderr: ${stderr.trim()}`);
       }
       if (err || !stdout.trim()) {
         resolve([]);
         return;
       }
       try {
-        const parsed: unknown = JSON.parse(stdout);
+        // qmd query prints progress lines before the JSON array —
+        // extract only the JSON portion.
+        const jsonStart = stdout.indexOf("[");
+        if (jsonStart < 0) {
+          resolve([]);
+          return;
+        }
+        const parsed: unknown = JSON.parse(stdout.slice(jsonStart));
         const items = Array.isArray(parsed) ? (parsed as QmdRawResult[]) : [];
         resolve(items.map(parseResult));
       } catch {

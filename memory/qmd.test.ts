@@ -23,9 +23,9 @@ test("toVaultPath handles root-level files", () => {
   );
 });
 
-test("buildSearchArgs uses semantic vector search for natural-language queries", () => {
+test("buildSearchArgs uses hybrid search for natural-language queries", () => {
   assert.deepStrictEqual(buildSearchArgs("advisory lock concurrency race condition", { limit: 3 }), [
-    "vsearch",
+    "query",
     "advisory lock concurrency race condition",
     "--json",
     "-n",
