@@ -1,0 +1,13 @@
+{
+  "name": "auto-name-session-extension",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "tsx --test --test-timeout=5000 *.test.ts"
+  },
+  "devDependencies": {
+    "@mariozechner/pi-ai": "*",
+    "@mariozechner/pi-coding-agent": "*",
+    "tsx": "^4.20.0"
+  }
+}

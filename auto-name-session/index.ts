@@ -25,52 +25,60 @@ function truncate(text: string, max: number): string {
 	return text.length > max ? text.slice(0, max) + "..." : text;
 }
 
-export default function (pi: ExtensionAPI) {
-	pi.on("agent_end", async (event, ctx) => {
-		if (pi.getSessionName() || !ctx.model) return;
+export function createAutoNameExtension(deps: {
+	completeFn?: typeof complete;
+} = {}) {
+	const completeFn = deps.completeFn ?? complete;
 
-		const { messages } = event;
+	return function autoNameSession(pi: ExtensionAPI) {
+		pi.on("agent_end", async (event, ctx) => {
+			if (pi.getSessionName() || !ctx.model) return;
 
-		// Skip aborted turns
-		const lastAssistant = [...messages].reverse().find((m) => m.role === "assistant");
-		if ((lastAssistant as any)?.stopReason === "aborted") return;
+			const { messages } = event;
 
-		const userText = textOf(messages.find((m) => m.role === "user"));
-		const assistantText = textOf(lastAssistant);
-		if (!userText && !assistantText) return;
+			// Skip aborted turns
+			const lastAssistant = [...messages].reverse().find((m) => m.role === "assistant");
+			if ((lastAssistant as any)?.stopReason === "aborted") return;
 
-		// Build context — truncate user text aggressively (skill invocations are long)
-		let context = "";
-		if (userText) context += `User's message:\n${truncate(userText, 500)}`;
-		if (assistantText) context += `\n\nAssistant's response:\n${truncate(assistantText, 1000)}`;
+			const userText = textOf(messages.find((m) => m.role === "user"));
+			const assistantText = textOf(lastAssistant);
+			if (!userText && !assistantText) return;
 
-		const model = ctx.modelRegistry.find(AUTO_NAME_PROVIDER, AUTO_NAME_MODEL);
-		if (!model) return;
+			// Build context — truncate user text aggressively (skill invocations are long)
+			let context = "";
+			if (userText) context += `User's message:\n${truncate(userText, 500)}`;
+			if (assistantText) context += `\n\nAssistant's response:\n${truncate(assistantText, 1000)}`;
 
-		const apiKey = await ctx.modelRegistry.getApiKey(model);
-		if (!apiKey) return;
+			const model = ctx.modelRegistry.find(AUTO_NAME_PROVIDER, AUTO_NAME_MODEL);
+			if (!model) return;
 
-		try {
-			const prompt: Message = {
-				role: "user",
-				content: [
-					{
-						type: "text",
-						text: `Summarize this coding session in a short phrase (3-6 words, natural casing, no quotes). Describe the task or topic, not the tool or skill used. Be specific enough to distinguish from other sessions.\n\n${context}`,
-					},
-				],
-				timestamp: Date.now(),
-			};
+			const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
+			if (!auth.ok || !auth.apiKey) return;
 
-			const response = await complete(model, { messages: [prompt] }, { apiKey, maxTokens: 30 });
-			const name = textOf(response);
-			if (!name) return;
+			try {
+				const prompt: Message = {
+					role: "user",
+					content: [
+						{
+							type: "text",
+							text: `Summarize this coding session in a short phrase (3-6 words, natural casing, no quotes). Describe the task or topic, not the tool or skill used. Be specific enough to distinguish from other sessions.\n\n${context}`,
+						},
+					],
+					timestamp: Date.now(),
+				};
 
-			pi.setSessionName(name);
-			const cwdBasename = path.basename(ctx.cwd);
-			ctx.ui.setTitle(`π - ${name} - ${cwdBasename}`);
-		} catch {
-			// Best-effort
-		}
-	});
+				const response = await completeFn(model, { messages: [prompt] }, { apiKey: auth.apiKey, headers: auth.headers, maxTokens: 30 });
+				const name = textOf(response);
+				if (!name) return;
+
+				pi.setSessionName(name);
+				const cwdBasename = path.basename(ctx.cwd);
+				ctx.ui.setTitle(`π - ${name} - ${cwdBasename}`);
+			} catch {
+				// Best-effort
+			}
+		});
+	};
 }
+
+export default createAutoNameExtension();
