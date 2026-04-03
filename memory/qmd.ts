@@ -122,6 +122,18 @@ export function update(): Promise<void> {
 }
 
 /**
+ * Run `qmd embed` to generate/refresh vector embeddings.
+ * Fire-and-forget — errors are swallowed.
+ */
+export function embed(): Promise<void> {
+  return new Promise((resolve) => {
+    execFile(QMD_BIN, ["embed", "-c", COLLECTION_NAME], { timeout: 120_000 }, () => {
+      resolve();
+    });
+  });
+}
+
+/**
  * Ensure the memory vault is registered as a QMD collection.
  * Idempotent — just tries `collection add` and treats "already exists" as success.
  */

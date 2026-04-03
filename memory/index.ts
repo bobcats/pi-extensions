@@ -179,7 +179,7 @@ export default function memoryExtension(pi: ExtensionAPI) {
     }
     qmdAvailable = isQmdInstalled;
     if (qmdAvailable) {
-      qmd.ensureCollection(VAULT_DIR).catch(() => {});
+      qmd.ensureCollection(VAULT_DIR).then(() => qmd.embed()).catch(() => {});
     }
 
     updateWidget(ctx);
@@ -521,7 +521,7 @@ export default function memoryExtension(pi: ExtensionAPI) {
 
       // Auto-index QMD after vault changes
       if (qmdAvailable && result.committed) {
-        qmd.update().catch(() => {});
+        qmd.update().then(() => qmd.embed()).catch(() => {});
       }
 
       runningOperation = null;
