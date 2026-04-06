@@ -8,7 +8,8 @@ export function writeConventions(dir: string): string {
 
 - Use write/edit tools to create or update .md files in the vault
 - One topic per file. Lowercase, hyphenated filenames (e.g., deploy-gotchas.md)
-- Link related notes with \`[[wikilinks]]\`
+- Link related notes with \`[[wikilinks]]\`. Use display text for inline references: \`[[path|term]]\` (e.g., \`[[projects/app/slug|Term]]\`). Reserve bare \`[[path]]\` for index listings and "See also" sections.
+- Create concept/overview pages for domain-specific or project-specific terms referenced across 3+ files. Place them alongside related content (e.g., \`projects/app/vcs.md\`, \`construction/aia.md\`), not in a separate concepts directory. Only create them where the vault's definition adds value beyond general knowledge.
 - Update index.md if any files were added or removed
 - Keep files under ${MEMORY_TOPIC_LIMIT} lines. Keep index.md under ${MEMORY_INDEX_LIMIT} lines
 - Prefer updating existing notes over creating new ones
@@ -135,6 +136,11 @@ Progress through these phases. Don't stay in explore — move to harder work qui
 - **Explore** (first 1-2 cycles only): Read files, identify errors, gaps, stale content, missing cross-references. Fix what you find immediately.
 - **Reorganize**: Merge overlapping files into one. Split overloaded files. Rename files whose names no longer match their content. Restructure directories.
 - **Synthesize**: Find a pattern that appears in 3+ files across different projects and extract it into a principle. Add cross-references between files that discuss the same concept from different angles. Connect isolated project notes to shared principles.
+- **Conceptualize**: Build out the vault's wiki graph. The brain-audit "Concept Candidates" section lists terms referenced across many files that lack dedicated pages. For each strong candidate:
+  1. Create a short concept/overview page alongside related content (e.g., \`projects/app/vcs.md\`, \`construction/aia.md\`) — what it is, why it matters, key files that discuss it.
+  2. Go back to the files that reference the concept and convert bare mentions to inline wikilinks: \`[[path/slug|Term]]\`.
+  3. The test: "would an agent landing in this codebase for the first time benefit from reading this page?" If no, skip it — don't create pages for generic terms like "Rails" or "React".
+  Also look for existing bare \`[[path]]\` wikilinks in prose that would read better as \`[[path|display text]]\` and upgrade them.
 - **Simplify**: Delete files that don't earn their keep. Collapse a file that says in 40 lines what could be said in 10. Remove sections that restate what's in a linked file.
 - **Disrupt** (diverge → develop → decide):
   1. **Wild ideas**: Generate 2-3 radical reorganization ideas. Think big — merge entire directories, flip the hierarchy, eliminate a category, organize by concept instead of project. Write them to \`${journalPath}\`.

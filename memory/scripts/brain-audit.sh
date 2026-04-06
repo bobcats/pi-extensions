@@ -45,7 +45,7 @@ while IFS= read -r link; do
     echo "  BROKEN: [[$link]] -> $file"
     ((broken++)) || true
   fi
-done < <(grep -roh '\[\[[^]]*\]\]' --include='*.md' . | sed 's/\[\[//;s/\]\]//' | sort -u)
+done < <(grep -roh '\[\[[^]]*\]\]' --include='*.md' . | sed 's/\[\[//;s/\]\]//' | sed 's/|.*//' | sort -u)
 if (( broken == 0 )); then echo "  None"; fi
 
 # --- Orphan files ---
@@ -54,7 +54,7 @@ echo "=== Orphan Files (not in any index) ==="
 orphans=0
 while IFS= read -r file; do
   slug=$(echo "$file" | sed 's|^\./||; s|\.md$||')
-  if ! grep -rq "\[\[$slug\]\]" --include='*.md' . 2>/dev/null; then
+  if ! grep -rqE "\[\[$slug(\]|\|)" --include='*.md' . 2>/dev/null; then
     echo "  ORPHAN: $file"
     ((orphans++)) || true
   fi
@@ -95,6 +95,33 @@ sort -n "$conn_tmp" | while read -r c n; do
   (( c <= 1 )) && printf "    %2d  %s\n" "$c" "$n"
 done
 rm -f "$conn_tmp"
+
+# --- Concept candidates ---
+echo ""
+echo "=== Concept Candidates ==="
+echo "  (common filename stems appearing in 3+ files, no concept page yet)"
+concept_cand=$(mktemp)
+find . -name '*.md' \
+  -not -name 'index.md' \
+  -not -name 'dream-journal.md' \
+  \
+  | sed 's|.*/||; s|\.md$||' \
+  | tr '-' '\n' \
+  | grep -v '^$' \
+  | sort | uniq -c | sort -rn \
+  | while read -r count term; do
+    (( count >= 3 )) || continue
+    # skip very short or generic terms
+    (( ${#term} < 3 )) && continue
+    case "$term" in
+      the|and|for|not|you|its|but|how|are|was|then|that|this|with|from|what|before|after|first|last|over|into|only|also|when|just|each|been|have|does|make|like|your|more|than|about|which|their|other|should|would|could|these|those) continue ;;
+    esac
+    # skip if a concept page already exists
+    # skip if a dedicated page already exists for this term
+    if find . -name "${term}.md" -not -name 'index.md' 2>/dev/null | grep -q .; then continue; fi
+    printf "  %2d files  %s\n" "$count" "$term"
+  done
+rm -f "$concept_cand"
 
 echo ""
 echo "=== Summary ==="
