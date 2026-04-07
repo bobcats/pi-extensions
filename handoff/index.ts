@@ -106,7 +106,7 @@ export function createHandoffExtension(
 ) {
   const completeFn = deps.completeFn ?? complete;
   const SUMMARY_PROVIDER = deps.summaryProvider ?? "anthropic";
-  const SUMMARY_MODEL = deps.summaryModel ?? "claude-sonnet-4-5";
+  const SUMMARY_MODEL = deps.summaryModel ?? "claude-sonnet-4-6";
 
   return function handoff(pi: ExtensionAPI) {
     pi.registerCommand("handoff", {

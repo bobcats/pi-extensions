@@ -328,6 +328,20 @@ test("generateHandoffSummary uses the system prompt and serialized conversation"
   assert.deepEqual(completeCalls[0].options, { apiKey: "test-key", headers: { "x-test": "1" }, signal: undefined });
 });
 
+test("prefers the configured Sonnet summary model id first", async () => {
+  const lookups: Array<[string, string]> = [];
+  const harness = createHarness();
+  harness.ctx.sessionManager.getBranch = nonEmptyBranch;
+  harness.ctx.modelRegistry.find = (provider: string, modelId: string) => {
+    lookups.push([provider, modelId]);
+    return null;
+  };
+  createHandoffExtension()(harness.pi);
+  const cmd = harness.commands.get("handoff");
+  await cmd.handler("continue the auth work", harness.ctx);
+  assert.deepEqual(lookups[0], ["anthropic", "claude-sonnet-4-6"]);
+});
+
 test("notifies when no usable model credentials are available", async () => {
   const harness = createHarness();
   harness.ctx.sessionManager.getBranch = nonEmptyBranch;
