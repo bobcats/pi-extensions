@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { CREATE_HANDOFF_CONTEXT_SYSTEM_PROMPT, createHandoffExtension, generateHandoffSummary } from "./index.ts";
 
 function createHarness() {
-  const commands = new Map<string, any>();
+  const commandMap = new Map<string, any>();
   const notifications: Array<{ message: string; level: string }> = [];
   const confirmations: Array<{ title: string; message: string }> = [];
   const editorTexts: string[] = [];
@@ -19,7 +19,7 @@ function createHarness() {
   const callOrder: string[] = [];
 
   return {
-    commands,
+    commandMap,
     notifications,
     confirmations,
     editorTexts,
@@ -48,7 +48,7 @@ function createHarness() {
     },
     pi: {
       registerCommand(name: string, spec: any) {
-        commands.set(name, spec);
+        commandMap.set(name, spec);
       },
       setSessionName() {
         setSessionNameCalls += 1;
@@ -162,7 +162,7 @@ test("notifies and aborts when not in interactive mode", async () => {
   const harness = createHarness();
   (harness.ctx as any).hasUI = false;
   createHandoffExtension()(harness.pi);
-  const cmd = harness.commands.get("handoff");
+  const cmd = harness.commandMap.get("handoff");
   await cmd.handler("continue the work", harness.ctx);
   assert.deepEqual(harness.notifications, [
     { message: "Handoff requires interactive mode.", level: "error" },
@@ -174,7 +174,7 @@ test("notifies when No model selected", async () => {
   const harness = createHarness();
   (harness.ctx as any).model = undefined;
   createHandoffExtension()(harness.pi);
-  const cmd = harness.commands.get("handoff");
+  const cmd = harness.commandMap.get("handoff");
   await cmd.handler("continue the work", harness.ctx);
   assert.deepEqual(harness.notifications, [{ message: "No model selected.", level: "error" }]);
   assert.equal(harness.newSessionCalls, 0);
@@ -183,7 +183,7 @@ test("notifies when No model selected", async () => {
 test("notifies Usage: /handoff when goal is empty", async () => {
   const harness = createHarness();
   createHandoffExtension()(harness.pi);
-  const cmd = harness.commands.get("handoff");
+  const cmd = harness.commandMap.get("handoff");
   await cmd.handler("   ", harness.ctx);
   assert.deepEqual(harness.notifications, [
     { message: "Usage: /handoff <goal for new session>", level: "error" },
@@ -202,7 +202,7 @@ test("notifies No conversation to hand off when branch is empty", async () => {
     { type: "tool_result", message: null },
   ];
   createHandoffExtension()(harness.pi);
-  const cmd = harness.commands.get("handoff");
+  const cmd = harness.commandMap.get("handoff");
   await cmd.handler("continue the work", harness.ctx);
   assert.deepEqual(harness.notifications, [
     { message: "No conversation to hand off.", level: "error" },
@@ -215,7 +215,7 @@ test("aborts when user denies overwrite of editor text", async () => {
   harness.setEditorTextValue("draft message");
   harness.setConfirmResult(false);
   createHandoffExtension()(harness.pi);
-  const cmd = harness.commands.get("handoff");
+  const cmd = harness.commandMap.get("handoff");
   await cmd.handler("continue the work", harness.ctx);
   assert.equal(harness.confirmations.length, 1);
   assert.equal(harness.newSessionCalls, 0);
@@ -230,7 +230,7 @@ test("falls back to ctx.model when Sonnet is missing from registry", async () =>
   harness.ctx.modelRegistry.find = () => null;
   harness.setCustomResult("- I made progress.\n- Continue here.");
   createHandoffExtension()(harness.pi);
-  const cmd = harness.commands.get("handoff");
+  const cmd = harness.commandMap.get("handoff");
   await cmd.handler("continue the work", harness.ctx);
   assert.equal(
     harness.notifications.find((n) => n.level === "error"),
@@ -248,7 +248,7 @@ test("falls back to ctx.model when Sonnet auth fails", async () => {
   };
   harness.setCustomResult("- summary text");
   createHandoffExtension()(harness.pi);
-  const cmd = harness.commands.get("handoff");
+  const cmd = harness.commandMap.get("handoff");
   await cmd.handler("continue the work", harness.ctx);
   assert.equal(
     harness.notifications.find((n) => n.level === "error"),
@@ -262,7 +262,7 @@ test("happy path: Sonnet available, generates summary, switches session, prefill
   harness.ctx.sessionManager.getBranch = nonEmptyBranch;
   harness.setCustomResult("- I already fixed auth.\n- Continue in auth/service.ts");
   createHandoffExtension()(harness.pi);
-  const cmd = harness.commands.get("handoff");
+  const cmd = harness.commandMap.get("handoff");
   await cmd.handler("continue the auth work", harness.ctx);
   assert.equal(harness.newSessionCalls, 1);
   assert.equal(harness.editorTexts.length, 1);
@@ -291,7 +291,7 @@ test("notifies Handoff cancelled when generation is aborted", async () => {
   harness.ctx.sessionManager.getBranch = nonEmptyBranch;
   harness.setCustomResult(null);
   createHandoffExtension()(harness.pi);
-  const cmd = harness.commands.get("handoff");
+  const cmd = harness.commandMap.get("handoff");
   await cmd.handler("continue the auth work", harness.ctx);
   assert.equal(harness.newSessionCalls, 0);
   assert.equal(harness.editorTexts.length, 0);
@@ -306,7 +306,7 @@ test("notifies New session cancelled when newSession is cancelled", async () => 
   harness.setCustomResult("- summary text");
   (harness.ctx as any).newSession = async () => ({ cancelled: true });
   createHandoffExtension()(harness.pi);
-  const cmd = harness.commands.get("handoff");
+  const cmd = harness.commandMap.get("handoff");
   await cmd.handler("continue the auth work", harness.ctx);
   assert.equal(harness.editorTexts.length, 0);
   assert.deepEqual(harness.notifications, [
@@ -319,7 +319,7 @@ test("does not call setSessionName", async () => {
   harness.ctx.sessionManager.getBranch = nonEmptyBranch;
   harness.setCustomResult("- summary");
   createHandoffExtension()(harness.pi);
-  const cmd = harness.commands.get("handoff");
+  const cmd = harness.commandMap.get("handoff");
   await cmd.handler("continue the auth work", harness.ctx);
   assert.equal(harness.setSessionNameCalls, 0);
 });
@@ -364,7 +364,7 @@ test("prefers the configured Sonnet summary model id first", async () => {
     return null;
   };
   createHandoffExtension()(harness.pi);
-  const cmd = harness.commands.get("handoff");
+  const cmd = harness.commandMap.get("handoff");
   await cmd.handler("continue the auth work", harness.ctx);
   assert.deepEqual(lookups[0], ["anthropic", "claude-sonnet-4-6"]);
 });
@@ -374,7 +374,7 @@ test("notifies when no usable model credentials are available", async () => {
   harness.ctx.sessionManager.getBranch = nonEmptyBranch;
   harness.ctx.modelRegistry.getApiKeyAndHeaders = async () => ({ ok: false as const, error: "no key" });
   createHandoffExtension()(harness.pi);
-  const cmd = harness.commands.get("handoff");
+  const cmd = harness.commandMap.get("handoff");
   await cmd.handler("continue the work", harness.ctx);
   assert.deepEqual(harness.notifications, [
     { message: "Handoff: no usable model credentials", level: "error" },
