@@ -29,28 +29,124 @@ unless critical.
 Format: Plain text with bullets. No markdown headers, no bold/italic,
 no code fences. Use workspace-relative paths for files.`;
 
-function textOfMessage(message: any): string {
+// ── Local types ───────────────────────────────────────────────────────────────
+
+type HandoffDeps = {
+  completeFn?: typeof complete;
+  summaryProvider?: string;
+  summaryModel?: string;
+};
+
+type AuthOk = {
+  ok: true;
+  apiKey?: string;
+  headers?: Record<string, string>;
+};
+
+type AuthError = {
+  ok: false;
+  error: string;
+};
+
+type AuthResult = AuthOk | AuthError;
+
+type SummaryModelResolution = {
+  model: { provider: string; id: string };
+  auth: AuthOk;
+};
+
+type HandoffCommandContext = {
+  hasUI: boolean;
+  model: { provider: string; id: string } | undefined;
+  modelRegistry: {
+    find(provider: string, modelId: string): { provider: string; id: string } | null;
+    getApiKeyAndHeaders(model: { provider: string; id: string }): Promise<AuthResult>;
+  };
+  sessionManager: {
+    getBranch(): SessionEntry[];
+    getSessionFile(): string;
+  };
+  newSession(options: { parentSession: string }): Promise<{ cancelled: boolean }>;
+  ui: {
+    notify(message: string, level: string): void;
+    getEditorText(): string;
+    confirm(title: string, message: string): Promise<boolean>;
+    setEditorText(text: string): void;
+    custom<T>(builder: any): Promise<T>;
+  };
+};
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+function textOfMessage(message: { content?: Array<{ type: string; text?: string }> }): string {
   if (!Array.isArray(message?.content)) return "";
   return message.content
-    .filter((part: any) => part.type === "text")
-    .map((part: any) => part.text)
+    .filter((part) => part.type === "text")
+    .map((part) => part.text ?? "")
     .join("\n")
     .trim();
 }
 
-function hasConversationText(entry: any): boolean {
+function hasConversationText(entry: SessionEntry): boolean {
   if (entry?.type !== "message") return false;
-  const role = entry.message?.role;
+  const msg = (entry as any).message;
+  const role = msg?.role;
   if (role !== "user" && role !== "assistant") return false;
-  return textOfMessage(entry.message).length > 0;
+  return textOfMessage(msg).length > 0;
 }
 
-async function resolveSummaryModel(ctx: any, provider: string, modelId: string) {
+function ensureInteractiveMode(ctx: HandoffCommandContext): boolean {
+  if (!ctx.hasUI) {
+    ctx.ui.notify("Handoff requires interactive mode.", "error");
+    return false;
+  }
+  return true;
+}
+
+function ensureModelSelected(ctx: HandoffCommandContext): boolean {
+  if (!ctx.model) {
+    ctx.ui.notify("No model selected.", "error");
+    return false;
+  }
+  return true;
+}
+
+function ensureGoal(args: string, ctx: HandoffCommandContext): string | null {
+  const goal = args.trim();
+  if (!goal) {
+    ctx.ui.notify("Usage: /handoff <goal for new session>", "error");
+    return null;
+  }
+  return goal;
+}
+
+function ensureConversation(branch: SessionEntry[], ctx: HandoffCommandContext): boolean {
+  if (!branch.some(hasConversationText)) {
+    ctx.ui.notify("No conversation to hand off.", "error");
+    return false;
+  }
+  return true;
+}
+
+async function confirmOverwriteIfNeeded(ctx: HandoffCommandContext): Promise<boolean> {
+  const currentEditorText = ctx.ui.getEditorText().trim();
+  if (!currentEditorText) return true;
+  return ctx.ui.confirm(
+    "Overwrite editor with handoff prompt?",
+    "The prompt editor has unsubmitted text. Replace it with the generated handoff prompt?",
+  );
+}
+
+async function resolveSummaryModel(
+  ctx: HandoffCommandContext,
+  provider: string,
+  modelId: string,
+): Promise<SummaryModelResolution | null> {
   const preferred = ctx.modelRegistry.find(provider, modelId);
   if (preferred) {
-    const preferredAuth = await ctx.modelRegistry.getApiKeyAndHeaders(preferred);
-    if (preferredAuth.ok) {
-      return { model: preferred, auth: preferredAuth };
+    const auth = await ctx.modelRegistry.getApiKeyAndHeaders(preferred);
+    if (auth.ok) {
+      return { model: preferred, auth };
     }
   }
 
@@ -61,9 +157,66 @@ async function resolveSummaryModel(ctx: any, provider: string, modelId: string) 
   return { model: fallback, auth: fallbackAuth };
 }
 
+function conversationMessagesFromBranch(branch: SessionEntry[]): any[] {
+  return branch
+    .filter((entry) => entry.type === "message")
+    .map((entry) => (entry as any).message);
+}
+
+async function generateSummaryWithLoader(params: {
+  ctx: HandoffCommandContext;
+  completeFn: typeof complete;
+  resolved: SummaryModelResolution;
+  messages: any[];
+  goal: string;
+}): Promise<string | null> {
+  const { ctx, completeFn, resolved, messages, goal } = params;
+  return ctx.ui.custom<string | null>((tui: any, theme: any, _kb: any, done: any) => {
+    const loader = new BorderedLoader(tui, theme, "Generating handoff prompt...");
+    loader.onAbort = () => done(null);
+
+    generateHandoffSummary({
+      completeFn,
+      model: resolved.model,
+      apiKey: resolved.auth.apiKey,
+      headers: resolved.auth.headers,
+      messages,
+      goal,
+      signal: loader.signal,
+    })
+      .then(done)
+      .catch(() => done(null));
+
+    return loader;
+  });
+}
+
+async function applyHandoffToNewSession(params: {
+  ctx: HandoffCommandContext;
+  goal: string;
+  summary: string;
+}): Promise<boolean> {
+  const { ctx, goal, summary } = params;
+  const newSessionResult = await ctx.newSession({
+    parentSession: ctx.sessionManager.getSessionFile(),
+  });
+
+  if (newSessionResult.cancelled) {
+    ctx.ui.notify("New session cancelled.", "info");
+    return false;
+  }
+
+  const finalPrompt = `${goal}\n\n${summary}`;
+  ctx.ui.setEditorText(finalPrompt);
+  ctx.ui.notify("Handoff ready — submit when ready.", "info");
+  return true;
+}
+
+// ── Public API ────────────────────────────────────────────────────────────────
+
 export async function generateHandoffSummary(params: {
   completeFn: typeof complete;
-  model: any;
+  model: { provider: string; id: string };
   apiKey: string | undefined;
   headers: Record<string, string> | undefined;
   messages: any[];
@@ -92,18 +245,12 @@ export async function generateHandoffSummary(params: {
 
   return response.content
     .filter((part: any) => part.type === "text")
-    .map((part: any) => part.text)
+    .map((part: any) => (part as any).text)
     .join("\n")
     .trim();
 }
 
-export function createHandoffExtension(
-  deps: {
-    completeFn?: typeof complete;
-    summaryProvider?: string;
-    summaryModel?: string;
-  } = {},
-) {
+export function createHandoffExtension(deps: HandoffDeps = {}) {
   const completeFn = deps.completeFn ?? complete;
   const SUMMARY_PROVIDER = deps.summaryProvider ?? "anthropic";
   const SUMMARY_MODEL = deps.summaryModel ?? "claude-sonnet-4-6";
@@ -112,80 +259,32 @@ export function createHandoffExtension(
     pi.registerCommand("handoff", {
       description: "Transfer context to a new focused session",
       handler: async (args: string, ctx: any) => {
-        if (!ctx.hasUI) {
-          ctx.ui.notify("Handoff requires interactive mode.", "error");
-          return;
-        }
-        if (!ctx.model) {
-          ctx.ui.notify("No model selected.", "error");
-          return;
-        }
-        const goal = args.trim();
-        if (!goal) {
-          ctx.ui.notify("Usage: /handoff <goal for new session>", "error");
-          return;
-        }
-        const branch = ctx.sessionManager.getBranch();
-        if (!branch.some(hasConversationText)) {
-          ctx.ui.notify("No conversation to hand off.", "error");
-          return;
-        }
+        const hctx = ctx as HandoffCommandContext;
 
-        const currentEditorText = ctx.ui.getEditorText().trim();
-        if (currentEditorText) {
-          const ok = await ctx.ui.confirm(
-            "Overwrite editor with handoff prompt?",
-            "The prompt editor has unsubmitted text. Replace it with the generated handoff prompt?",
-          );
-          if (!ok) return;
-        }
+        if (!ensureInteractiveMode(hctx)) return;
+        if (!ensureModelSelected(hctx)) return;
 
-        const resolved = await resolveSummaryModel(ctx, SUMMARY_PROVIDER, SUMMARY_MODEL);
+        const goal = ensureGoal(args, hctx);
+        if (!goal) return;
+
+        const branch = hctx.sessionManager.getBranch();
+        if (!ensureConversation(branch, hctx)) return;
+        if (!(await confirmOverwriteIfNeeded(hctx))) return;
+
+        const resolved = await resolveSummaryModel(hctx, SUMMARY_PROVIDER, SUMMARY_MODEL);
         if (!resolved) {
-          ctx.ui.notify("Handoff: no usable model credentials", "error");
+          hctx.ui.notify("Handoff: no usable model credentials", "error");
           return;
         }
 
-        const messages = branch
-          .filter((entry: SessionEntry) => entry.type === "message")
-          .map((entry: any) => entry.message);
-
-        const summary = await ctx.ui.custom<string | null>((tui: any, theme: any, _kb: any, done: any) => {
-          const loader = new BorderedLoader(tui, theme, "Generating handoff prompt...");
-          loader.onAbort = () => done(null);
-
-          generateHandoffSummary({
-            completeFn,
-            model: resolved.model,
-            apiKey: resolved.auth.apiKey,
-            headers: resolved.auth.headers,
-            messages,
-            goal,
-            signal: loader.signal,
-          })
-            .then(done)
-            .catch(() => done(null));
-
-          return loader;
-        });
-
+        const messages = conversationMessagesFromBranch(branch);
+        const summary = await generateSummaryWithLoader({ ctx: hctx, completeFn, resolved, messages, goal });
         if (summary === null) {
-          ctx.ui.notify("Handoff cancelled.", "info");
+          hctx.ui.notify("Handoff cancelled.", "info");
           return;
         }
 
-        const finalPrompt = `${goal}\n\n${summary}`;
-        const newSessionResult = await ctx.newSession({
-          parentSession: ctx.sessionManager.getSessionFile(),
-        });
-
-        if (newSessionResult.cancelled) {
-          ctx.ui.notify("New session cancelled.", "info");
-          return;
-        }
-
-        ctx.ui.setEditorText(finalPrompt);
-        ctx.ui.notify("Handoff ready — submit when ready.", "info");
+        await applyHandoffToNewSession({ ctx: hctx, goal, summary });
       },
     });
   };
