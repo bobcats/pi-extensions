@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { CREATE_HANDOFF_CONTEXT_SYSTEM_PROMPT, createHandoffExtension } from "./index.ts";
+import { CREATE_HANDOFF_CONTEXT_SYSTEM_PROMPT, createHandoffExtension, generateHandoffSummary } from "./index.ts";
 
 function createHarness() {
   const commands = new Map<string, any>();
@@ -12,12 +12,22 @@ function createHarness() {
   let customResult: unknown = null;
   let newSessionCalls = 0;
   let setSessionNameCalls = 0;
+  const newSessionArgs: Array<{ parentSession: string }> = [];
+  let customCallCount = 0;
+  let findCalls = 0;
+  let authCalls = 0;
+  const callOrder: string[] = [];
 
   return {
     commands,
     notifications,
     confirmations,
     editorTexts,
+    get newSessionArgs() { return newSessionArgs; },
+    get customCallCount() { return customCallCount; },
+    get findCalls() { return findCalls; },
+    get authCalls() { return authCalls; },
+    get callOrder() { return callOrder; },
     setConfirmResult(value: boolean) {
       confirmResult = value;
     },
@@ -50,15 +60,17 @@ function createHarness() {
       cwd: "/tmp/project",
       modelRegistry: {
         find(provider: string, modelId: string) {
+          findCalls += 1;
           return provider === "anthropic" && modelId === "claude-sonnet-4-5"
             ? { provider, id: modelId }
             : null;
         },
         async getApiKeyAndHeaders(model: any) {
+          authCalls += 1;
           return {
             ok: true as const,
             apiKey: `key-for-${model.provider}/${model.id}`,
-            headers: { "x-test": "1" },
+            headers: { "x-test": "1" } as Record<string, string>,
           };
         },
       },
@@ -70,13 +82,16 @@ function createHarness() {
           return "/tmp/project/.pi/sessions/current.jsonl";
         },
       },
-      newSession: async () => {
+      newSession: async (options: { parentSession: string }) => {
         newSessionCalls += 1;
+        newSessionArgs.push(options);
+        callOrder.push("newSession");
         return { cancelled: false };
       },
       ui: {
         notify(message: string, level: string) {
           notifications.push({ message, level });
+          callOrder.push(`notify:${level}`);
         },
         getEditorText() {
           return editorText;
@@ -87,8 +102,10 @@ function createHarness() {
         },
         setEditorText(text: string) {
           editorTexts.push(text);
+          callOrder.push("setEditorText");
         },
         async custom<T>(_builder: any): Promise<T> {
+          customCallCount += 1;
           return customResult as T;
         },
       },
@@ -171,6 +188,9 @@ test("notifies Usage: /handoff when goal is empty", async () => {
   assert.deepEqual(harness.notifications, [
     { message: "Usage: /handoff <goal for new session>", level: "error" },
   ]);
+  // characterization: missing goal short-circuits model lookup
+  assert.equal(harness.findCalls, 0);
+  assert.equal(harness.authCalls, 0);
 });
 
 test("notifies No conversation to hand off when branch is empty", async () => {
@@ -200,6 +220,8 @@ test("aborts when user denies overwrite of editor text", async () => {
   assert.equal(harness.confirmations.length, 1);
   assert.equal(harness.newSessionCalls, 0);
   assert.equal(harness.editorTexts.length, 0);
+  // characterization: overwrite denial short-circuits generation and session switch
+  assert.equal(harness.customCallCount, 0);
 });
 
 test("falls back to ctx.model when Sonnet is missing from registry", async () => {
@@ -256,6 +278,12 @@ test("happy path: Sonnet available, generates summary, switches session, prefill
     harness.notifications.find((n) => n.level === "info"),
     { message: "Handoff ready — submit when ready.", level: "info" },
   );
+  // characterization: newSession receives parentSession from getSessionFile()
+  assert.deepEqual(harness.newSessionArgs[0], {
+    parentSession: "/tmp/project/.pi/sessions/current.jsonl",
+  });
+  // characterization: session switch ordering — newSession before setEditorText before notify
+  assert.deepEqual(harness.callOrder, ["newSession", "setEditorText", "notify:info"]);
 });
 
 test("notifies Handoff cancelled when generation is aborted", async () => {
@@ -297,7 +325,6 @@ test("does not call setSessionName", async () => {
 });
 
 test("generateHandoffSummary uses the system prompt and serialized conversation", async () => {
-  const { generateHandoffSummary } = await import("./index.ts");
   const completeCalls: any[] = [];
   const result = await generateHandoffSummary({
     completeFn: async (model: any, prompt: any, options: any) => {
