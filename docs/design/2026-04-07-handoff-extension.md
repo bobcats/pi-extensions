@@ -59,10 +59,13 @@ After the user presses Enter, pi fires `before_agent_start` → `memory` injects
 | `!ctx.hasUI` | "Handoff requires interactive mode." | `notify("error")`, return |
 | `!ctx.model` | "No model selected." | `notify("error")`, return |
 | `!goal.trim()` | "Usage: /handoff \<goal for new session\>" | `notify("error")`, return |
-| Branch has no message entries | "No conversation to hand off." | `notify("error")`, return |
+| Conversation is empty (see predicate below) | "No conversation to hand off." | `notify("error")`, return |
 | Editor has unsubmitted text | "Overwrite editor with handoff prompt?" | `confirm`, return on deny |
 | LLM generation aborted (Esc) | "Handoff cancelled." | `notify("info")`, return |
 | `newSession()` cancelled by another extension | "New session cancelled." | `notify("info")`, return |
+| No usable model credentials after fallback | "Handoff: no usable model credentials" | `notify("error")`, return |
+
+**"Conversation is empty" predicate (exact):** after filtering the current branch to `SessionEntry.type === "message"` entries, the conversation is considered empty if the filtered list contains zero entries whose `message.role` is `"user"` or `"assistant"` with at least one non-empty text content block. System messages and tool-only entries do not count. This keeps the check deterministic for tests and avoids the edge case of handing off a session that contains only tool traces or empty placeholders.
 
 ## Model selection
 
@@ -218,6 +221,7 @@ Uses the harness pattern from `auto-name-session/index.test.ts`: mock `pi` with 
 11. **`newSession` cancelled by another extension** → notifies "New session cancelled"
 12. **System prompt snapshot** — `CREATE_HANDOFF_CONTEXT_SYSTEM_PROMPT` matches the expected text exactly (guards against silent drift from Amp's prompt)
 13. **No `setSessionName` regression** — harness asserts `pi.setSessionName` is not called from handoff (guards against accidentally stepping on auto-name-session)
+14. **Both-models-unauthed error path** — Sonnet's auth fails *and* `ctx.model`'s auth also fails → notifies "Handoff: no usable model credentials" and does not call `newSession`; exercises the final error branch in model selection
 
 All tests use `tsx --test --test-timeout=5000`, matching repo convention.
 
@@ -240,6 +244,8 @@ These all came up during brainstorming and were rejected with reasons captured:
 ## Open questions
 
 - **Exact Sonnet model ID.** `claude-sonnet-4-5` vs `claude-sonnet-4-6` — verify the correct current ID against `@mariozechner/pi-ai`'s registry at implementation time. The fallback to `ctx.model` means this is not load-bearing, but the default should point at a real model.
+
+  **Done condition for this question:** during implementation, call `modelRegistry.find("anthropic", CANDIDATE_ID)` for each candidate Sonnet ID against a freshly-launched pi and pick the one that resolves to a non-null model. Update `SUMMARY_MODEL` constant accordingly and verify one happy-path test runs green against the real registry (not just the mock). No code changes ship until this is resolved.
 
 ## References
 
