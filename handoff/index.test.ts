@@ -235,6 +235,99 @@ test("falls back to ctx.model when Sonnet auth fails", async () => {
   );
 });
 
+test("happy path: Sonnet available, generates summary, switches session, prefills editor", async () => {
+  const harness = createHarness();
+  harness.ctx.sessionManager.getBranch = nonEmptyBranch;
+  harness.setCustomResult("- I already fixed auth.\n- Continue in auth/service.ts");
+  createHandoffExtension()(harness.pi);
+  const cmd = harness.commands.get("handoff");
+  await cmd.handler("continue the auth work", harness.ctx);
+  assert.equal(harness.newSessionCalls, 1);
+  assert.equal(harness.editorTexts.length, 1);
+  assert.ok(
+    harness.editorTexts[0].startsWith("continue the auth work\n\n"),
+    "editor text should be goal + summary",
+  );
+  assert.ok(
+    harness.editorTexts[0].includes("- I already fixed auth."),
+    "editor text should include generated summary",
+  );
+  assert.deepEqual(
+    harness.notifications.find((n) => n.level === "info"),
+    { message: "Handoff ready — submit when ready.", level: "info" },
+  );
+});
+
+test("notifies Handoff cancelled when generation is aborted", async () => {
+  const harness = createHarness();
+  harness.ctx.sessionManager.getBranch = nonEmptyBranch;
+  harness.setCustomResult(null);
+  createHandoffExtension()(harness.pi);
+  const cmd = harness.commands.get("handoff");
+  await cmd.handler("continue the auth work", harness.ctx);
+  assert.equal(harness.newSessionCalls, 0);
+  assert.equal(harness.editorTexts.length, 0);
+  assert.deepEqual(harness.notifications, [
+    { message: "Handoff cancelled.", level: "info" },
+  ]);
+});
+
+test("notifies New session cancelled when newSession is cancelled", async () => {
+  const harness = createHarness();
+  harness.ctx.sessionManager.getBranch = nonEmptyBranch;
+  harness.setCustomResult("- summary text");
+  (harness.ctx as any).newSession = async () => ({ cancelled: true });
+  createHandoffExtension()(harness.pi);
+  const cmd = harness.commands.get("handoff");
+  await cmd.handler("continue the auth work", harness.ctx);
+  assert.equal(harness.editorTexts.length, 0);
+  assert.deepEqual(harness.notifications, [
+    { message: "New session cancelled.", level: "info" },
+  ]);
+});
+
+test("does not call setSessionName", async () => {
+  const harness = createHarness();
+  harness.ctx.sessionManager.getBranch = nonEmptyBranch;
+  harness.setCustomResult("- summary");
+  createHandoffExtension()(harness.pi);
+  const cmd = harness.commands.get("handoff");
+  await cmd.handler("continue the auth work", harness.ctx);
+  assert.equal(harness.setSessionNameCalls, 0);
+});
+
+test("generateHandoffSummary uses the system prompt and serialized conversation", async () => {
+  const { generateHandoffSummary } = await import("./index.ts");
+  const completeCalls: any[] = [];
+  const result = await generateHandoffSummary({
+    completeFn: async (model: any, prompt: any, options: any) => {
+      completeCalls.push({ model, prompt, options });
+      return {
+        role: "assistant",
+        content: [{ type: "text", text: "- I already fixed auth.\n- Continue in auth/service.ts" }],
+        stopReason: "stop",
+      };
+    },
+    model: { provider: "anthropic", id: "claude-sonnet-4-5" },
+    apiKey: "test-key",
+    headers: { "x-test": "1" },
+    messages: [{ role: "user", content: [{ type: "text", text: "Continue the auth cleanup" }] }],
+    goal: "continue the auth cleanup",
+  });
+  assert.equal(result, "- I already fixed auth.\n- Continue in auth/service.ts");
+  assert.equal(completeCalls.length, 1);
+  assert.equal(completeCalls[0].prompt.systemPrompt, CREATE_HANDOFF_CONTEXT_SYSTEM_PROMPT);
+  assert.ok(
+    completeCalls[0].prompt.messages[0].content[0].text.includes("## Conversation History"),
+    "user message should contain serialized conversation",
+  );
+  assert.ok(
+    completeCalls[0].prompt.messages[0].content[0].text.includes("continue the auth cleanup"),
+    "user message should contain the goal",
+  );
+  assert.deepEqual(completeCalls[0].options, { apiKey: "test-key", headers: { "x-test": "1" }, signal: undefined });
+});
+
 test("notifies when no usable model credentials are available", async () => {
   const harness = createHarness();
   harness.ctx.sessionManager.getBranch = nonEmptyBranch;
