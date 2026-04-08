@@ -18,6 +18,12 @@ Extensions and prompt templates for [pi](https://github.com/badlogic/pi-mono).
 | [subagent](./subagent/) | Delegates tasks to isolated subagents — single, parallel, or chained |
 | [tldraw-desktop](./tldraw-desktop/) | Reads and manipulates tldraw desktop canvases |
 
+## Skills
+
+| Skill | Purpose |
+|-------|---------|
+| [memory-ingest](./skills/memory-ingest/) | Deterministically ingest URLs, local paths, repos, datasets, and pasted text into `~/.pi/memories/raw/` |
+
 ## Prompt Templates
 
 | Template | Slash command |
@@ -55,6 +61,8 @@ cd ext-prof && npm test
 cd memory && npm test
 cd tldraw-desktop && npm test
 ```
+
+Skills live under `./skills/` and are packaged with the repository. For example, `/skill:memory-ingest <input>` writes markdown artifacts to `~/.pi/memories/raw/`.
 
 Hot-reload in a running session:
 
