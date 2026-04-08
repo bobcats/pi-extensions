@@ -1,5 +1,6 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { spawnSync } from "node:child_process";
 import {
   buildMarkdownOutput,
   buildOutputBaseName,
@@ -41,6 +42,7 @@ const DATASET_CAPS = { files: 50, bytes: 100 * 1024 * 1024 };
 const REPO_CAPS = { files: 200, bytes: 25 * 1024 * 1024, depth: 4 };
 const LOCAL_DIR_CAPS = { files: 100, bytes: 25 * 1024 * 1024, depth: 3 };
 const BLOB_CAP = 200 * 1024;
+const SUMMARIZE_SCRIPT = "/Users/brian/.agents/skills/summarize/to-markdown.mjs";
 
 export function planIngest(input: string, options: { nowIso?: string; rawRoot?: string } = {}): IngestPlan {
   const nowIso = options.nowIso ?? new Date().toISOString();
@@ -157,13 +159,47 @@ function walkFiles(root: string, maxDepth: number): Array<{ path: string; rel: s
   return results;
 }
 
-function summarizeLocalPath(input: string, kind: string, nowIso: string): { body: string; filesWritten: string[]; stats: LocalStats } {
+export async function convertLocalDocumentToMarkdown(
+  input: string,
+  deps: { convertWithSummarize?: (input: string) => Promise<string> } = {},
+): Promise<{ body: string; usedFallback: boolean; note?: string }> {
+  if (isTextLike(input)) {
+    return { body: normalizeText(fs.readFileSync(input, "utf8")), usedFallback: false };
+  }
+
+  const convertWithSummarize = deps.convertWithSummarize ?? (async (filePath: string) => {
+    const result = spawnSync("node", [SUMMARIZE_SCRIPT, filePath], {
+      encoding: "utf8",
+      maxBuffer: 50 * 1024 * 1024,
+    });
+
+    if (result.error) {
+      throw result.error;
+    }
+    if (result.status !== 0) {
+      throw new Error((result.stderr || "summarize conversion failed").trim());
+    }
+    return result.stdout;
+  });
+
+  try {
+    const body = normalizeText(await convertWithSummarize(input));
+    return { body, usedFallback: false };
+  } catch (error) {
+    const note = error instanceof Error ? error.message : String(error);
+    return {
+      body: `Fallback conversion used for ${path.basename(input)}. Original preserved alongside summary.\n\nNote: ${note}`,
+      usedFallback: true,
+      note,
+    };
+  }
+}
+
+async function summarizeLocalPath(input: string, kind: string, nowIso: string): Promise<{ body: string; filesWritten: string[]; stats: LocalStats }> {
   const stat = fs.statSync(input);
   if (stat.isFile()) {
-    const body = isTextLike(input)
-      ? normalizeText(fs.readFileSync(input, "utf8"))
-      : `Fallback conversion used for ${path.basename(input)}. Original preserved alongside summary.`;
-    return { body, filesWritten: [], stats: { files: 1, bytes: stat.size, depth: 1 } };
+    const converted = await convertLocalDocumentToMarkdown(input);
+    return { body: converted.body, filesWritten: [], stats: { files: 1, bytes: stat.size, depth: 1 } };
   }
 
   const maxDepth = kind === "repo" ? REPO_CAPS.depth : LOCAL_DIR_CAPS.depth;
@@ -282,7 +318,7 @@ export async function run(payload: Payload): Promise<RunnerResult> {
         return { status: "error", kind: classification.kind, reason: `Path not found: ${input}` };
       }
 
-      const summary = summarizeLocalPath(input, classification.kind, nowIso);
+      const summary = await summarizeLocalPath(input, classification.kind, nowIso);
       const confirmation = requiresConfirmationForCaps(classification.kind, summary.stats);
       if (confirmation.required && !payload.confirm) {
         return { status: "confirm", kind: classification.kind, reason: confirmation.reason };
