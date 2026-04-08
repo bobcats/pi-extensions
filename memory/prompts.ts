@@ -168,6 +168,7 @@ Audit EVERYTHING in the vault — principles, project files, cross-cutting notes
 ### Rules
 
 - Don't audit \`dream-journal.md\` itself — it's a working file, not vault content
+- Treat \`${dir}/raw/\` as read-only during dream mode. You may read raw files for context, but do not edit, delete, move, summarize, or otherwise modify them.
 - One topic per vault file. File name = topic slug.
 - Group in directories with index files using \`[[wikilinks]]\`
 - Update \`${dir}/index.md\` if files are added or removed

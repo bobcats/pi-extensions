@@ -37,6 +37,11 @@ function createHarness() {
           return { ok: true as const, apiKey: "test-key", headers: { "x-test": "1" } };
         },
       },
+      sessionManager: {
+        getBranch() {
+          return [];
+        },
+      },
       ui: {
         setTitle(nextTitle: string) {
           title = nextTitle;
@@ -76,6 +81,43 @@ test("uses getApiKeyAndHeaders and names the session", async () => {
   assert.equal(harness.sessionName, "Fix auto-name session");
   assert.equal(harness.title, "π - Fix auto-name session - project");
   assert.deepEqual(completeCall?.options, { apiKey: "test-key", headers: { "x-test": "1" }, maxTokens: 30 });
+});
+
+test("uses recent branch context in naming prompt", async () => {
+  const harness = createHarness();
+  let promptText = "";
+
+  harness.ctx.sessionManager.getBranch = () => [
+    { type: "message", message: { role: "user", content: [{ type: "text", text: "debug the auto-name extension" }] } },
+    { type: "message", message: { role: "assistant", content: [{ type: "text", text: "I found the provider error and added logging." }], stopReason: "stop" } },
+  ];
+
+  createAutoNameExtension({
+    completeFn: async (_model, context) => {
+      promptText = context.messages[0].content[0].text;
+      return {
+        role: "assistant",
+        content: [{ type: "text", text: "Debug Auto-Name Extension" }],
+      };
+    },
+  })(harness.pi);
+
+  const handler = harness.handlers.get("agent_end");
+  assert.ok(handler);
+
+  await handler(
+    {
+      messages: [
+        { role: "user", content: [{ type: "text", text: "test" }] },
+        { role: "assistant", content: [{ type: "text", text: "tail the log and paste it" }], stopReason: "stop" },
+      ],
+    },
+    harness.ctx,
+  );
+
+  assert.match(promptText, /debug the auto-name extension/);
+  assert.match(promptText, /I found the provider error and added logging\./);
+  assert.match(promptText, /tail the log and paste it/);
 });
 
 test("skips naming when auth resolution fails", async () => {
