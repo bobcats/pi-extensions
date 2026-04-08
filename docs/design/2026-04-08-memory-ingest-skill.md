@@ -93,6 +93,7 @@ Implementation should reuse existing capabilities where available (e.g., summari
 |---|---|---|---|
 | URL/article | One `.md` file with extracted content | Downloaded local images/attachments when extraction returns them | Max 1 URL per call unless user passes explicit list |
 | Local document (pdf/docx/html/txt/md) | One `.md` conversion/normalization file | Original file copied only when input is not already markdown/text | Max 1 input path per call unless explicit list |
+| Local directory (non-repo, non-dataset) | One `.md` corpus summary + per-file markdown for supported files | Supported files preserved when useful (`.md`, `.txt`, `.html`, `.pdf`, `.docx`) | Recursive up to depth 3, max 100 files, max 25 MB total processed |
 | Repo (url/path) | One `.md` repo summary (purpose, structure, key docs/files) | Key documentation files (`README*`, `/docs/**`, selected config files) | Max 200 files, max depth 4, max 25 MB total copied |
 | Dataset (url/path) | One `.md` dataset summary/preview | Source files preserved when directly retrievable | Max 50 files, max 100 MB total copied |
 | Pasted blob | One `.md` note with normalized content | N/A | Max 200 KB pasted text |
@@ -109,10 +110,15 @@ File naming convention (simple and human-readable):
 - `<yyyy-mm-dd>-<source-slug>-2.md`, etc. for collisions
 - Preserve originals/assets adjacent within `~/.pi/memories/raw/` when useful (especially repos/datasets/docs/images)
 
-Each generated markdown file begins with a minimal provenance header, e.g.:
-- `source:` original URL/path/input label
-- `ingested_at:` ISO timestamp
-- `method:` adapter/converter used
+Each generated markdown file begins with a minimal provenance header using fixed YAML front matter:
+
+```yaml
+---
+source: <original URL/path/input label>
+ingested_at: <ISO timestamp>
+method: <adapter/converter>
+---
+```
 
 No run-id directory indexing for v1.
 
