@@ -16,6 +16,12 @@ export type RunnerResult = {
   status: RunnerStatus;
   kind?: string;
   filesWritten?: string[];
+  sourceSummaries?: Array<{
+    source: string;
+    rawMarkdownPath?: string;
+    preservedAssets?: string[];
+    kind: string;
+  }>;
   question?: string;
   reason?: string;
 };
@@ -301,6 +307,7 @@ export async function run(payload: Payload): Promise<RunnerResult> {
   const nowIso = payload.nowIso ?? new Date().toISOString();
 
   const results: string[] = [];
+  const sourceSummaries: NonNullable<RunnerResult["sourceSummaries"]> = [];
   const usedNames = listExistingRawNames(rawRoot);
   for (const input of inputs) {
     const plan = planIngest(input, { nowIso, rawRoot });
@@ -330,7 +337,9 @@ export async function run(payload: Payload): Promise<RunnerResult> {
         return { status: "confirm", kind: "pasted-blob", reason: confirmation.reason };
       }
       const markdown = buildMarkdownOutput(input, plan.method, nowIso, normalizeText(input));
-      results.push(safeWriteMarkdown(rawRoot, uniqueBaseName, markdown));
+      const markdownPath = safeWriteMarkdown(rawRoot, uniqueBaseName, markdown);
+      results.push(markdownPath);
+      sourceSummaries.push({ source: input, rawMarkdownPath: markdownPath, preservedAssets: [], kind: classification.kind });
       continue;
     }
 
@@ -341,7 +350,9 @@ export async function run(payload: Payload): Promise<RunnerResult> {
       }
       const fetched = await convertUrlToMarkdown(input);
       const markdown = buildMarkdownOutput(input, plan.method, nowIso, fetched.body);
-      results.push(safeWriteMarkdown(rawRoot, uniqueBaseName, markdown));
+      const markdownPath = safeWriteMarkdown(rawRoot, uniqueBaseName, markdown);
+      results.push(markdownPath);
+      sourceSummaries.push({ source: input, rawMarkdownPath: markdownPath, preservedAssets: [], kind: classification.kind });
       continue;
     }
 
@@ -359,14 +370,26 @@ export async function run(payload: Payload): Promise<RunnerResult> {
       const originalArtifacts = collectLocalArtifacts(input, classification.kind, rawRoot, uniqueBaseName);
       const sourceNote = originalArtifacts.length > 0 ? `\n\nPreserved artifacts:\n${originalArtifacts.map((p) => `- ${p}`).join("\n")}` : "";
       const markdown = buildMarkdownOutput(input, plan.method, nowIso, summary.body + sourceNote);
-      results.push(safeWriteMarkdown(rawRoot, uniqueBaseName, markdown));
+      const markdownPath = safeWriteMarkdown(rawRoot, uniqueBaseName, markdown);
+      results.push(markdownPath);
+      sourceSummaries.push({
+        source: input,
+        rawMarkdownPath: markdownPath,
+        preservedAssets: originalArtifacts,
+        kind: classification.kind,
+      });
       continue;
     }
 
     return { status: "error", kind: classification.kind, reason: `Unsupported input: ${input}` };
   }
 
-  return { status: "ok", filesWritten: results, kind: results.length === 1 ? undefined : "batch" };
+  return {
+    status: "ok",
+    filesWritten: results,
+    sourceSummaries,
+    kind: inputs.length === 1 ? sourceSummaries[0]?.kind : "batch",
+  };
 }
 
 async function main() {
