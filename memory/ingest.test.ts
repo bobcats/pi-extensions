@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import * as assert from "node:assert";
 import {
+  buildMarkdownOutput,
   buildOutputBaseName,
   buildProvenanceFrontmatter,
   classifyIngestInput,
@@ -51,4 +52,22 @@ test("provenance uses fixed yaml frontmatter", () => {
   assert.ok(fm.includes("ingested_at:"));
   assert.ok(fm.includes("method:"));
   assert.ok(fm.endsWith("---\n\n"));
+});
+
+test("provenance quotes multiline source values", () => {
+  const fm = buildProvenanceFrontmatter("Line 1\nLine 2", "2026-04-08T00:00:00.000Z", "pasted-blob-adapter");
+
+  assert.match(fm, /^---\nsource: \|-\n  Line 1\n  Line 2\ningested_at: 2026-04-08T00:00:00.000Z\nmethod: pasted-blob-adapter\n---\n\n$/);
+});
+
+test("buildMarkdownOutput strips nested leading frontmatter from body", () => {
+  const out = buildMarkdownOutput(
+    "https://x",
+    "url-adapter",
+    "2026-04-08T00:00:00.000Z",
+    "---\ntitle: Example\n---\n\n# Heading\n\nBody",
+  );
+
+  assert.ok(out.startsWith("---\nsource: https://x\ningested_at: 2026-04-08T00:00:00.000Z\nmethod: url-adapter\n---\n\n# Heading"));
+  assert.ok(!out.includes("title: Example"));
 });

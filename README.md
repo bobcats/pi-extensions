@@ -22,7 +22,7 @@ Extensions and prompt templates for [pi](https://github.com/badlogic/pi-mono).
 
 | Skill | Purpose |
 |-------|---------|
-| [memory-ingest](./skills/memory-ingest/) | Deterministically ingest URLs, local paths, repos, datasets, and pasted text into `~/.pi/memories/raw/` |
+| [memory-ingest](./skills/memory-ingest/) | Deterministically ingest URLs, local paths, repos, datasets, and pasted text into `~/.pi/memories/raw/`, then compile them into curated notes under `~/.pi/memories/` |
 
 ## Prompt Templates
 
@@ -62,7 +62,7 @@ cd memory && npm test
 cd tldraw-desktop && npm test
 ```
 
-Skills live under `./skills/` and are packaged with the repository. For example, `/skill:memory-ingest <input>` writes markdown artifacts to `~/.pi/memories/raw/`.
+Skills live under `./skills/` and are packaged with the repository. For example, `/skill:memory-ingest <input>` writes markdown artifacts to `~/.pi/memories/raw/` and then updates curated notes in `~/.pi/memories/`.
 
 Hot-reload in a running session:
 

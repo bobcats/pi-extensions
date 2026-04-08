@@ -49,7 +49,7 @@ Check:
 - compile stage is mandatory on success
 - `log_operation(type="ingest")` now represents end-to-end success
 
-- [ ] **Step 4: Commit corrected docs**
+- [x] **Step 4: Commit corrected docs**
 
 ```bash
 git add docs/design/2026-04-08-memory-ingest-skill.md docs/plans/2026-04-08-memory-ingest-skill.md
@@ -64,7 +64,7 @@ git commit -m "docs(memory-ingest): redefine workflow as ingest plus compile"
 - Modify: `skills/memory-ingest/SKILL.md`
 - Create or Modify: skill-adjacent tests if there is an existing harness; otherwise use a deterministic shell/integration test file under `skills/memory-ingest/scripts/`
 
-- [ ] **Step 1: Add a failing test/spec for successful ingest producing a compile handoff payload**
+- [x] **Step 1: Add a failing test/spec for successful ingest producing a compile handoff payload**
 
 Test should prove the post-ingest step knows:
 - raw files written
@@ -72,19 +72,19 @@ Test should prove the post-ingest step knows:
 - source label
 - enough context to update curated notes
 
-- [ ] **Step 2: Add a failing test/spec for compile behavior expectations**
+- [x] **Step 2: Add a failing test/spec for compile behavior expectations**
 
 Expected outputs:
 - curated note updated or created under `~/.pi/memories/`
 - backlink/reference to raw source present
 - no success log before compile stage finishes
 
-- [ ] **Step 3: Run the focused test and observe failure**
+- [x] **Step 3: Run the focused test and observe failure**
 
 Run: `npx tsx --test skills/memory-ingest/scripts/ingest-runner.test.ts`
 Expected: FAIL because compile orchestration is not implemented yet.
 
-- [ ] **Step 4: Commit red tests**
+- [x] **Step 4: Commit red tests**
 
 ```bash
 git add skills/memory-ingest/scripts/ingest-runner.test.ts
@@ -99,7 +99,7 @@ git commit -m "test(memory-ingest): add compile orchestration red tests"
 - Modify: `skills/memory-ingest/scripts/ingest-runner.ts`
 - Modify: `skills/memory-ingest/scripts/ingest-runner.test.ts`
 
-- [ ] **Step 1: Extend runner result details to include compile-relevant context**
+- [x] **Step 1: Extend runner result details to include compile-relevant context**
 
 Target shape should include at least:
 
@@ -119,14 +119,14 @@ type RunnerResult = {
 };
 ```
 
-- [ ] **Step 2: Populate the new fields for all successful ingest paths**
+- [x] **Step 2: Populate the new fields for all successful ingest paths**
 
-- [ ] **Step 3: Run the focused runner tests**
+- [x] **Step 3: Run the focused runner tests**
 
 Run: `npx tsx --test skills/memory-ingest/scripts/ingest-runner.test.ts`
 Expected: PASS.
 
-- [ ] **Step 4: Commit runner handoff changes**
+- [x] **Step 4: Commit runner handoff changes**
 
 ```bash
 git add skills/memory-ingest/scripts/ingest-runner.ts skills/memory-ingest/scripts/ingest-runner.test.ts
@@ -141,7 +141,7 @@ git commit -m "feat(memory-ingest): return compile handoff details"
 - Modify: `skills/memory-ingest/SKILL.md`
 - Modify: `skills/memory-ingest/examples.md`
 
-- [ ] **Step 1: Rewrite `SKILL.md` so success requires both raw ingest and compile**
+- [x] **Step 1: Rewrite `SKILL.md` so success requires both raw ingest and compile**
 
 Must state explicitly:
 - run ingest runner first
@@ -151,7 +151,7 @@ Must state explicitly:
 - add backlinks/source references
 - only then call `log_operation(type="ingest", status="keep", ...)`
 
-- [ ] **Step 2: Define compile heuristics in the skill**
+- [x] **Step 2: Define compile heuristics in the skill**
 
 Rules:
 - prefer updating existing topic/concept notes over creating new notes
@@ -160,14 +160,14 @@ Rules:
 - update indexes only when new note families appear
 - avoid whole-vault rewrites during normal ingest
 
-- [ ] **Step 3: Update examples to show both raw and curated outcomes**
+- [x] **Step 3: Update examples to show both raw and curated outcomes**
 
 Examples should include:
 - article → raw markdown + curated concept/source summary note
 - PDF → raw conversion + preserved original + curated summary note
 - repo/dataset → raw summary + curated summary/update
 
-- [ ] **Step 4: Commit skill contract changes**
+- [x] **Step 4: Commit skill contract changes**
 
 ```bash
 git add skills/memory-ingest/SKILL.md skills/memory-ingest/examples.md
@@ -181,17 +181,17 @@ git commit -m "feat(memory-ingest): compile ingests into curated memory"
 **Files:**
 - Modify only files touched above if fixes are required
 
-- [ ] **Step 1: Run runner tests**
+- [x] **Step 1: Run runner tests**
 
 Run: `npx tsx --test skills/memory-ingest/scripts/ingest-runner.test.ts`
 Expected: PASS.
 
-- [ ] **Step 2: Run full memory tests**
+- [x] **Step 2: Run full memory tests**
 
 Run: `cd memory && npm test`
 Expected: PASS.
 
-- [ ] **Step 3: Manual acceptance test with a representative source**
+- [x] **Step 3: Manual acceptance test with a representative source**
 
 Verify all of:
 - raw artifact created in `~/.pi/memories/raw/`
@@ -199,7 +199,7 @@ Verify all of:
 - backlink/reference to raw source present
 - operation logged only after compile work completes
 
-- [ ] **Step 4: Update README to describe the corrected workflow**
+- [x] **Step 4: Update README to describe the corrected workflow**
 
 Document that `memory-ingest` updates both raw artifacts and curated memory.
 

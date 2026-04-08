@@ -93,12 +93,28 @@ export function resolveSafeRawPath(rawRoot: string, relativeTarget: string): str
   return resolved;
 }
 
+function formatYamlScalar(value: string): string {
+  if (value.includes("\n")) {
+    return `|-\n${value
+      .split("\n")
+      .map((line) => `  ${line}`)
+      .join("\n")}`;
+  }
+  return value;
+}
+
 export function buildProvenanceFrontmatter(source: string, ingestedAtIso: string, method: string): string {
-  return `---\nsource: ${source}\ningested_at: ${ingestedAtIso}\nmethod: ${method}\n---\n\n`;
+  return `---\nsource: ${formatYamlScalar(source)}\ningested_at: ${ingestedAtIso}\nmethod: ${method}\n---\n\n`;
+}
+
+function stripLeadingFrontmatter(body: string): string {
+  const trimmed = body.trim();
+  const match = trimmed.match(/^---\n[\s\S]*?\n---\n*/);
+  return match ? trimmed.slice(match[0].length).trimStart() : trimmed;
 }
 
 export function buildMarkdownOutput(source: string, method: string, ingestedAtIso: string, body: string): string {
-  const normalizedBody = body.trim();
+  const normalizedBody = stripLeadingFrontmatter(body);
   return buildProvenanceFrontmatter(source, ingestedAtIso, method) + normalizedBody + (normalizedBody.endsWith("\n") ? "" : "\n");
 }
 
