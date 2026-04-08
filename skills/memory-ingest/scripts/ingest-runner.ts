@@ -44,6 +44,22 @@ const LOCAL_DIR_CAPS = { files: 100, bytes: 25 * 1024 * 1024, depth: 3 };
 const BLOB_CAP = 200 * 1024;
 const SUMMARIZE_SCRIPT = "/Users/brian/.agents/skills/summarize/to-markdown.mjs";
 
+async function convertWithSummarize(input: string): Promise<string> {
+  const testOutput = process.env.PI_MEMORY_INGEST_TEST_SUMMARIZE_OUTPUT;
+  if (testOutput) return testOutput;
+
+  const result = spawnSync("node", [SUMMARIZE_SCRIPT, input], {
+    encoding: "utf8",
+    maxBuffer: 50 * 1024 * 1024,
+  });
+
+  if (result.error) throw result.error;
+  if (result.status !== 0) {
+    throw new Error((result.stderr || "summarize conversion failed").trim());
+  }
+  return result.stdout;
+}
+
 export function planIngest(input: string, options: { nowIso?: string; rawRoot?: string } = {}): IngestPlan {
   const nowIso = options.nowIso ?? new Date().toISOString();
   const classification = classifyIngestInput(input, (value) => {
@@ -167,23 +183,10 @@ export async function convertLocalDocumentToMarkdown(
     return { body: normalizeText(fs.readFileSync(input, "utf8")), usedFallback: false };
   }
 
-  const convertWithSummarize = deps.convertWithSummarize ?? (async (filePath: string) => {
-    const result = spawnSync("node", [SUMMARIZE_SCRIPT, filePath], {
-      encoding: "utf8",
-      maxBuffer: 50 * 1024 * 1024,
-    });
-
-    if (result.error) {
-      throw result.error;
-    }
-    if (result.status !== 0) {
-      throw new Error((result.stderr || "summarize conversion failed").trim());
-    }
-    return result.stdout;
-  });
+  const summarize = deps.convertWithSummarize ?? convertWithSummarize;
 
   try {
-    const body = normalizeText(await convertWithSummarize(input));
+    const body = normalizeText(await summarize(input));
     return { body, usedFallback: false };
   } catch (error) {
     const note = error instanceof Error ? error.message : String(error);
@@ -218,6 +221,16 @@ async function summarizeLocalPath(input: string, kind: string, nowIso: string): 
     bodyLines.push(`- ${file.rel}`);
   }
   if (files.length === 0) bodyLines.push("- (no supported files found)");
+
+  const convertibleFiles = files.filter((file) => /\.(pdf|docx?|html?)$/i.test(file.path)).slice(0, 20);
+  if (convertibleFiles.length > 0) {
+    bodyLines.push("", "## Converted document excerpts");
+    for (const file of convertibleFiles) {
+      const converted = await convertLocalDocumentToMarkdown(file.path);
+      bodyLines.push(`### ${file.rel}`, "", converted.body.slice(0, 4000), "");
+    }
+  }
+
   return { body: bodyLines.join("\n"), filesWritten: [], stats: { files: files.length, bytes: totalBytes, depth: actualDepth } };
 }
 
@@ -243,6 +256,25 @@ function collectLocalArtifacts(input: string, kind: string, rawRoot: string, bas
     written.push(dest);
   }
   return written;
+}
+
+export async function convertUrlToMarkdown(
+  input: string,
+  deps: { convertWithSummarize?: (input: string) => Promise<string> } = {},
+): Promise<{ body: string; usedFallback: boolean; note?: string }> {
+  const summarize = deps.convertWithSummarize ?? convertWithSummarize;
+
+  try {
+    const body = normalizeText(await summarize(input));
+    return { body, usedFallback: false };
+  } catch (error) {
+    const fetched = await fetchUrlText(input);
+    return {
+      body: fetched.body,
+      usedFallback: true,
+      note: error instanceof Error ? error.message : String(error),
+    };
+  }
 }
 
 async function fetchUrlText(url: string): Promise<{ body: string; note?: string }> {
@@ -307,7 +339,7 @@ export async function run(payload: Payload): Promise<RunnerResult> {
       if (confirmation.required && !payload.confirm) {
         return { status: "confirm", kind: "url", reason: confirmation.reason };
       }
-      const fetched = await fetchUrlText(input);
+      const fetched = await convertUrlToMarkdown(input);
       const markdown = buildMarkdownOutput(input, plan.method, nowIso, fetched.body);
       results.push(safeWriteMarkdown(rawRoot, uniqueBaseName, markdown));
       continue;

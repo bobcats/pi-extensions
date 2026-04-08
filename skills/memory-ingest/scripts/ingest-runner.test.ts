@@ -6,6 +6,7 @@ import * as path from "node:path";
 import {
   buildWriteTargets,
   convertLocalDocumentToMarkdown,
+  convertUrlToMarkdown,
   planIngest,
   requiresConfirmationForCaps,
   run,
@@ -77,4 +78,56 @@ test("convertLocalDocumentToMarkdown falls back when summarize conversion fails"
   assert.match(result.body, /Fallback conversion used/);
   assert.match(result.body, /uvx markitdown failed/);
   assert.strictEqual(result.usedFallback, true);
+});
+
+test("convertUrlToMarkdown uses summarize conversion first", async () => {
+  let calledWith: string | null = null;
+
+  // Act
+  const result = await convertUrlToMarkdown("https://example.com/post", {
+    convertWithSummarize: async (input) => {
+      calledWith = input;
+      return "# Converted URL\n\nBody";
+    },
+  });
+
+  // Assert
+  assert.strictEqual(calledWith, "https://example.com/post");
+  assert.strictEqual(result.body, "# Converted URL\n\nBody");
+  assert.strictEqual(result.usedFallback, false);
+});
+
+test("directory ingest converts contained pdf documents", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "memory-ingest-dir-"));
+  const sourceDir = path.join(root, "source");
+  const rawRoot = path.join(root, "raw");
+  fs.mkdirSync(sourceDir, { recursive: true });
+  fs.writeFileSync(path.join(sourceDir, "guide.pdf"), "fake pdf", "utf8");
+
+  const originalSpawnSync = process.env.PI_MEMORY_INGEST_TEST_SUMMARIZE_OUTPUT;
+  process.env.PI_MEMORY_INGEST_TEST_SUMMARIZE_OUTPUT = "# Converted PDF\n\nDirectory body";
+
+  try {
+    // Act
+    const result = await run({
+      inputs: [sourceDir],
+      confirm: false,
+      rawRoot,
+      nowIso: "2026-04-08T00:00:00.000Z",
+    });
+
+    // Assert
+    assert.strictEqual(result.status, "ok");
+    const markdownPath = result.filesWritten?.[0];
+    assert.ok(markdownPath);
+    const markdown = fs.readFileSync(markdownPath!, "utf8");
+    assert.match(markdown, /Converted PDF/);
+    assert.match(markdown, /guide\.pdf/);
+  } finally {
+    if (originalSpawnSync === undefined) {
+      delete process.env.PI_MEMORY_INGEST_TEST_SUMMARIZE_OUTPUT;
+    } else {
+      process.env.PI_MEMORY_INGEST_TEST_SUMMARIZE_OUTPUT = originalSpawnSync;
+    }
+  }
 });
