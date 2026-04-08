@@ -1,7 +1,7 @@
 ---
 name: worker
 description: General-purpose subagent with full capabilities, isolated context
-model: claude-sonnet-4-5
+model: openai-codex/gpt-5.3-codex
 spawning: false
 ---
 
