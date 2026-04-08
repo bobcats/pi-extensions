@@ -61,7 +61,7 @@ function createHarness() {
       modelRegistry: {
         find(provider: string, modelId: string) {
           findCalls += 1;
-          return provider === "anthropic" && modelId === "claude-sonnet-4-5"
+          return provider === "openai-codex" && modelId === "gpt-5.3-codex"
             ? { provider, id: modelId }
             : null;
         },
@@ -224,7 +224,7 @@ test("aborts when user denies overwrite of editor text", async () => {
   assert.equal(harness.customCallCount, 0);
 });
 
-test("falls back to ctx.model when Sonnet is missing from registry", async () => {
+test("falls back to ctx.model when preferred summary model is missing from registry", async () => {
   const harness = createHarness();
   harness.ctx.sessionManager.getBranch = nonEmptyBranch;
   harness.ctx.modelRegistry.find = () => null;
@@ -239,11 +239,11 @@ test("falls back to ctx.model when Sonnet is missing from registry", async () =>
   );
 });
 
-test("falls back to ctx.model when Sonnet auth fails", async () => {
+test("falls back to ctx.model when preferred summary model auth fails", async () => {
   const harness = createHarness();
   harness.ctx.sessionManager.getBranch = nonEmptyBranch;
   harness.ctx.modelRegistry.getApiKeyAndHeaders = async (model: any) => {
-    if (model.provider === "anthropic") return { ok: false as const, error: "no key" };
+    if (model.provider === "openai-codex") return { ok: false as const, error: "no key" };
     return { ok: true as const, apiKey: "fallback-key", headers: { "x-test": "1" } };
   };
   harness.setCustomResult("- summary text");
@@ -257,7 +257,7 @@ test("falls back to ctx.model when Sonnet auth fails", async () => {
   );
 });
 
-test("happy path: Sonnet available, generates summary, switches session, prefills editor", async () => {
+test("happy path: preferred summary model available, generates summary, switches session, prefills editor", async () => {
   const harness = createHarness();
   harness.ctx.sessionManager.getBranch = nonEmptyBranch;
   harness.setCustomResult("- I already fixed auth.\n- Continue in auth/service.ts");
@@ -368,7 +368,7 @@ test("generateHandoffSummary uses the system prompt and serialized conversation"
         stopReason: "stop",
       };
     },
-    model: { provider: "anthropic", id: "claude-sonnet-4-5" },
+    model: { provider: "openai-codex", id: "gpt-5.3-codex" },
     apiKey: "test-key",
     headers: { "x-test": "1" },
     messages: [{ role: "user", content: [{ type: "text", text: "Continue the auth cleanup" }] }],
@@ -388,7 +388,7 @@ test("generateHandoffSummary uses the system prompt and serialized conversation"
   assert.deepEqual(completeCalls[0].options, { apiKey: "test-key", headers: { "x-test": "1" }, signal: undefined });
 });
 
-test("prefers the configured Sonnet summary model id first", async () => {
+test("prefers the configured summary model id first", async () => {
   const lookups: Array<[string, string]> = [];
   const harness = createHarness();
   harness.ctx.sessionManager.getBranch = nonEmptyBranch;
@@ -399,7 +399,7 @@ test("prefers the configured Sonnet summary model id first", async () => {
   createHandoffExtension()(harness.pi);
   const cmd = harness.commandMap.get("handoff");
   await cmd.handler("continue the auth work", harness.ctx);
-  assert.deepEqual(lookups[0], ["anthropic", "claude-sonnet-4-6"]);
+  assert.deepEqual(lookups[0], ["openai-codex", "gpt-5.3-codex"]);
 });
 
 test("notifies when no usable model credentials are available", async () => {

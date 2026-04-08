@@ -262,8 +262,8 @@ export async function generateHandoffSummary(params: {
 
 export function createHandoffExtension(deps: HandoffDeps = {}) {
   const completeFn = deps.completeFn ?? complete;
-  const SUMMARY_PROVIDER = deps.summaryProvider ?? "anthropic";
-  const SUMMARY_MODEL = deps.summaryModel ?? "claude-sonnet-4-6";
+  const SUMMARY_PROVIDER = deps.summaryProvider ?? "openai-codex";
+  const SUMMARY_MODEL = deps.summaryModel ?? "gpt-5.3-codex";
 
   return function handoff(pi: ExtensionAPI) {
     pi.registerCommand("handoff", {

@@ -39,9 +39,9 @@ Examples:
 
 ## Model selection
 
-Prefers `anthropic/claude-sonnet-4-6` for summary generation. Falls back silently to `ctx.model` (the current session's model) if Sonnet is not in the registry or lacks credentials. If neither model has usable credentials, the command emits an error and returns.
+Prefers `openai-codex/gpt-5.3-codex` for summary generation. Falls back silently to `ctx.model` (the current session's model) if that model is not in the registry or lacks credentials. If neither model has usable credentials, the command emits an error and returns.
 
-Sonnet is preferred because summary generation is an ancillary task — Sonnet's extraction quality on dense long conversations is materially better than Haiku's, and using Opus for it is wasteful.
+`gpt-5.3-codex` is preferred because summary generation is an ancillary task and this model provides a good quality/cost tradeoff for extracting concise handoff context.
 
 ## Parent session tracking
 
