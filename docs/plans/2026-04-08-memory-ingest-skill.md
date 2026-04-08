@@ -1,624 +1,220 @@
 # Memory Ingest Skill Implementation Plan
 
-> REQUIRED: Use the `executing-plans` skill to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
+> REQUIRED: Use the `executing-plans` skill to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add a packaged `/skill:memory-ingest` workflow that deterministically classifies freeform input, ingests supported sources into `~/.pi/memories/raw/`, and logs ingest outcomes via existing memory operations.
+**Goal:** Make `/skill:memory-ingest` a single end-to-end workflow that ingests source material into `~/.pi/memories/raw/` and immediately compiles it into curated notes under `~/.pi/memories/`.
 
-**Architecture:** Put deterministic logic in testable TypeScript modules (`memory/ingest.ts` for classification/naming/safety/frontmatter and `skills/memory-ingest/scripts/ingest-runner.ts` for adapter execution and cap enforcement). The packaged skill delegates execution to the runner and follows fail-safe clarification rules. The memory extension only adds `ingest` as a valid operation type for `log_operation`.
+**Architecture:** Keep deterministic acquisition logic in the ingest runner, but make the packaged skill orchestrate a second compile stage that reads newly written raw artifacts and updates the brain/wiki incrementally. Raw ingest stays testable and safe; synthesis/backlinks/index updates are performed in the same skill invocation.
 
-**Tech Stack:** TypeScript, Node.js fs/path/url APIs, pi packaged skills (`SKILL.md`), pi extension API, `tsx --test`
-
-**Dependency policy (resolved):** Soft dependencies with explicit fallback behavior. If a preferred converter/tool is unavailable, ingest must still produce a markdown artifact with provenance + clear degradation notes, and must not fail silently.
+**Tech Stack:** TypeScript, Node.js fs/path/url APIs, pi packaged skills (`SKILL.md`), existing memory extension tools, `tsx --test`
 
 ---
 
 ## Scope check
 
-- Single subsystem only: **source ingestion into memory raw store**.
-- Explicitly excluded: compile/Q&A/lint pipelines.
+- Single subsystem only: **end-to-end memory ingestion (raw ingest + immediate compile)**.
+- Explicitly excluded: independent ask/lint products, whole-vault reorganization, standalone compile UX.
 
 ## File structure map
 
-### Create
-- `memory/ingest.ts` — pure helpers: classify input, classify local paths, slug/date naming, collision handling, raw-root path guard, provenance frontmatter formatter.
-- `memory/ingest.test.ts` — exhaustive unit tests for all required source classes and safety constraints.
-- `skills/memory-ingest/scripts/ingest-runner.ts` — executable ingest adapters (url, local-document, local-directory, repo, dataset, pasted-blob), cap checks, confirmation prompts, file writes.
-- `skills/memory-ingest/scripts/ingest-runner.test.ts` — adapter tests (including cap overflow and confirmation behavior).
-- `skills/memory-ingest/SKILL.md` — packaged skill instructions that call ingest runner and enforce fail-safe behavior.
-- `skills/memory-ingest/examples.md` — deterministic examples and expected outcomes.
-
 ### Modify
-- `package.json` — add `pi.skills` entry for packaged skill discovery.
-- `README.md` — document packaged skill.
-- `memory/types.ts` — add `ingest` operation type.
-- `memory/index.ts` — allow `log_operation(type="ingest")`.
-- `memory/prompts.test.ts` — add ingest operation parsing/rendering test.
+- `skills/memory-ingest/SKILL.md` — change contract from raw-only to ingest+compile orchestration.
+- `skills/memory-ingest/examples.md` — update examples to include curated-note outcomes.
+- `skills/memory-ingest/scripts/ingest-runner.ts` — if needed, return richer structured output for compile handoff.
+- `skills/memory-ingest/scripts/ingest-runner.test.ts` — cover richer handoff output if runner changes.
+- `memory/ingest.ts` — shared helpers for normalized markdown output if compile-facing cleanup is needed.
+- `README.md` — document that `memory-ingest` updates raw and curated memory.
+- `docs/design/2026-04-08-memory-ingest-skill.md` — keep aligned with shipped behavior.
+
+### Create (only if needed)
+- `docs/acceptance/2026-04-08-memory-ingest-compile-checklist.md` — manual checklist if compile behavior needs explicit operator review.
 
 ---
 
-### Task 1: Write ingest core tests first (RED)
+### Task 1: Lock the corrected workflow contract in docs first
 
 **Files:**
-- Create: `memory/ingest.test.ts`
-- Test: `memory/ingest.test.ts`
+- Modify: `docs/design/2026-04-08-memory-ingest-skill.md`
+- Modify: `docs/plans/2026-04-08-memory-ingest-skill.md`
 
-- [x] **Step 1: Add failing tests for all top-level source classes**
+- [x] **Step 1: Update the design doc to state that `memory-ingest` always performs raw ingest and immediate compile**
 
-```ts
-import { test } from "node:test";
-import * as assert from "node:assert";
-import { classifyIngestInput } from "./ingest.ts";
+- [x] **Step 2: Update the plan file to replace raw-only scope with ingest+compile scope**
 
-test("classifyIngestInput: url", () => {
-  const r = classifyIngestInput("https://example.com/x");
-  assert.deepStrictEqual({ kind: r.kind, ambiguous: r.ambiguous }, { kind: "url", ambiguous: false });
-});
+- [x] **Step 3: Review both docs for consistency**
 
-test("classifyIngestInput: pasted blob", () => {
-  const r = classifyIngestInput("Line 1\nLine 2\nLine 3");
-  assert.strictEqual(r.kind, "pasted-blob");
-});
-```
+Check:
+- one entrypoint
+- raw stage is internal, not terminal
+- compile stage is mandatory on success
+- `log_operation(type="ingest")` now represents end-to-end success
 
-- [x] **Step 2: Add failing tests for local path classification**
-
-```ts
-import { classifyLocalPath } from "./ingest.ts";
-
-test("classifyLocalPath: local document", () => {
-  assert.strictEqual(classifyLocalPath("/tmp/paper.pdf", false, true), "local-document");
-});
-
-test("classifyLocalPath: local directory", () => {
-  assert.strictEqual(classifyLocalPath("/tmp/corpus", true, false), "local-directory");
-});
-```
-
-- [x] **Step 3: Add failing ambiguity tests (fail-safe behavior)**
-
-```ts
-test("ambiguous token requires clarification", () => {
-  const r = classifyIngestInput("project-alpha");
-  assert.strictEqual(r.ambiguous, true);
-  assert.ok(r.reason?.includes("clarify"));
-});
-```
-
-- [x] **Step 4: Add failing naming and collision tests**
-
-```ts
-import { buildOutputBaseName } from "./ingest.ts";
-
-test("collision suffix increments", () => {
-  const out = buildOutputBaseName("2026-04-08", "paper", new Set(["2026-04-08-paper.md", "2026-04-08-paper-2.md"]));
-  assert.strictEqual(out, "2026-04-08-paper-3");
-});
-```
-
-- [x] **Step 5: Add failing raw-root safety tests**
-
-```ts
-import { resolveSafeRawPath } from "./ingest.ts";
-
-test("rejects traversal", () => {
-  assert.throws(() => resolveSafeRawPath("/home/u/.pi/memories/raw", "../oops.md"), /outside raw root/);
-});
-```
-
-- [x] **Step 6: Add failing provenance frontmatter format test**
-
-```ts
-import { buildProvenanceFrontmatter } from "./ingest.ts";
-
-test("provenance uses fixed yaml frontmatter", () => {
-  const fm = buildProvenanceFrontmatter("https://x", "2026-04-08T00:00:00.000Z", "url-adapter");
-  assert.ok(fm.startsWith("---\nsource:"));
-  assert.ok(fm.includes("ingested_at:"));
-  assert.ok(fm.includes("method:"));
-  assert.ok(fm.endsWith("---\n\n"));
-});
-```
-
-- [x] **Step 7: Run red tests**
-
-Run: `cd memory && npm test -- ingest.test.ts`
-Expected: FAIL (missing `memory/ingest.ts` exports).
-
-- [x] **Step 8: Commit red tests**
+- [ ] **Step 4: Commit corrected docs**
 
 ```bash
-git add memory/ingest.test.ts
-git commit -m "test(memory): add ingest core red tests for classification naming and safety"
+git add docs/design/2026-04-08-memory-ingest-skill.md docs/plans/2026-04-08-memory-ingest-skill.md
+git commit -m "docs(memory-ingest): redefine workflow as ingest plus compile"
 ```
 
 ---
 
-### Task 2: Implement ingest core helpers (GREEN)
+### Task 2: Write failing tests for compile-stage orchestration (RED)
 
 **Files:**
-- Create: `memory/ingest.ts`
-- Test: `memory/ingest.test.ts`
+- Modify: `skills/memory-ingest/SKILL.md`
+- Create or Modify: skill-adjacent tests if there is an existing harness; otherwise use a deterministic shell/integration test file under `skills/memory-ingest/scripts/`
 
-- [x] **Step 1: Implement explicit source-kind and result types**
+- [ ] **Step 1: Add a failing test/spec for successful ingest producing a compile handoff payload**
 
-```ts
-export type IngestKind =
-  | "url"
-  | "local-document"
-  | "local-directory"
-  | "repo"
-  | "dataset"
-  | "pasted-blob"
-  | "unknown";
+Test should prove the post-ingest step knows:
+- raw files written
+- source kind
+- source label
+- enough context to update curated notes
 
-export interface ClassificationResult {
-  kind: IngestKind;
-  ambiguous: boolean;
-  reason?: string;
-}
-```
+- [ ] **Step 2: Add a failing test/spec for compile behavior expectations**
 
-- [x] **Step 2: Implement `classifyIngestInput` with local-path detection hook (no placeholders)**
+Expected outputs:
+- curated note updated or created under `~/.pi/memories/`
+- backlink/reference to raw source present
+- no success log before compile stage finishes
 
-```ts
-export function classifyIngestInput(
-  input: string,
-  inspectLocalPath?: (value: string) => { exists: boolean; isFile: boolean; isDirectory: boolean }
-): ClassificationResult {
-  const value = input.trim();
-  if (!value) return { kind: "unknown", ambiguous: true, reason: "Empty input; clarify source." };
-  if (/^https?:\/\//i.test(value)) {
-    if (/\.(csv|parquet|jsonl?|tsv|zip)(\?|#|$)/i.test(value)) return { kind: "dataset", ambiguous: false };
-    if (/github\.com\//i.test(value) || /\.git(\?|#|$)/i.test(value)) return { kind: "repo", ambiguous: false };
-    return { kind: "url", ambiguous: false };
-  }
-  if (value.includes("\n") || value.length > 280) return { kind: "pasted-blob", ambiguous: false };
-  if (/^(git@|ssh:\/\/git@)/i.test(value) || /\.git$/i.test(value)) return { kind: "repo", ambiguous: false };
-
-  if (inspectLocalPath) {
-    const p = inspectLocalPath(value);
-    if (p.exists) return { kind: classifyLocalPath(value, p.isDirectory, p.isFile), ambiguous: false };
-  }
-
-  return { kind: "unknown", ambiguous: true, reason: "Unable to classify safely; clarify source type." };
-}
-```
-
-- [x] **Step 3: Implement local-path classifier + naming helpers (fail-safe, ambiguity-first)**
-
-```ts
-export function classifyLocalPath(pathLike: string, isDirectory: boolean, isFile: boolean): IngestKind {
-  if (isFile) {
-    if (/\.(csv|parquet|jsonl?|tsv|zip)$/i.test(pathLike)) return "dataset";
-    return "local-document";
-  }
-
-  if (isDirectory) {
-    // Deterministic repo signal only
-    if (fs.existsSync(path.join(pathLike, ".git"))) return "repo";
-    // Deterministic dataset signal only
-    if (fs.existsSync(path.join(pathLike, "dataset.yaml")) || fs.existsSync(path.join(pathLike, "dataset.json"))) return "dataset";
-    // Otherwise treat as generic local directory (not repo/dataset)
-    return "local-directory";
-  }
-
-  return "unknown";
-}
-
-// In runner: if directory intent is unclear and would materially change adapter choice,
-// return status:"clarify" instead of guessing.
-
-export function buildOutputBaseName(date: string, sourceSlug: string, existing: Set<string>): string {
-  let i = 1;
-  let candidate = `${date}-${sourceSlug}`;
-  while (existing.has(`${candidate}.md`)) {
-    i += 1;
-    candidate = `${date}-${sourceSlug}-${i}`;
-  }
-  return candidate;
-}
-```
-
-- [x] **Step 4: Implement raw-root safety + provenance formatter**
-
-```ts
-import * as path from "node:path";
-
-export function resolveSafeRawPath(rawRoot: string, relativeTarget: string): string {
-  const root = path.resolve(rawRoot);
-  const resolved = path.resolve(root, relativeTarget);
-  if (resolved !== root && !resolved.startsWith(root + path.sep)) {
-    throw new Error("Target path is outside raw root");
-  }
-  return resolved;
-}
-
-export function buildProvenanceFrontmatter(source: string, ingestedAtIso: string, method: string): string {
-  return `---\nsource: ${source}\ningested_at: ${ingestedAtIso}\nmethod: ${method}\n---\n\n`;
-}
-```
-
-- [x] **Step 5: Run ingest core tests**
-
-Run: `cd memory && npm test -- ingest.test.ts`
-Expected: PASS.
-
-- [x] **Step 6: Commit green ingest core**
-
-```bash
-git add memory/ingest.ts memory/ingest.test.ts
-git commit -m "feat(memory): add ingest core classification naming safety and frontmatter helpers"
-```
-
----
-
-### Task 3: Write ingest runner adapter tests first (RED)
-
-**Files:**
-- Create: `skills/memory-ingest/scripts/ingest-runner.test.ts`
-- Test: `skills/memory-ingest/scripts/ingest-runner.test.ts`
-
-- [x] **Step 1: Add failing tests for adapter routing**
-
-```ts
-import { test } from "node:test";
-import * as assert from "node:assert";
-import { planIngest } from "./ingest-runner.ts";
-
-test("planIngest routes url to url adapter", () => {
-  const p = planIngest("https://example.com/post", { nowIso: "2026-04-08T00:00:00.000Z" });
-  assert.strictEqual(p.kind, "url");
-  assert.strictEqual(p.method, "url-adapter");
-});
-```
-
-- [x] **Step 2: Add failing tests for cap confirmation requirements**
-
-```ts
-import { requiresConfirmationForCaps } from "./ingest-runner.ts";
-
-test("repo over cap requires confirmation", () => {
-  const r = requiresConfirmationForCaps("repo", { files: 250, bytes: 10_000_000, depth: 3 });
-  assert.strictEqual(r.required, true);
-});
-```
-
-- [x] **Step 3: Add failing tests for write boundary enforcement**
-
-```ts
-import { buildWriteTargets } from "./ingest-runner.ts";
-
-test("write targets stay under raw root", () => {
-  const t = buildWriteTargets("/home/u/.pi/memories/raw", "2026-04-08-paper");
-  assert.ok(t.markdownPath.startsWith("/home/u/.pi/memories/raw/"));
-});
-```
-
-- [x] **Step 4: Run red runner tests**
+- [ ] **Step 3: Run the focused test and observe failure**
 
 Run: `npx tsx --test skills/memory-ingest/scripts/ingest-runner.test.ts`
-Expected: FAIL (missing `ingest-runner.ts`).
+Expected: FAIL because compile orchestration is not implemented yet.
 
-- [x] **Step 5: Commit red runner tests**
+- [ ] **Step 4: Commit red tests**
 
 ```bash
 git add skills/memory-ingest/scripts/ingest-runner.test.ts
-git commit -m "test(memory-ingest): add ingest runner red tests for routing caps and path safety"
+git commit -m "test(memory-ingest): add compile orchestration red tests"
 ```
 
 ---
 
-### Task 4: Implement ingest runner adapters and wiring (GREEN)
+### Task 3: Enrich runner output for compile handoff (GREEN)
 
 **Files:**
-- Create: `skills/memory-ingest/scripts/ingest-runner.ts`
+- Modify: `skills/memory-ingest/scripts/ingest-runner.ts`
 - Modify: `skills/memory-ingest/scripts/ingest-runner.test.ts`
-- Modify: `memory/ingest.ts` (only if additional exports are required)
 
-- [x] **Step 1: Implement explicit runner CLI contract**
+- [ ] **Step 1: Extend runner result details to include compile-relevant context**
 
-`ingest-runner.ts` accepts JSON payload only (single canonical API) for deterministic single-vs-list handling and confirmation replay:
-
-```bash
-npx tsx skills/memory-ingest/scripts/ingest-runner.ts '{"inputs":["https://example.com"],"confirm":false}'
-```
-
-For confirmation replay, same payload with `confirm:true`:
-
-```bash
-npx tsx skills/memory-ingest/scripts/ingest-runner.ts '{"inputs":["https://example.com","https://example.com/2"],"confirm":true}'
-```
-
-Output JSON schema:
+Target shape should include at least:
 
 ```ts
 type RunnerResult = {
   status: "ok" | "clarify" | "confirm" | "error";
   kind?: string;
   filesWritten?: string[];
+  sourceSummaries?: Array<{
+    source: string;
+    rawMarkdownPath?: string;
+    preservedAssets?: string[];
+    kind: string;
+  }>;
   question?: string;
   reason?: string;
 };
 ```
 
-- [x] **Step 2: Wire runner planner to `classifyIngestInput(..., inspectLocalPath)`**
+- [ ] **Step 2: Populate the new fields for all successful ingest paths**
 
-```ts
-const c = classifyIngestInput(input, (v) => {
-  const s = fs.existsSync(v) ? fs.statSync(v) : null;
-  return { exists: !!s, isFile: !!s?.isFile(), isDirectory: !!s?.isDirectory() };
-});
-```
-
-- [x] **Step 3: Implement full cap/confirmation rules (all required source types)**
-
-Rules to encode and test:
-- URL: max 1 unless explicit list (`inputs` array length > 1)
-- Local document: max 1 unless explicit list (`inputs` array length > 1)
-- Local directory: depth <= 3, files <= 100, bytes <= 25MB
-- Repo: depth <= 4, files <= 200, bytes <= 25MB
-- Dataset: files <= 50, bytes <= 100MB
-- Pasted blob: <= 200KB
-
-If a cap is exceeded and `confirm:false`, return `status:"confirm"` with reason.
-If user replays same payload with `confirm:true`, proceed.
-
-- [x] **Step 4: Implement URL adapter + test**
-
-Implementation target:
-- fetch/convert URL content to markdown body using preferred extractor
-- if extractor unavailable/fails, write markdown artifact with provenance + explicit fallback note
-- write `<date>-<slug>.md` with provenance header
-- optionally preserve downloaded assets under `<date>-<slug>.assets/`
-
-Test target:
-- successful URL ingest writes markdown + frontmatter
-- extractor-unavailable path still writes markdown with degradation note
-- second URL in non-list mode returns `status: "confirm"`
-
-- [x] **Step 5: Implement local-document adapter + test**
-
-Implementation target:
-- convert document/text to markdown using preferred converter(s)
-- if converter unavailable/fails, write markdown artifact with fallback note and preserve original
-- preserve original if not plain markdown/text
-- write markdown artifact always
-
-Test target:
-- `.pdf` input writes markdown + preserves source copy
-- converter-unavailable path still writes markdown with degradation note
-- `.md` input writes markdown artifact without redundant copy requirement
-
-- [x] **Step 6: Implement local-directory adapter + test**
-
-Implementation target:
-- recurse supported files (`.md`, `.txt`, `.html`, `.pdf`, `.docx`) up to caps
-- produce corpus summary markdown + per-file markdown artifacts
-- if preferred conversion tooling is unavailable for any file, still emit markdown artifact(s) with degradation note(s)
-
-Test target:
-- over-cap directory returns `status: "confirm"`
-- successful ingest writes corpus summary markdown with frontmatter
-- tooling-unavailable path still writes markdown with degradation note
-
-- [x] **Step 7: Implement repo adapter + test**
-
-Implementation target:
-- generate repo summary markdown
-- preserve key docs (`README*`, `docs/**`, selected config files)
-- if preferred repo tooling is unavailable, still emit markdown artifact with explicit degradation note
-
-Test target:
-- repo fixture writes summary markdown + key docs copy
-- tooling-unavailable path still writes markdown with degradation note
-- over-cap repo returns `status: "confirm"`
-
-- [x] **Step 8: Implement dataset adapter + test**
-
-Implementation target:
-- generate dataset summary/preview markdown
-- preserve retrievable dataset artifacts
-- if preview tooling unavailable, emit markdown with schema/filename fallback summary
-
-Test target:
-- dataset fixture writes preview markdown + preserved artifact
-- tooling-unavailable path still writes markdown with degradation note
-- over-cap dataset returns `status: "confirm"`
-
-- [x] **Step 9: Implement pasted-blob adapter + test**
-
-Implementation target:
-- write normalized markdown note with provenance frontmatter
-
-Test target:
-- >200KB returns `status: "confirm"`
-- valid blob writes markdown
-
-- [x] **Step 10: Implement shared write-target builder + markdown emitter**
-
-```ts
-export function buildWriteTargets(rawRoot: string, baseName: string) {
-  return {
-    markdownPath: resolveSafeRawPath(rawRoot, `${baseName}.md`),
-    assetsDir: resolveSafeRawPath(rawRoot, `${baseName}.assets`),
-  };
-}
-
-export function buildMarkdownOutput(source: string, method: string, ingestedAtIso: string, body: string): string {
-  return buildProvenanceFrontmatter(source, ingestedAtIso, method) + body.trim() + "\n";
-}
-```
-
-- [x] **Step 11: Run runner tests**
+- [ ] **Step 3: Run the focused runner tests**
 
 Run: `npx tsx --test skills/memory-ingest/scripts/ingest-runner.test.ts`
-Expected: PASS, including per-source adapter and cap-confirmation coverage.
-
-- [x] **Step 12: Commit ingest runner implementation**
-
-```bash
-git add skills/memory-ingest/scripts/ingest-runner.ts skills/memory-ingest/scripts/ingest-runner.test.ts memory/ingest.ts
-git commit -m "feat(memory-ingest): implement source adapters with cap-confirmation and safe raw writes"
-```
-
----
-
-### Task 5: Integrate `ingest` operation type in memory extension
-
-**Files:**
-- Modify: `memory/types.ts`
-- Modify: `memory/index.ts`
-- Modify: `memory/prompts.test.ts`
-- Test: `memory/prompts.test.ts`
-
-- [x] **Step 1: Add `ingest` to `OperationType` union**
-
-```ts
-export type OperationType = "reflect" | "ruminate" | "dream" | "ingest";
-```
-
-- [x] **Step 2: Update `LogOperationParams` enum in `memory/index.ts`**
-
-```ts
-type: StringEnum(["reflect", "ruminate", "dream", "ingest"] as const, {
-  description: "What kind of memory operation was performed",
-}),
-```
-
-- [x] **Step 3: Add ingest operation parse test in `memory/prompts.test.ts`**
-
-```ts
-test("parseOperationsJSONL parses ingest operations", () => {
-  const ops = parseOperationsJSONL(JSON.stringify({ operationType: "ingest", status: "keep", description: "ingested", timestamp: 1 }));
-  assert.strictEqual(ops[0].type, "ingest");
-});
-```
-
-- [x] **Step 4: Run targeted memory tests**
-
-Run: `cd memory && npm test -- prompts.test.ts`
 Expected: PASS.
 
-- [x] **Step 5: Commit operation-type integration**
+- [ ] **Step 4: Commit runner handoff changes**
 
 ```bash
-git add memory/types.ts memory/index.ts memory/prompts.test.ts
-git commit -m "feat(memory): allow ingest operation logging"
+git add skills/memory-ingest/scripts/ingest-runner.ts skills/memory-ingest/scripts/ingest-runner.test.ts
+git commit -m "feat(memory-ingest): return compile handoff details"
 ```
 
 ---
 
-### Task 6: Package and document `/skill:memory-ingest`
+### Task 4: Implement compile-stage orchestration in the packaged skill
 
 **Files:**
-- Create: `skills/memory-ingest/SKILL.md`
-- Create: `skills/memory-ingest/examples.md`
-- Modify: `package.json`
-- Modify: `README.md`
+- Modify: `skills/memory-ingest/SKILL.md`
+- Modify: `skills/memory-ingest/examples.md`
 
-- [x] **Step 1: Author `SKILL.md` to invoke the runner script**
+- [ ] **Step 1: Rewrite `SKILL.md` so success requires both raw ingest and compile**
 
-Must include valid skill frontmatter at top:
+Must state explicitly:
+- run ingest runner first
+- on `ok`, read the newly written raw artifact(s)
+- inspect existing vault notes relevant to the topic
+- update/create curated notes under `~/.pi/memories/`
+- add backlinks/source references
+- only then call `log_operation(type="ingest", status="keep", ...)`
 
-```yaml
----
-name: memory-ingest
-description: Ingest heterogeneous knowledge sources into ~/.pi/memories/raw/ using deterministic routing and fail-safe clarification.
----
-```
+- [ ] **Step 2: Define compile heuristics in the skill**
 
-Must include explicit execution call (JSON payload only):
+Rules:
+- prefer updating existing topic/concept notes over creating new notes
+- create a source-summary note only when there is no obvious destination
+- preserve traceability to raw source note
+- update indexes only when new note families appear
+- avoid whole-vault rewrites during normal ingest
 
-```bash
-npx tsx skills/memory-ingest/scripts/ingest-runner.ts '{"inputs":["<user input>"],"confirm":false}'
-```
+- [ ] **Step 3: Update examples to show both raw and curated outcomes**
 
-For cap/size/list confirmations, skill must ask the user, then replay with:
+Examples should include:
+- article → raw markdown + curated concept/source summary note
+- PDF → raw conversion + preserved original + curated summary note
+- repo/dataset → raw summary + curated summary/update
 
-```bash
-npx tsx skills/memory-ingest/scripts/ingest-runner.ts '{"inputs":["..."],"confirm":true}'
-```
-
-And explicit rules:
-- ambiguity => ask clarification, stop
-- write only under `~/.pi/memories/raw/`
-- enforce source caps + confirmation policy
-- apply soft-dependency fallback behavior (always produce markdown artifact with degradation note)
-- after successful write, call `log_operation(type="ingest", status="keep", ...)`
-
-- [x] **Step 2: Add examples file with expected outputs**
-
-Include URL, local doc, local directory, repo, dataset, pasted blob examples, plus one ambiguous case that should ask clarification.
-
-- [x] **Step 3: Add packaged skills entry in `package.json`**
-
-```json
-"pi": {
-  "extensions": [...],
-  "prompts": ["./prompts"],
-  "skills": ["./skills"]
-}
-```
-
-- [x] **Step 4: Update `README.md` with Skills section**
-
-Document:
-- `memory-ingest` purpose
-- invocation example
-- where files are written (`~/.pi/memories/raw/`)
-
-- [x] **Step 5: Validate package and skill load**
-
-Run: `node -e "JSON.parse(require('fs').readFileSync('package.json','utf8')); console.log('ok')"`
-Expected: `ok`
-
-Run: `pi --no-extensions --skill ./skills/memory-ingest/SKILL.md -p "/skill:memory-ingest https://example.com"`
-Expected: skill loads; no skill frontmatter/path errors.
-
-- [x] **Step 6: Commit package wiring/docs**
+- [ ] **Step 4: Commit skill contract changes**
 
 ```bash
-git add skills/memory-ingest/SKILL.md skills/memory-ingest/examples.md package.json README.md
-git commit -m "feat(skills): package memory-ingest skill and docs"
+git add skills/memory-ingest/SKILL.md skills/memory-ingest/examples.md
+git commit -m "feat(memory-ingest): compile ingests into curated memory"
 ```
 
 ---
 
-### Task 7: Full verification and final checkpoint
+### Task 5: Verify curated-memory update behavior end-to-end
 
 **Files:**
-- Modify (if needed): touched files from Tasks 1-6 only
+- Modify only files touched above if fixes are required
 
-- [x] **Step 1: Run full memory tests**
+- [ ] **Step 1: Run runner tests**
+
+Run: `npx tsx --test skills/memory-ingest/scripts/ingest-runner.test.ts`
+Expected: PASS.
+
+- [ ] **Step 2: Run full memory tests**
 
 Run: `cd memory && npm test`
 Expected: PASS.
 
-- [x] **Step 2: Run ingest runner tests**
+- [ ] **Step 3: Manual acceptance test with a representative source**
 
-Run: `npx tsx --test skills/memory-ingest/scripts/ingest-runner.test.ts`
-Expected: PASS.
+Verify all of:
+- raw artifact created in `~/.pi/memories/raw/`
+- curated note(s) updated in `~/.pi/memories/`
+- backlink/reference to raw source present
+- operation logged only after compile work completes
 
-- [x] **Step 3: Manual acceptance pass using spec checklist**
+- [ ] **Step 4: Update README to describe the corrected workflow**
 
-Verify:
-- `/skill:memory-ingest <anything>` is deterministic or asks clarification
-- writes only under raw root
-- markdown includes YAML provenance frontmatter
-- cap overflow requests confirmation
-- ingest can be logged via `log_operation(type="ingest")`
+Document that `memory-ingest` updates both raw artifacts and curated memory.
 
-- [ ] **Step 4: Commit final fixes (only if needed)**
+- [ ] **Step 5: Commit final verification fixes**
 
 ```bash
-git add -A
-git commit -m "chore(memory-ingest): finalize verification fixes"
+git add README.md skills/memory-ingest/SKILL.md skills/memory-ingest/examples.md skills/memory-ingest/scripts/ingest-runner.ts skills/memory-ingest/scripts/ingest-runner.test.ts docs/design/2026-04-08-memory-ingest-skill.md docs/plans/2026-04-08-memory-ingest-skill.md
+git commit -m "chore(memory-ingest): finalize ingest plus compile workflow"
 ```
 
 ---
 
 ## Execution reminders
 
-- Use `test-driven-development` during implementation (RED → GREEN → REFACTOR per task).
-- Use `verification-before-completion` before claiming done.
-- Keep changes DRY and YAGNI; do not add compile/Q&A/lint features in this branch.
+- Use `test-driven-development` for any behavior change.
+- Use `verification-before-completion` before claiming the corrected workflow is complete.
+- Do not ship more raw-only behavior under the name `memory-ingest`.
+- Prefer updating existing notes over note sprawl during compile.
