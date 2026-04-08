@@ -86,6 +86,18 @@ The skill routes to one of these strategy paths:
 
 Implementation should reuse existing capabilities where available (e.g., summarize/web extraction, subagent delegation for larger jobs), rather than building bespoke converters in memory extension code.
 
+#### 4.2.1 Source-type output contract (v1 defaults)
+
+| Source type | Always produce | Preserve originals/assets | Default caps |
+|---|---|---|---|
+| URL/article | One `.md` file with extracted content | Downloaded local images/attachments when extraction returns them | Max 1 URL per call unless user passes explicit list |
+| Local document (pdf/docx/html/txt/md) | One `.md` conversion/normalization file | Original file copied only when input is not already markdown/text | Max 1 input path per call unless explicit list |
+| Repo (url/path) | One `.md` repo summary (purpose, structure, key docs/files) | Key documentation files (`README*`, `/docs/**`, selected config files) | Max 200 files, max depth 4, max 25 MB total copied |
+| Dataset (url/path) | One `.md` dataset summary/preview | Source files preserved when directly retrievable | Max 50 files, max 100 MB total copied |
+| Pasted blob | One `.md` note with normalized content | N/A | Max 200 KB pasted text |
+
+If a source exceeds caps, skill asks for explicit confirmation before continuing.
+
 ### 4.3 Output Layout and Naming
 
 All writes go to:
@@ -94,7 +106,7 @@ All writes go to:
 File naming convention (simple and human-readable):
 - `<yyyy-mm-dd>-<source-slug>.md` (primary markdown)
 - `<yyyy-mm-dd>-<source-slug>-2.md`, etc. for collisions
-- Preserve originals/assets adjacent when useful (especially repos/datasets/docs/images)
+- Preserve originals/assets adjacent within `~/.pi/memories/raw/` when useful (especially repos/datasets/docs/images)
 
 No run-id directory indexing for v1.
 
@@ -168,15 +180,14 @@ Partial success is acceptable only when deterministic and transparent (e.g., mai
 
 ## 9) Open Questions (for planning stage)
 
-1. Exact adapter behavior for repo/dataset ingestion (depth limits, size caps)
-2. Default dependency strategy (hard vs soft requirements for conversion tools)
-3. Whether `/memory ingest` command alias should be added later to invoke `/skill:memory-ingest`
+1. Default dependency strategy (hard vs soft requirements for conversion tools)
+2. Whether `/memory ingest` command alias should be added later to invoke `/skill:memory-ingest`
 
 ## 10) Acceptance Criteria (Design-level)
 
 1. User can run `/skill:memory-ingest <anything>` and receive deterministic handling or explicit clarification.
 2. Outputs are written exclusively under `~/.pi/memories/raw/`.
 3. Filenames are human-readable and collision-safe.
-4. Original assets/files are preserved when useful and a markdown artifact is produced for LLM use.
+4. Per source type, required outputs match the source-type output contract (including caps and confirmation behavior), and a markdown artifact is always produced.
 5. Ingest outcomes can be recorded in memory operation history without disrupting existing memory workflows.
 6. No additional heavy architecture introduced beyond this scope.
