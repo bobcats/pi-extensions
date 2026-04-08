@@ -46,6 +46,44 @@ test("batch ingest assigns unique filenames", async () => {
   assert.notStrictEqual(result.filesWritten?.[0], result.filesWritten?.[1]);
 });
 
+test("successful ingest returns compile handoff details", async () => {
+  const rawRoot = fs.mkdtempSync(path.join(os.tmpdir(), "memory-ingest-handoff-"));
+
+  // Act
+  const result = await run({
+    inputs: ["Line 1\nLine 2"],
+    confirm: false,
+    rawRoot,
+    nowIso: "2026-04-08T00:00:00.000Z",
+  });
+
+  // Assert
+  assert.strictEqual(result.status, "ok");
+  assert.strictEqual(result.kind, "pasted-blob");
+  assert.ok(result.sourceSummaries);
+  assert.strictEqual(result.sourceSummaries?.length, 1);
+  assert.deepStrictEqual(result.sourceSummaries?.[0], {
+    source: "Line 1\nLine 2",
+    rawMarkdownPath: result.filesWritten?.[0],
+    preservedAssets: [],
+    kind: "pasted-blob",
+  });
+});
+
+
+test("skill contract requires compile before ingest success logging", () => {
+  const skillPath = path.resolve("skills/memory-ingest/SKILL.md");
+
+  // Act
+  const skill = fs.readFileSync(skillPath, "utf8");
+
+  // Assert
+  assert.match(skill, /read the newly written raw artifact/i);
+  assert.match(skill, /update\/create curated notes under `~\/\.pi\/memories\//i);
+  assert.match(skill, /backlinks|source references/i);
+  assert.match(skill, /only then call `log_operation`/i);
+});
+
 test("convertLocalDocumentToMarkdown uses summarize conversion for pdf", async () => {
   const filePath = "/tmp/spec.pdf";
   let calledWith: string | null = null;
