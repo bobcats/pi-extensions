@@ -256,6 +256,11 @@ test("parseOperationsJSONL skips malformed lines", () => {
   assert.strictEqual(ops.length, 1);
 });
 
+test("parseOperationsJSONL parses ingest operations", () => {
+  const ops = parseOperationsJSONL(JSON.stringify({ operationType: "ingest", status: "keep", description: "ingested", timestamp: 1 }));
+  assert.strictEqual(ops[0].type, "ingest");
+});
+
 test("parseOperationsJSONL defaults missing fields", () => {
   const content = JSON.stringify({ status: "keep" });
 

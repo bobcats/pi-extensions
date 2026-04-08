@@ -43,7 +43,7 @@ interface LogDetails {
 // ---------------------------------------------------------------------------
 
 const LogOperationParams = Type.Object({
-  type: StringEnum(["reflect", "ruminate", "dream"] as const, {
+  type: StringEnum(["reflect", "ruminate", "dream", "ingest"] as const, {
     description: "What kind of memory operation was performed",
   }),
   status: StringEnum(["keep", "noop"] as const, {
@@ -105,7 +105,7 @@ export default function memoryExtension(pi: ExtensionAPI) {
       name: "memory-miner",
       description: "Mines conversation batches for uncaptured patterns",
       tools: ["read", "bash"],
-      model: "claude-haiku-4-5",
+      model: "openai-codex/gpt-5.4-mini",
       systemPrompt,
       source: "bundled",
       filePath: MINER_AGENT_PATH,

@@ -1,4 +1,4 @@
-export type OperationType = "reflect" | "ruminate" | "dream";
+export type OperationType = "reflect" | "ruminate" | "dream" | "ingest";
 export type OperationStatus = "keep" | "noop" | "cancelled" | "error";
 
 export interface OperationResult {
