@@ -33,14 +33,15 @@ Primary UX target:
 3. Write outputs **only** to `~/.pi/memories/raw/`.
 4. Use reasonable human-readable filenames (date + slug; collision suffixes).
 5. Preserve useful originals/assets when appropriate, while also producing markdown summaries.
-6. Fail-safe on ambiguity or unsupported cases (ask user; do not guess).
+6. Add a tiny inline provenance header at the top of generated markdown (source + timestamp + ingest method).
+7. Fail-safe on ambiguity or unsupported cases (ask user; do not guess).
 
 ### Non-Goals (v1)
 
 - No wiki compilation engine
 - No dedicated Q&A command/output pipeline
 - No lint/health-check framework
-- No new metadata sidecar architecture beyond what is strictly needed for operation logging
+- No metadata sidecar architecture (provenance lives inline in markdown only)
 - No reorganization of existing memory vault structure outside `raw/`
 
 ## 3) Design Approach Options Considered
@@ -107,6 +108,11 @@ File naming convention (simple and human-readable):
 - `<yyyy-mm-dd>-<source-slug>.md` (primary markdown)
 - `<yyyy-mm-dd>-<source-slug>-2.md`, etc. for collisions
 - Preserve originals/assets adjacent within `~/.pi/memories/raw/` when useful (especially repos/datasets/docs/images)
+
+Each generated markdown file begins with a minimal provenance header, e.g.:
+- `source:` original URL/path/input label
+- `ingested_at:` ISO timestamp
+- `method:` adapter/converter used
 
 No run-id directory indexing for v1.
 
@@ -189,5 +195,6 @@ Partial success is acceptable only when deterministic and transparent (e.g., mai
 2. Outputs are written exclusively under `~/.pi/memories/raw/`.
 3. Filenames are human-readable and collision-safe.
 4. Per source type, required outputs match the source-type output contract (including caps and confirmation behavior), and a markdown artifact is always produced.
-5. Ingest outcomes can be recorded in memory operation history without disrupting existing memory workflows.
-6. No additional heavy architecture introduced beyond this scope.
+5. Generated markdown includes a minimal inline provenance header (source, ingested_at, method).
+6. Ingest outcomes can be recorded in memory operation history without disrupting existing memory workflows.
+7. No additional heavy architecture introduced beyond this scope.
