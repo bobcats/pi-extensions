@@ -14,7 +14,7 @@ Ship a pi extension that matches real Amp's `/handoff` *content* fidelity — fi
 | Handoff-mode / countdown / editable preview | Not shipped (explicit divergence from real Amp's TUI UX) |
 | Extraction prompt | Real Amp's `create_handoff_context` system prompt, verbatim |
 | Extraction output format | Free-text (no JSON parsing, no tool-call-based structured output) |
-| Summary model | Hardcoded `anthropic/claude-sonnet-4-5`, fall back to `ctx.model` if unavailable |
+| Summary model | Hardcoded `anthropic/claude-sonnet-4-6`, fall back to `ctx.model` if unavailable |
 | Session-switch API | `ctx.newSession({ parentSession })` + `ctx.ui.setEditorText(finalPrompt)` |
 | Submit | Manual — user presses Enter after reviewing the pre-filled editor |
 | Editor-collision handling | Confirm overwrite via `ctx.ui.confirm` if `getEditorText().trim()` is non-empty |
@@ -34,7 +34,7 @@ Ship a pi extension that matches real Amp's `/handoff` *content* fidelity — fi
   │    if getEditorText().trim() → confirm "Overwrite editor?" (abort on deny)
   │
   ├─ generate summary via pi-ai complete():
-  │    model:   anthropic/claude-sonnet-4-5 (fallback to ctx.model)
+  │    model:   anthropic/claude-sonnet-4-6 (fallback to ctx.model)
   │    system:  CREATE_HANDOFF_CONTEXT_SYSTEM_PROMPT (verbatim from Amp binary)
   │    user:    "## Conversation History\n\n{serialized}\n\n
   │              ## User's Goal for New Thread\n\n{goal}"
@@ -71,7 +71,7 @@ After the user presses Enter, pi fires `before_agent_start` → `memory` injects
 
 ```typescript
 const SUMMARY_PROVIDER = "anthropic";
-const SUMMARY_MODEL = "claude-sonnet-4-5";  // exact ID confirmed at implementation
+const SUMMARY_MODEL = "claude-sonnet-4-6";  // exact ID confirmed at implementation
 
 let summaryModel = ctx.modelRegistry.find(SUMMARY_PROVIDER, SUMMARY_MODEL);
 let summaryAuth = summaryModel
@@ -185,11 +185,11 @@ export const CREATE_HANDOFF_CONTEXT_SYSTEM_PROMPT = `...`;  // exported for snap
 export function createHandoffExtension(deps: {
   completeFn?: typeof complete;
   summaryProvider?: string;   // default "anthropic"
-  summaryModel?: string;      // default "claude-sonnet-4-5"
+  summaryModel?: string;      // default "claude-sonnet-4-6"
 } = {}) {
   const completeFn = deps.completeFn ?? complete;
   const SUMMARY_PROVIDER = deps.summaryProvider ?? "anthropic";
-  const SUMMARY_MODEL = deps.summaryModel ?? "claude-sonnet-4-5";
+  const SUMMARY_MODEL = deps.summaryModel ?? "claude-sonnet-4-6"
 
   return function handoff(pi: ExtensionAPI) {
     pi.registerCommand("handoff", {
@@ -206,7 +206,7 @@ export default createHandoffExtension();
 
 Uses the harness pattern from `auto-name-session/index.test.ts`: mock `pi` with a `commands` Map (capturing registered handlers), mock `ctx` with `modelRegistry`, `ui`, `sessionManager`, `newSession`; inject `completeFn`.
 
-### Test cases (13)
+### Test cases (17)
 
 1. **Happy path** — Sonnet available, conversation present, no editor text → generates summary, switches session, sets editor text, notifies "Handoff ready"
 2. **`!ctx.hasUI`** → notifies "Handoff requires interactive mode", returns without LLM call
@@ -214,14 +214,17 @@ Uses the harness pattern from `auto-name-session/index.test.ts`: mock `pi` with 
 4. **Empty goal** (whitespace) → notifies usage string
 5. **Empty conversation** (branch has no message entries) → notifies "No conversation to hand off"
 6. **Editor has text → user denies overwrite** → `confirm` called, returns without LLM call
-7. **Editor has text → user confirms** → proceeds normally
-8. **Sonnet fallback (not in registry)** → `ctx.modelRegistry.find` returns `null` → falls back to `ctx.model`, succeeds
-9. **Sonnet fallback (auth fails)** → Sonnet present but `getApiKeyAndHeaders` returns `ok: false` → falls back to `ctx.model`, succeeds
-10. **Generation aborted** (`response.stopReason === "aborted"`) → notifies "Handoff cancelled", does not call `newSession`
-11. **`newSession` cancelled by another extension** → notifies "New session cancelled"
-12. **System prompt snapshot** — `CREATE_HANDOFF_CONTEXT_SYSTEM_PROMPT` matches the expected text exactly (guards against silent drift from Amp's prompt)
-13. **No `setSessionName` regression** — harness asserts `pi.setSessionName` is not called from handoff (guards against accidentally stepping on auto-name-session)
-14. **Both-models-unauthed error path** — Sonnet's auth fails *and* `ctx.model`'s auth also fails → notifies "Handoff: no usable model credentials" and does not call `newSession`; exercises the final error branch in model selection
+7. **Sonnet fallback (not in registry)** → `ctx.modelRegistry.find` returns `null` → falls back to `ctx.model`, succeeds
+8. **Sonnet fallback (auth fails)** → Sonnet present but `getApiKeyAndHeaders` returns `ok: false` → falls back to `ctx.model`, succeeds
+9. **Generation aborted** (`response.stopReason === "aborted"`) → notifies "Handoff cancelled", does not call `newSession`
+10. **`newSession` cancelled by another extension** → notifies "New session cancelled"
+11. **Summary generation failure** — loader path propagates generation errors and notifies `Failed to generate handoff summary: <error>`
+12. **`newSession` throws** — session creation exceptions are caught and notify `Failed to create new session.`
+13. **System prompt snapshot** — `CREATE_HANDOFF_CONTEXT_SYSTEM_PROMPT` matches the expected text exactly (guards against silent drift from Amp's prompt)
+14. **No `setSessionName` regression** — harness asserts `pi.setSessionName` is not called from handoff (guards against accidentally stepping on auto-name-session)
+15. **Summary prompt assembly** — `generateHandoffSummary` sends the expected system prompt and conversation+goal user payload
+16. **Configured model preference** — command prefers `anthropic/claude-sonnet-4-6` first
+17. **Both-models-unauthed error path** — Sonnet's auth fails *and* `ctx.model`'s auth also fails → notifies "Handoff: no usable model credentials" and does not call `newSession`; exercises the final error branch in model selection
 
 All tests use `tsx --test --test-timeout=5000`, matching repo convention.
 
@@ -243,9 +246,7 @@ These all came up during brainstorming and were rejected with reasons captured:
 
 ## Open questions
 
-- **Exact Sonnet model ID.** `claude-sonnet-4-5` vs `claude-sonnet-4-6` — verify the correct current ID against `@mariozechner/pi-ai`'s registry at implementation time. The fallback to `ctx.model` means this is not load-bearing, but the default should point at a real model.
-
-  **Done condition for this question:** during implementation, call `modelRegistry.find("anthropic", CANDIDATE_ID)` for each candidate Sonnet ID against a freshly-launched pi and pick the one that resolves to a non-null model. Update `SUMMARY_MODEL` constant accordingly and verify one happy-path test runs green against the real registry (not just the mock). No code changes ship until this is resolved.
+- None currently. The summary model default was resolved to `claude-sonnet-4-6`, with fallback to `ctx.model` when unavailable or unauthenticated.
 
 ## References
 

@@ -25,6 +25,18 @@ Examples:
 5. Pre-fills the new session's editor with `goal + summary` — goal first so the top line shows what this handoff is about
 6. User reviews and presses Enter to submit
 
+## Guardrails and error handling
+
+- `!ctx.hasUI` → `Handoff requires interactive mode.`
+- `!ctx.model` → `No model selected.`
+- empty goal → `Usage: /handoff <goal for new session>`
+- no meaningful conversation text → `No conversation to hand off.`
+- generation aborted (Esc) → `Handoff cancelled.`
+- summary generation failure → `Failed to generate handoff summary: <error>`
+- `newSession` cancelled → `New session cancelled.`
+- `newSession` throws → `Failed to create new session.`
+- both preferred+fallback model auth fail → `Handoff: no usable model credentials`
+
 ## Model selection
 
 Prefers `anthropic/claude-sonnet-4-6` for summary generation. Falls back silently to `ctx.model` (the current session's model) if Sonnet is not in the registry or lacks credentials. If neither model has usable credentials, the command emits an error and returns.

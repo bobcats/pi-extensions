@@ -169,9 +169,9 @@ async function generateSummaryWithLoader(params: {
   resolved: SummaryModelResolution;
   messages: any[];
   goal: string;
-}): Promise<string | null> {
+}): Promise<string | null | { kind: "error"; error: string }> {
   const { ctx, completeFn, resolved, messages, goal } = params;
-  return ctx.ui.custom<string | null>((tui: any, theme: any, _kb: any, done: any) => {
+  return ctx.ui.custom<string | null | { kind: "error"; error: string }>((tui: any, theme: any, _kb: any, done: any) => {
     const loader = new BorderedLoader(tui, theme, "Generating handoff prompt...");
     loader.onAbort = () => done(null);
 
@@ -185,7 +185,10 @@ async function generateSummaryWithLoader(params: {
       signal: loader.signal,
     })
       .then(done)
-      .catch(() => done(null));
+      .catch((error) => {
+        const message = error instanceof Error ? error.message : "unknown error";
+        done({ kind: "error", error: message });
+      });
 
     return loader;
   });
@@ -197,9 +200,16 @@ async function applyHandoffToNewSession(params: {
   summary: string;
 }): Promise<boolean> {
   const { ctx, goal, summary } = params;
-  const newSessionResult = await ctx.newSession({
-    parentSession: ctx.sessionManager.getSessionFile(),
-  });
+
+  let newSessionResult: { cancelled: boolean };
+  try {
+    newSessionResult = await ctx.newSession({
+      parentSession: ctx.sessionManager.getSessionFile(),
+    });
+  } catch {
+    ctx.ui.notify("Failed to create new session.", "error");
+    return false;
+  }
 
   if (newSessionResult.cancelled) {
     ctx.ui.notify("New session cancelled.", "info");
@@ -281,6 +291,11 @@ export function createHandoffExtension(deps: HandoffDeps = {}) {
         const summary = await generateSummaryWithLoader({ ctx: hctx, completeFn, resolved, messages, goal });
         if (summary === null) {
           hctx.ui.notify("Handoff cancelled.", "info");
+          return;
+        }
+
+        if (typeof summary !== "string") {
+          hctx.ui.notify(`Failed to generate handoff summary: ${summary.error}`, "error");
           return;
         }
 

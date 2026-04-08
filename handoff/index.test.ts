@@ -314,6 +314,39 @@ test("notifies New session cancelled when newSession is cancelled", async () => 
   ]);
 });
 
+test("notifies when summary generation fails", async () => {
+  const harness = createHarness();
+  harness.ctx.sessionManager.getBranch = nonEmptyBranch;
+  harness.setCustomResult({ kind: "error", error: "network down" });
+  createHandoffExtension()(harness.pi);
+  const cmd = harness.commandMap.get("handoff");
+
+  await cmd.handler("continue the auth work", harness.ctx);
+
+  assert.equal(harness.newSessionCalls, 0);
+  assert.deepEqual(harness.notifications, [
+    { message: "Failed to generate handoff summary: network down", level: "error" },
+  ]);
+});
+
+test("notifies when creating new session throws", async () => {
+  const harness = createHarness();
+  harness.ctx.sessionManager.getBranch = nonEmptyBranch;
+  harness.setCustomResult("- summary text");
+  (harness.ctx as any).newSession = async () => {
+    throw new Error("boom");
+  };
+  createHandoffExtension()(harness.pi);
+  const cmd = harness.commandMap.get("handoff");
+
+  await cmd.handler("continue the auth work", harness.ctx);
+
+  assert.equal(harness.editorTexts.length, 0);
+  assert.deepEqual(harness.notifications, [
+    { message: "Failed to create new session.", level: "error" },
+  ]);
+});
+
 test("does not call setSessionName", async () => {
   const harness = createHarness();
   harness.ctx.sessionManager.getBranch = nonEmptyBranch;
