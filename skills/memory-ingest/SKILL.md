@@ -1,20 +1,32 @@
 ---
 name: memory-ingest
-description: Ingest heterogeneous knowledge sources into ~/.pi/memories/raw/ using deterministic routing and fail-safe clarification.
+description: Ingest heterogeneous knowledge sources into ~/.pi/memories/raw/ and immediately compile them into curated memory notes.
 ---
 
 # memory-ingest
 
-Use this skill to turn a URL, local path, repo, dataset, or pasted blob into a markdown artifact under `~/.pi/memories/raw/`.
+Use this skill to run one end-to-end workflow:
+1. ingest the source into `~/.pi/memories/raw/`
+2. compile the new raw artifact(s) into curated notes under `~/.pi/memories/`
+3. log the completed ingest operation
+
+Raw ingest is an internal stage, not the final product.
 
 ## Rules
 
-- Be deterministic. If the source is ambiguous, stop and ask a concise clarification question.
-- Never write outside `~/.pi/memories/raw/`.
-- Always produce a markdown artifact, even if conversion tooling is missing.
+- Be deterministic during ingest. If the source is ambiguous, stop and ask a concise clarification question.
+- Never write outside `~/.pi/memories/raw/` during the ingest stage.
+- Always produce a raw markdown artifact, even if conversion tooling is missing.
 - Preserve useful originals/assets when it helps future recall.
 - If the runner returns `confirm`, ask the user before replaying with `confirm:true`.
-- After a successful write, call `log_operation` with `type="ingest"` and `status="keep"`.
+- On `ok`, read the newly written raw artifact(s) before any synthesis.
+- Inspect existing vault notes relevant to the topic before deciding where curated knowledge should go.
+- Prefer updating existing topic/concept notes over creating new notes.
+- Create a source-summary note only when there is no obvious curated destination.
+- Preserve traceability with backlinks/source references to the raw note.
+- Update indexes only when a genuinely new note family appears.
+- Avoid whole-vault rewrites during normal ingest.
+- Only then call `log_operation` with `type="ingest"` and `status="keep"` after raw ingest and compile both succeed.
 
 ## Execution
 
@@ -30,17 +42,32 @@ If the runner asks for confirmation because of caps, replay the same payload wit
 npx tsx skills/memory-ingest/scripts/ingest-runner.ts '{"inputs":["<user input>"],"confirm":true}'
 ```
 
+## Compile flow after runner success
+
+When the runner returns `status: "ok"`:
+
+1. Read the newly written raw artifact(s) from `filesWritten` / `sourceSummaries`.
+2. Use the returned source kind and source label to identify the best curated destination.
+3. Read existing vault notes relevant to that destination.
+4. Update/create curated notes under `~/.pi/memories/`.
+5. Add backlinks or source references to the raw artifact.
+6. If a new note family is created, update the relevant index note.
+7. Only after compile finishes, call `log_operation(type="ingest", status="keep", ...)`.
+
+If compile fails after raw ingest succeeds, report the partial failure clearly and do not claim ingest success.
+
 ## Decision policy
 
-- URL → fetch and normalize to markdown.
-- Local document → normalize to markdown, preserve the original if needed.
-- Local directory → summarize the corpus and preserve supported files.
-- Repo → summarize structure and preserve key docs/files.
-- Dataset → summarize and preserve retrievable artifacts.
-- Pasted blob → normalize into a markdown note.
+- URL → fetch and normalize to markdown, then compile into source/concept notes.
+- Local document → normalize to markdown, preserve the original if needed, then compile into curated notes.
+- Local directory → summarize the corpus, preserve supported files, then compile the useful knowledge into curated notes.
+- Repo → summarize structure and preserve key docs/files, then compile into project/tech notes.
+- Dataset → summarize and preserve retrievable artifacts, then compile into dataset/domain notes.
+- Pasted blob → normalize into a markdown note, then synthesize directly into an existing or new curated note.
 
 ## Failure policy
 
 - Ambiguous classification → ask the user.
-- Missing dependency or fetch failure → still write a markdown artifact with a clear fallback note.
+- Missing dependency or fetch failure → still write a markdown artifact with a clear fallback note, then compile from that artifact if possible.
 - Path safety failure → abort and explain.
+- Raw ingest success but compile failure → report partial success; do not call `log_operation(... status="keep")`.
