@@ -9,8 +9,8 @@ import path from "path";
 import { complete, type Message } from "@mariozechner/pi-ai";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 
-const AUTO_NAME_PROVIDER = "anthropic";
-const AUTO_NAME_MODEL = "claude-haiku-4-5";
+const AUTO_NAME_PROVIDER = "openai-codex";
+const AUTO_NAME_MODEL = "gpt-5.4-mini";
 
 function textOf(msg: any): string {
 	if (!Array.isArray(msg?.content)) return "";
