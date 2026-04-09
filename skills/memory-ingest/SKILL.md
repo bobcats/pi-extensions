@@ -21,7 +21,11 @@ Raw ingest is an internal stage, not the final product.
 - If the runner returns `confirm`, ask the user before replaying with `confirm:true`.
 - On `ok`, read the newly written raw artifact(s) before any synthesis.
 - Inspect existing vault notes relevant to the topic before deciding where curated knowledge should go.
-- Prefer updating existing topic/concept notes over creating new notes.
+- Bias toward wiki-style curation: get the source into the brain, then extract reusable knowledge into notes.
+- Prefer updating existing topic/concept/project notes over creating new notes.
+- A single source may update an existing principle only when it clearly reinforces or refines that principle.
+- If a useful lesson does not fit an existing principle cleanly, create or update a source-derived concept note instead of minting a new principle.
+- Do not create a new principle from a single source unless the vault already contains repeated evidence that clearly supports it.
 - Create a source-summary note only when there is no obvious curated destination.
 - Preserve traceability with backlinks/source references to the raw note.
 - Update indexes only when a genuinely new note family appears.
@@ -49,10 +53,15 @@ When the runner returns `status: "ok"`:
 1. Read the newly written raw artifact(s) from `filesWritten` / `sourceSummaries`.
 2. Use the returned source kind and source label to identify the best curated destination.
 3. Read existing vault notes relevant to that destination.
-4. Update/create curated notes under `~/.pi/memories/`.
-5. Add backlinks or source references to the raw artifact.
-6. If a new note family is created, update the relevant index note.
-7. Only after compile finishes, call `log_operation(type="ingest", status="keep", ...)`.
+4. Choose the destination in this order:
+   - update an existing topic/concept/project note
+   - if the source clearly reinforces an existing principle, update that principle
+   - otherwise create/update a source-derived concept note
+   - only create a new principle when stronger prior evidence already exists in the vault
+5. Update/create curated notes under `~/.pi/memories/`.
+6. Add backlinks or source references to the raw artifact.
+7. If a new note family is created, update the relevant index note.
+8. Only after compile finishes, call `log_operation(type="ingest", status="keep", ...)`.
 
 If compile fails after raw ingest succeeds, report the partial failure clearly and do not claim ingest success.
 
@@ -64,6 +73,7 @@ If compile fails after raw ingest succeeds, report the partial failure clearly a
 - Repo → summarize structure and preserve key docs/files, then compile into project/tech notes.
 - Dataset → summarize and preserve retrievable artifacts, then compile into dataset/domain notes.
 - Pasted blob → normalize into a markdown note, then synthesize directly into an existing or new curated note.
+- In all cases, prefer source-derived concept notes over new principles when the lesson is interesting but not yet well-proven.
 
 ## Failure policy
 
