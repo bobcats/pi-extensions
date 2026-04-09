@@ -105,6 +105,10 @@ Recommended baseline:
 - **Chat template:** use the model's proper Gemma/GGUF template support
 - **Quant:** `UD-Q5_K_M` preferred, else `Q5_K_M`
 
+Normative context contract:
+- If the server is launched at `131072`, `models.json.contextWindow` must be `131072`.
+- If phase 1 falls back to `65536`, `models.json.contextWindow` must also be set to `65536` until the server is retuned and re-verified at `131072`.
+
 Rationale for context size:
 - The user's actual destination is `memory` dream, not generic local chat.
 - `memory` dream re-reads vault context repeatedly.
@@ -139,8 +143,25 @@ Recommendation: keep the launcher script under a memorable path and avoid manual
 Minimal operator contract for the launcher script:
 - starts `llama-server` in the foreground unless explicitly wrapped by the shell/user
 - uses `gemma4-memory` as the server alias
+- binds to `127.0.0.1`
+- sets the configured port and context explicitly
+- passes the resolved model path explicitly
+- uses GGUF/template behavior that produces normal chat output; if template auto-detection is unreliable, the script must set the Gemma template explicitly
 - writes stderr/stdout to a known log location when backgrounded
 - fails loudly on missing model file or port conflict rather than silently choosing something else
+
+Normative command skeleton:
+
+```bash
+llama-server \
+  -m "$MODEL_PATH" \
+  --alias gemma4-memory \
+  --host 127.0.0.1 \
+  --port 8123 \
+  -c 131072
+```
+
+If phase 1 uses the `65536` fallback, the `-c` value must match that fallback and the pi `contextWindow` setting must be updated to match.
 
 ## 7) pi Model Registration
 
@@ -211,19 +232,20 @@ Exact checks:
 - Pass condition: response is HTTP 200 and returns assistant text containing `GEMMA_OK`
 - Streaming: repeat with `stream: true`
 - Pass condition: streamed chunks arrive and the assembled assistant text contains `GEMMA_OK`
-- Representative envelope: send one larger text-only prompt roughly the size of a small memory-style prompt (for example a few KB of pasted text plus an instruction to summarize in one sentence)
-- Pass condition: request completes successfully without protocol/config errors
+- Representative envelope: send one larger text-only prompt containing at least 4,000 characters of pasted text plus an instruction to summarize it in 5 bullets
+- Pass condition: request completes successfully without protocol/config errors and returns within the same smoke-test budget used for context feasibility
 
 This catches the common failures: wrong base URL, wrong alias/model id, bad chat-template setup, broken streaming behavior, or a broken custom-model contract.
 
 ### Layer 3 — pi integration
 
 Exact checks:
-- `/model` shows model id `gemma4-memory`
-- pi can switch to it successfully (provider/id matching may still use `local-llama/gemma4-memory`)
+- `/model` displays the model id `gemma4-memory`
+- selection string for the smoke test is `local-llama/gemma4-memory`
 - a trivial test prompt in pi, such as `Reply with exactly: PI_GEMMA_OK`, completes with the expected string
 - a second follow-up turn in the same pi session succeeds
 - one larger prompt representative of memory/dream prompt size succeeds without protocol/config errors
+- one tool-call smoke test succeeds: prompt pi to use the `read` tool on `README.md` and report the first extension listed in the table
 
 Only after all three layers pass should the setup be considered complete. Capture command output or screenshots for each layer so the result is not based on vibes.
 
@@ -249,14 +271,15 @@ Only after all three layers pass should the setup be considered complete. Captur
 ## 10) Acceptance Criteria
 
 1. A local Gemma 4 GGUF exists on disk in a stable path.
-2. The chosen artifact is the instruct/chat model from `unsloth/gemma-4-26B-A4B-it-GGUF`, using a filename pattern matching `*UD-Q5_K_M*.gguf` when available and `*Q5_K_M*.gguf` as the accepted fallback.
+2. The preferred artifact is the instruct/chat model from `unsloth/gemma-4-26B-A4B-it-GGUF`, using a filename pattern matching `*UD-Q5_K_M*.gguf` when available and `*Q5_K_M*.gguf` as the accepted fallback. An equivalent Gemma 4 26B-A4B instruct GGUF with the same quant characteristics is acceptable if the preferred source is unavailable.
 3. A launcher script at a documented path (recommended: `~/.local/bin/start-gemma4-memory`) can start `llama-server` reproducibly with a stable alias of `gemma4-memory`.
 4. `GET /v1/models` returns an entry whose id is `gemma4-memory`.
 5. Direct non-streaming and streaming `POST /v1/chat/completions` calls using `model: "gemma4-memory"` succeed and return the expected test string.
-6. One larger direct prompt representative of a small memory-style envelope succeeds without protocol/config errors.
-7. `/model` shows model id `gemma4-memory`.
-8. pi can switch to that model, complete the expected test prompt, and complete one follow-up turn in the same session.
-9. No `memory` extension code changes are required for this first phase.
+6. One larger direct prompt containing at least 4,000 characters of text succeeds without protocol/config errors.
+7. `/model` shows model id `gemma4-memory`, and the smoke-test selection string `local-llama/gemma4-memory` works.
+8. pi can switch to that model, complete the expected test prompt, complete one follow-up turn in the same session, and complete one `read` tool-call smoke test.
+9. `models.json.contextWindow` matches the server's actual configured context window for the verified setup.
+10. No `memory` extension code changes are required for this first phase.
 
 ## 11) Follow-up Work (Deferred)
 
@@ -266,3 +289,5 @@ Once the setup is working, the next design/planning step is to decide how `memor
 - session-level manual model switching
 
 That should be a separate change after the local model setup is verified.
+
+Implementation note for that later phase: if dream-only routing uses subagents or explicit model overrides, it may also require the local model to be present in pi's enabled-model settings, not just `models.json`.
