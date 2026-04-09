@@ -157,7 +157,9 @@ Normative phase-1 shape:
       "apiKey": "local",
       "compat": {
         "supportsDeveloperRole": false,
-        "supportsReasoningEffort": false
+        "supportsReasoningEffort": false,
+        "supportsUsageInStreaming": false,
+        "maxTokensField": "max_tokens"
       },
       "models": [
         {
@@ -182,6 +184,12 @@ Expected characteristics:
 - `apiKey` is a dummy value because pi expects one even when the local server ignores it
 - Compatibility flags disable OpenAI niceties that local servers often mishandle
 
+Compatibility fallback order:
+1. Start with the normative config above.
+2. If pi streaming fails, keep `supportsUsageInStreaming: false`.
+3. If token-limit field errors appear, keep `maxTokensField: "max_tokens"`.
+4. Only add more compat overrides if a concrete error proves they are needed.
+
 The launch command should set the server alias to the same id (`gemma4-memory`) so `/v1/models`, direct requests, and pi all agree on the exact model name.
 
 ## 8) Verification Strategy
@@ -196,22 +204,28 @@ Exact check:
 
 ### Layer 2 — direct inference
 
-Exact check:
-- `POST http://127.0.0.1:8123/v1/chat/completions`
+Exact checks:
+- Non-streaming: `POST http://127.0.0.1:8123/v1/chat/completions`
 - Request uses `model: "gemma4-memory"`
 - Prompt is a tiny deterministic text-only request such as `Reply with exactly: GEMMA_OK`
 - Pass condition: response is HTTP 200 and returns assistant text containing `GEMMA_OK`
+- Streaming: repeat with `stream: true`
+- Pass condition: streamed chunks arrive and the assembled assistant text contains `GEMMA_OK`
+- Representative envelope: send one larger text-only prompt roughly the size of a small memory-style prompt (for example a few KB of pasted text plus an instruction to summarize in one sentence)
+- Pass condition: request completes successfully without protocol/config errors
 
-This catches the common failures: wrong base URL, wrong alias/model id, bad chat-template setup, or a broken custom-model contract.
+This catches the common failures: wrong base URL, wrong alias/model id, bad chat-template setup, broken streaming behavior, or a broken custom-model contract.
 
 ### Layer 3 — pi integration
 
 Exact checks:
-- `/model` lists `local-llama/gemma4-memory`
-- pi can switch to it successfully
+- `/model` shows model id `gemma4-memory`
+- pi can switch to it successfully (provider/id matching may still use `local-llama/gemma4-memory`)
 - a trivial test prompt in pi, such as `Reply with exactly: PI_GEMMA_OK`, completes with the expected string
+- a second follow-up turn in the same pi session succeeds
+- one larger prompt representative of memory/dream prompt size succeeds without protocol/config errors
 
-Only after all three pass should the setup be considered complete. Capture command output or screenshots for each layer so the result is not based on vibes.
+Only after all three layers pass should the setup be considered complete. Capture command output or screenshots for each layer so the result is not based on vibes.
 
 ## 9) Risks and Failure Handling
 
@@ -227,7 +241,7 @@ Only after all three pass should the setup be considered complete. Capture comma
 ### Failure policy
 
 - If `UD-Q5_K_M` is unavailable, fall back to `Q5_K_M`
-- If `131072` context performs terribly, use the `65536` smoke-test fallback to prove the integration, then re-raise and retest
+- If `131072` context cannot start cleanly, or if a representative direct request cannot complete within a reasonable smoke-test budget (for example, under 60 seconds for a short response), phase 1 may fall back to `65536`; `131072` then becomes explicit follow-up tuning work
 - If the OpenAI-compatible config is unhappy, keep the provider simple and disable unsupported compatibility features first
 - If `8123` is occupied, move the server port and update the provider config to match
 - If the loaded model name is unstable, force a stable `--alias gemma4-memory` in the launcher script and use that everywhere
@@ -235,14 +249,14 @@ Only after all three pass should the setup be considered complete. Capture comma
 ## 10) Acceptance Criteria
 
 1. A local Gemma 4 GGUF exists on disk in a stable path.
-2. The chosen artifact is the instruct/chat model from `unsloth/gemma-4-26B-A4B-it-GGUF`, with `UD-Q5_K_M` preferred and `Q5_K_M` accepted fallback.
+2. The chosen artifact is the instruct/chat model from `unsloth/gemma-4-26B-A4B-it-GGUF`, using a filename pattern matching `*UD-Q5_K_M*.gguf` when available and `*Q5_K_M*.gguf` as the accepted fallback.
 3. A launcher script at a documented path (recommended: `~/.local/bin/start-gemma4-memory`) can start `llama-server` reproducibly with a stable alias of `gemma4-memory`.
 4. `GET /v1/models` returns an entry whose id is `gemma4-memory`.
-5. A direct `POST /v1/chat/completions` call using `model: "gemma4-memory"` succeeds and returns the expected test string.
-6. pi lists `local-llama/gemma4-memory` via `/model`.
-7. pi can switch to that model and complete the expected test prompt.
-8. No `memory` extension code changes are required for this first phase.
-9. A follow-up phase can later route `memory dream` specifically to this local model.
+5. Direct non-streaming and streaming `POST /v1/chat/completions` calls using `model: "gemma4-memory"` succeed and return the expected test string.
+6. One larger direct prompt representative of a small memory-style envelope succeeds without protocol/config errors.
+7. `/model` shows model id `gemma4-memory`.
+8. pi can switch to that model, complete the expected test prompt, and complete one follow-up turn in the same session.
+9. No `memory` extension code changes are required for this first phase.
 
 ## 11) Follow-up Work (Deferred)
 
