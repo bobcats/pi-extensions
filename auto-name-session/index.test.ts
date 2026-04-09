@@ -83,7 +83,7 @@ test("uses getApiKeyAndHeaders and names the session", async () => {
   assert.deepEqual(completeCall?.options, { apiKey: "test-key", headers: { "x-test": "1" }, maxTokens: 30 });
 });
 
-test("uses recent branch context in naming prompt", async () => {
+test("uses first user message only in naming prompt", async () => {
   const harness = createHarness();
   let promptText = "";
 
@@ -97,7 +97,7 @@ test("uses recent branch context in naming prompt", async () => {
       promptText = context.messages[0].content[0].text;
       return {
         role: "assistant",
-        content: [{ type: "text", text: "Debug Auto-Name Extension" }],
+        content: [{ type: "text", text: "Debug auto-name extension" }],
       };
     },
   })(harness.pi);
@@ -108,16 +108,19 @@ test("uses recent branch context in naming prompt", async () => {
   await handler(
     {
       messages: [
-        { role: "user", content: [{ type: "text", text: "test" }] },
+        { role: "user", content: [{ type: "text", text: "first user message" }] },
         { role: "assistant", content: [{ type: "text", text: "tail the log and paste it" }], stopReason: "stop" },
+        { role: "user", content: [{ type: "text", text: "second user message" }] },
       ],
     },
     harness.ctx,
   );
 
-  assert.match(promptText, /debug the auto-name extension/);
-  assert.match(promptText, /I found the provider error and added logging\./);
-  assert.match(promptText, /tail the log and paste it/);
+  assert.match(promptText, /<message>first user message<\/message>/);
+  assert.doesNotMatch(promptText, /second user message/);
+  assert.doesNotMatch(promptText, /tail the log and paste it/);
+  assert.doesNotMatch(promptText, /debug the auto-name extension/);
+  assert.doesNotMatch(promptText, /I found the provider error and added logging\./);
 });
 
 test("skips naming when auth resolution fails", async () => {

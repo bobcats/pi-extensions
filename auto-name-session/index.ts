@@ -1,8 +1,8 @@
 /**
  * Auto-name sessions after the first completed exchange.
  *
- * Uses a hardcoded cheap model to generate a short description from recent
- * conversation context. Skips aborted turns.
+ * Uses a hardcoded cheap model to generate a short title from the first user
+ * message. Skips aborted turns.
  */
 
 import path from "path";
@@ -11,7 +11,7 @@ import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 
 const AUTO_NAME_PROVIDER = "openai-codex";
 const AUTO_NAME_MODEL = "gpt-5.4-mini";
-const AUTO_NAME_SYSTEM_PROMPT = "You generate short session titles for coding work. Return only a 3-6 word natural-casing title with no quotes or extra commentary.";
+const AUTO_NAME_SYSTEM_PROMPT = "You are an assistant that generates short, descriptive titles (maximum 5 words, sentence case with the first word capitalized, not title case) based on a user's message to an agentic coding tool. Your titles should be concise (max 5 words) and capture the essence of the query or topic. Do not assume or guess the user's intent beyond what is in their message. Omit generic words like question, request, etc. Be professional and precise. Use common software engineering terms and acronyms if they are helpful. Return only the title text.";
 
 function textOf(msg: any): string {
 	if (!Array.isArray(msg?.content)) return "";
@@ -24,27 +24,6 @@ function textOf(msg: any): string {
 
 function truncate(text: string, max: number): string {
 	return text.length > max ? text.slice(0, max) + "..." : text;
-}
-
-function formatMessage(role: string, text: string): string | null {
-	if (!text) return null;
-	return `${role}:\n${truncate(text, role === "User" ? 500 : 1000)}`;
-}
-
-function buildContext(sessionManager: any, messages: any[]): string {
-	const branch = typeof sessionManager?.getBranch === "function" ? sessionManager.getBranch() : [];
-	const branchMessages = branch
-		.filter((entry: any) => entry?.type === "message" && (entry.message?.role === "user" || entry.message?.role === "assistant"))
-		.slice(-4)
-		.map((entry: any) => formatMessage(entry.message.role === "user" ? "User" : "Assistant", textOf(entry.message)))
-		.filter(Boolean);
-	const eventMessages = messages
-		.filter((message: any) => message?.role === "user" || message?.role === "assistant")
-		.slice(-2)
-		.map((message: any) => formatMessage(message.role === "user" ? "User" : "Assistant", textOf(message)))
-		.filter(Boolean);
-
-	return [...branchMessages, ...eventMessages].join("\n\n");
 }
 
 export function createAutoNameExtension(deps: {
@@ -61,8 +40,9 @@ export function createAutoNameExtension(deps: {
 			const lastAssistant = [...messages].reverse().find((m) => m.role === "assistant");
 			if ((lastAssistant as any)?.stopReason === "aborted") return;
 
-			const context = buildContext((ctx as any).sessionManager, messages);
-			if (!context) return;
+			const firstUser = messages.find((m) => m.role === "user");
+			const userText = truncate(textOf(firstUser), 1000);
+			if (!userText) return;
 
 			const model = ctx.modelRegistry.find(AUTO_NAME_PROVIDER, AUTO_NAME_MODEL);
 			if (!model) return;
@@ -76,7 +56,7 @@ export function createAutoNameExtension(deps: {
 					content: [
 						{
 							type: "text",
-							text: `Summarize this coding session in a short phrase (3-6 words, natural casing, no quotes). Describe the task or topic, not the tool or skill used. Be specific enough to distinguish from other sessions. Use the recent conversation context below, not just the last exchange.\n\nRecent conversation:\n${context}`,
+							text: `<message>${userText}</message>`,
 						},
 					],
 					timestamp: Date.now(),
