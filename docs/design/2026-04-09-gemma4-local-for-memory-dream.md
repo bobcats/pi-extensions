@@ -97,19 +97,22 @@ The first-pass `llama-server` configuration should optimize for reliability, not
 
 Recommended baseline:
 - **Port:** `8123`
-- **Context:** `131072`
+- **Alias/model id:** `gemma4-memory`
+- **Target context:** `131072`
+- **Smoke-test context fallback:** `65536` if startup or throughput is bad enough to block verification
 - **Parallel:** `1`
 - **Text-only:** yes
 - **Chat template:** use the model's proper Gemma/GGUF template support
 - **Quant:** `UD-Q5_K_M` preferred, else `Q5_K_M`
 
 Rationale for context size:
+- The user's actual destination is `memory` dream, not generic local chat.
 - `memory` dream re-reads vault context repeatedly.
 - The extension injects vault index material into the prompt.
 - `65536` is likely too cramped once the vault grows.
-- `131072` is a safer starting point without immediately turning the server into molasses.
+- `131072` is the desired steady-state target for this setup.
 
-This setting may still be revised later if actual prompt-eval cost is unacceptable, but it is the right first target for dream-oriented memory work.
+Phase-1 acceptance still requires only that the model work end-to-end in pi. If `131072` makes first verification miserable, use `65536` for smoke testing, then raise back to `131072` once the basic integration is proven.
 
 ## 6) Operator Workflow
 
@@ -118,7 +121,9 @@ Use a stable, explicit workflow rather than making the operator remember a giant
 ### Files and locations
 
 - Model files live in a stable local directory, for example: `~/models/gemma4/`
-- A small launcher script starts `llama-server` with the chosen flags
+- Recommended launcher script path: `~/.local/bin/start-gemma4-memory`
+- The launcher script is responsible for model path, port, alias, and context settings
+- Logs should go to a stable file, for example: `~/Library/Logs/gemma4-memory.log`
 - pi model registration lives in: `~/.pi/agent/models.json`
 
 ### Launch workflow
@@ -131,19 +136,53 @@ Use a stable, explicit workflow rather than making the operator remember a giant
 
 Recommendation: keep the launcher script under a memorable path and avoid manual copy-paste startup.
 
+Minimal operator contract for the launcher script:
+- starts `llama-server` in the foreground unless explicitly wrapped by the shell/user
+- uses `gemma4-memory` as the server alias
+- writes stderr/stdout to a known log location when backgrounded
+- fails loudly on missing model file or port conflict rather than silently choosing something else
+
 ## 7) pi Model Registration
 
 Register the local model as a normal custom provider in `~/.pi/agent/models.json`.
 
+Normative phase-1 shape:
+
+```json
+{
+  "providers": {
+    "local-llama": {
+      "baseUrl": "http://127.0.0.1:8123/v1",
+      "api": "openai-completions",
+      "apiKey": "local",
+      "compat": {
+        "supportsDeveloperRole": false,
+        "supportsReasoningEffort": false
+      },
+      "models": [
+        {
+          "id": "gemma4-memory",
+          "name": "Gemma 4 Memory (Local)",
+          "reasoning": false,
+          "input": ["text"],
+          "contextWindow": 131072,
+          "maxTokens": 8192,
+          "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 }
+        }
+      ]
+    }
+  }
+}
+```
+
 Expected characteristics:
 - OpenAI-compatible endpoint backed by local `llama-server`
-- A named provider such as `local-llama`
-- A named model entry for the Gemma variant
-- Compatibility flags to disable unsupported OpenAI niceties if needed, especially:
-  - `supportsDeveloperRole: false`
-  - `supportsReasoningEffort: false`
+- Provider name: `local-llama`
+- Stable model id: `gemma4-memory`
+- `apiKey` is a dummy value because pi expects one even when the local server ignores it
+- Compatibility flags disable OpenAI niceties that local servers often mishandle
 
-This keeps pi from sending protocol details that some local servers handle badly.
+The launch command should set the server alias to the same id (`gemma4-memory`) so `/v1/models`, direct requests, and pi all agree on the exact model name.
 
 ## 8) Verification Strategy
 
@@ -151,20 +190,28 @@ Verification happens in three layers.
 
 ### Layer 1 — server availability
 
-Confirm the local server is reachable and serving the selected model.
+Exact check:
+- `GET http://127.0.0.1:8123/v1/models`
+- Pass condition: response includes a model entry whose `id` is exactly `gemma4-memory`
 
 ### Layer 2 — direct inference
 
-Send a minimal local request and confirm it returns a sane text response.
+Exact check:
+- `POST http://127.0.0.1:8123/v1/chat/completions`
+- Request uses `model: "gemma4-memory"`
+- Prompt is a tiny deterministic text-only request such as `Reply with exactly: GEMMA_OK`
+- Pass condition: response is HTTP 200 and returns assistant text containing `GEMMA_OK`
+
+This catches the common failures: wrong base URL, wrong alias/model id, bad chat-template setup, or a broken custom-model contract.
 
 ### Layer 3 — pi integration
 
-Confirm:
-- `/model` lists the custom model
-- pi can switch to it
-- a trivial prompt completes successfully
+Exact checks:
+- `/model` lists `local-llama/gemma4-memory`
+- pi can switch to it successfully
+- a trivial test prompt in pi, such as `Reply with exactly: PI_GEMMA_OK`, completes with the expected string
 
-Only after all three pass should the setup be considered complete.
+Only after all three pass should the setup be considered complete. Capture command output or screenshots for each layer so the result is not based on vibes.
 
 ## 9) Risks and Failure Handling
 
@@ -175,23 +222,27 @@ Only after all three pass should the setup be considered complete.
 - Overly optimistic context/window settings hurting speed badly
 - OpenAI-compat quirks in pi/custom-provider config
 - Port collision on `8123`
+- Model id drift between the server alias, `/v1/models`, and `models.json`
 
 ### Failure policy
 
 - If `UD-Q5_K_M` is unavailable, fall back to `Q5_K_M`
-- If `131072` context performs terribly, reduce only after baseline verification
+- If `131072` context performs terribly, use the `65536` smoke-test fallback to prove the integration, then re-raise and retest
 - If the OpenAI-compatible config is unhappy, keep the provider simple and disable unsupported compatibility features first
 - If `8123` is occupied, move the server port and update the provider config to match
+- If the loaded model name is unstable, force a stable `--alias gemma4-memory` in the launcher script and use that everywhere
 
 ## 10) Acceptance Criteria
 
 1. A local Gemma 4 GGUF exists on disk in a stable path.
-2. A launcher script can start `llama-server` reproducibly.
-3. The local endpoint responds successfully.
-4. pi lists the local model via `/model`.
-5. pi can switch to the model and complete a test prompt.
-6. No `memory` extension code changes are required for this first phase.
-7. A follow-up phase can later route `memory dream` specifically to this local model.
+2. The chosen artifact is the instruct/chat model from `unsloth/gemma-4-26B-A4B-it-GGUF`, with `UD-Q5_K_M` preferred and `Q5_K_M` accepted fallback.
+3. A launcher script at a documented path (recommended: `~/.local/bin/start-gemma4-memory`) can start `llama-server` reproducibly with a stable alias of `gemma4-memory`.
+4. `GET /v1/models` returns an entry whose id is `gemma4-memory`.
+5. A direct `POST /v1/chat/completions` call using `model: "gemma4-memory"` succeeds and returns the expected test string.
+6. pi lists `local-llama/gemma4-memory` via `/model`.
+7. pi can switch to that model and complete the expected test prompt.
+8. No `memory` extension code changes are required for this first phase.
+9. A follow-up phase can later route `memory dream` specifically to this local model.
 
 ## 11) Follow-up Work (Deferred)
 
