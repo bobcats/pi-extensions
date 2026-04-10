@@ -285,7 +285,7 @@ export default function memoryExtension(pi: ExtensionAPI) {
       resumeMsg += ` NOTE: ${consecutiveNoops} consecutive noop cycles before reset — stop exploring and start restructuring.`;
     }
 
-    pi.sendUserMessage(resumeMsg);
+    pi.sendUserMessage(resumeMsg, { deliverAs: "followUp" });
   });
 
   // Inject vault content into system prompt

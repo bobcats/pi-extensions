@@ -118,6 +118,12 @@ test("buildDreamPrompt includes dream mode structure", () => {
   assert.ok(prompt.includes("dream-journal.md"));
 });
 
+test("buildDreamPrompt makes raw files a hard no-edit rule", () => {
+  const prompt = buildDreamPrompt("/test/vault");
+  assert.ok(prompt.includes("HARD BOUNDARY: `/test/vault/raw/` is read-only source material"));
+  assert.ok(prompt.includes("Do not create plans to split, summarize, index, delete, move, or rewrite raw files"));
+});
+
 test("buildDreamPrompt includes strategy phases", () => {
   const prompt = buildDreamPrompt("/test/vault");
   assert.ok(prompt.includes("Explore"));

@@ -125,7 +125,13 @@ Run the vault audit script at the start of each dream session to get a quick hea
 \`\`\`bash
 bash ${scriptsDir ?? "memory/scripts"}/brain-audit.sh
 \`\`\`
-This reports: file census, largest files, broken wikilinks, orphan files, and principle connectivity. Use the output to guide your work instead of manually grepping.
+This reports: file census, largest files, broken wikilinks, orphan files, principle connectivity, and raw-source inventory. Use the output to guide your work instead of manually grepping.
+
+**HARD BOUNDARY: \`${dir}/raw/\` is read-only source material.** Raw files are inputs for future ingest/compilation work, not dream-mode cleanup targets.
+- You may read raw files for context.
+- Do not edit, delete, move, rename, split, summarize, compile, index, or otherwise modify raw files.
+- Do not create plans to split, summarize, index, delete, move, or rewrite raw files.
+- If the audit script reports large or orphaned raw files, treat that as intake backlog for later — update curated notes elsewhere, not the raw files themselves.
 
 Use \`search_memory\` to find related content across the vault when looking for cross-references, duplicates, or patterns to synthesize.
 
@@ -168,7 +174,7 @@ Audit EVERYTHING in the vault — principles, project files, cross-cutting notes
 ### Rules
 
 - Don't audit \`dream-journal.md\` itself — it's a working file, not vault content
-- Treat \`${dir}/raw/\` as read-only during dream mode. You may read raw files for context, but do not edit, delete, move, summarize, or otherwise modify them.
+- Treat \`${dir}/raw/\` as read-only during dream mode. You may read raw files for context, but do not edit, delete, move, rename, split, summarize, compile, index, or otherwise modify them.
 - One topic per vault file. File name = topic slug.
 - Group in directories with index files using \`[[wikilinks]]\`
 - Update \`${dir}/index.md\` if files are added or removed

@@ -11,18 +11,20 @@ fi
 cd "$VAULT"
 
 # --- File census ---
-total=$(find . -name '*.md' -not -name 'dream-journal.md' -not -name 'memory-operations.jsonl' | wc -l | tr -d ' ')
+total=$(find . -name '*.md' -not -path './raw/*' -not -name 'dream-journal.md' -not -name 'memory-operations.jsonl' | wc -l | tr -d ' ')
 principles=$(find ./principles -name '*.md' 2>/dev/null | wc -l | tr -d ' ')
 projects=$(find ./projects -name '*.md' 2>/dev/null | wc -l | tr -d ' ')
 root=$(find . -maxdepth 1 -name '*.md' -not -name 'dream-journal.md' | wc -l | tr -d ' ')
+raw=$(find ./raw -name '*.md' 2>/dev/null | wc -l | tr -d ' ')
 
 echo "=== Vault Census ==="
-echo "Total: $total files ($principles principles, $projects project, $root root)"
+echo "Total: $total curated files ($principles principles, $projects project, $root root)"
+echo "Raw sources: $raw files (read-only)"
 
 # --- File sizes ---
 echo ""
 echo "=== File Sizes (top 10) ==="
-find . -name '*.md' -not -name 'dream-journal.md' -not -name 'memory-operations.jsonl' -exec wc -l {} + 2>/dev/null \
+find . -name '*.md' -not -path './raw/*' -not -name 'dream-journal.md' -not -name 'memory-operations.jsonl' -exec wc -l {} + 2>/dev/null \
   | grep -v ' total$' \
   | sort -rn \
   | head -10 \
@@ -33,6 +35,19 @@ find . -name '*.md' -not -name 'dream-journal.md' -not -name 'memory-operations.
     if [[ "$path" != *index.md ]] && (( lines > 400 )); then flag="${flag:- ⚡ approaching limit}"; fi
     printf "%4d %s%s\n" "$lines" "$path" "$flag"
   done
+
+# --- Raw sources ---
+echo ""
+echo "=== Raw Sources (read-only) ==="
+raw_found=0
+find ./raw -name '*.md' 2>/dev/null | sort | while read -r raw_file; do
+  raw_found=1
+  lines=$(wc -l < "$raw_file" | tr -d ' ')
+  flag=""
+  if (( lines > 500 )); then flag=" ⚠️  large raw source — ingest/compile later, do not edit in dream"; fi
+  printf "%4d %s%s\n" "$lines" "$raw_file" "$flag"
+done
+if (( raw == 0 )); then echo "  None"; fi
 
 # --- Broken wikilinks ---
 echo ""
@@ -59,6 +74,7 @@ while IFS= read -r file; do
     ((orphans++)) || true
   fi
 done < <(find . -name '*.md' \
+  -not -path './raw/*' \
   -not -name 'index.md' \
   -not -name 'dream-journal.md' \
   -not -name 'memory-operations.jsonl' \
@@ -125,4 +141,4 @@ rm -f "$concept_cand"
 
 echo ""
 echo "=== Summary ==="
-echo "Files: $total | Broken links: $broken | Orphans: $orphans"
+echo "Files: $total curated + $raw raw | Broken links: $broken | Orphans: $orphans"
