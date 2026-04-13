@@ -1,6 +1,27 @@
 export type OperationType = "reflect" | "ruminate" | "dream" | "ingest";
 export type OperationStatus = "keep" | "noop" | "cancelled" | "error";
 
+export interface MemoryBrainDefinition {
+  path: string;
+}
+
+export interface MemoryProjectMapping {
+  projectPath: string;
+  brain: string;
+}
+
+export interface MemoryBrainConfig {
+  defaultBrain: string;
+  brains: Record<string, MemoryBrainDefinition>;
+  projectMappings: MemoryProjectMapping[];
+}
+
+export interface ActiveBrain {
+  name: string;
+  vaultDir: string;
+  source: "mapped" | "default";
+}
+
 export interface OperationResult {
   type: OperationType;
   status: OperationStatus;
