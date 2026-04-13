@@ -348,7 +348,7 @@ Clean up leftover `VAULT_DIR` assumptions, duplicated path joins, and any status
 Run: `cd memory && npm test`
 Expected: PASS
 
-- [ ] **Step 5: Commit the verified final state**
+- [x] **Step 5: Commit the verified final state**
 
 ```bash
 git add memory README.md
