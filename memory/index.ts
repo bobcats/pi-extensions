@@ -27,7 +27,7 @@ import { OPERATIONS_FILE, readVaultIndex, listVaultFiles, countVaultFiles, initV
 import { MINER_AGENT_PATH, SCRIPTS_DIR, parseRuminateArgs, extractAndBatch, buildRuminatePrompt } from "./session.js";
 import { formatElapsed, formatRelativeTime, STATUS_ICONS, parseOperationsJSONL, renderDashboardLines } from "./dashboard.js";
 import { buildReflectPrompt, buildDreamPrompt } from "./prompts.js";
-import { loadMemoryConfig, resolveActiveBrain } from "./config.js";
+import { MEMORY_CONFIG_FILE, loadMemoryConfig, resolveActiveBrain, saveMemoryConfig } from "./config.js";
 import type { ActiveBrain, OperationType, OperationStatus, OperationResult, MemoryState } from "./types.js";
 
 // ---------------------------------------------------------------------------
@@ -156,6 +156,7 @@ export default function memoryExtension(pi: ExtensionAPI) {
   };
 
   const getOperationsPath = (brain: ActiveBrain): string => path.join(brain.vaultDir, OPERATIONS_FILE);
+  const getMemoryConfigPath = (): string => path.join(os.homedir(), MEMORY_CONFIG_FILE);
 
   // -----------------------------------------------------------------------
   // State reconstruction
@@ -760,6 +761,13 @@ export default function memoryExtension(pi: ExtensionAPI) {
     { value: "ruminate --from", label: "ruminate --from", description: "Mine sessions modified on or after YYYY-MM-DD" },
     { value: "ruminate --to", label: "ruminate --to", description: "Mine sessions modified on or before YYYY-MM-DD" },
     { value: "search", label: "search", description: "Search the memory vault (requires qmd)" },
+    { value: "brain list", label: "brain list", description: "List configured brains" },
+    { value: "brain add", label: "brain add", description: "Register a named brain" },
+    { value: "brain remove", label: "brain remove", description: "Remove a named brain from config" },
+    { value: "brain create", label: "brain create", description: "Create and initialize a named brain" },
+    { value: "brain map", label: "brain map", description: "Map a project path to a brain" },
+    { value: "brain unmap", label: "brain unmap", description: "Remove a project mapping" },
+    { value: "brain which", label: "brain which", description: "Show the active brain for this project" },
     { value: "dream", label: "dream", description: "Start autonomous vault curation loop" },
     { value: "cancel dream", label: "cancel dream", description: "Stop dream mode" },
     { value: "undo", label: "undo", description: "Revert the last memory vault commit" },
@@ -777,6 +785,117 @@ export default function memoryExtension(pi: ExtensionAPI) {
     },
     handler: async (args, ctx) => {
       const trimmed = (args ?? "").trim();
+      const brain = getActiveBrain(ctx);
+
+      if (trimmed === "brain list") {
+        const config = loadMemoryConfig(os.homedir());
+        const lines = Object.entries(config.brains)
+          .sort(([a], [b]) => a.localeCompare(b))
+          .map(([name, definition]) => {
+            const suffix = name === brain.name ? " (active)" : "";
+            return `${name}${suffix} — ${definition.path}`;
+          });
+        ctx.ui.notify(`Brains (${getMemoryConfigPath()}):\n${lines.join("\n")}`, "info");
+        return;
+      }
+
+      if (trimmed === "brain which") {
+        ctx.ui.notify(
+          `Active brain: ${brain.name}\nProject: ${ctx.cwd}\nLocation: ${brain.vaultDir}\nSource: ${brain.source}`,
+          "info",
+        );
+        return;
+      }
+
+      if (trimmed.startsWith("brain add ")) {
+        const [, , name, ...rest] = trimmed.split(/\s+/);
+        if (!name) {
+          ctx.ui.notify("Usage: /memory brain add <name> [path]", "warning");
+          return;
+        }
+        const config = loadMemoryConfig(os.homedir());
+        const brainPath = rest.length > 0 ? rest.join(" ") : path.join(os.homedir(), ".pi", "memory-brains", name);
+        config.brains[name] = { path: brainPath };
+        saveMemoryConfig(os.homedir(), config);
+        ctx.ui.notify(`Added brain ${name} at ${config.brains[name].path}.`, "success");
+        return;
+      }
+
+      if (trimmed.startsWith("brain create ")) {
+        const [, , name] = trimmed.split(/\s+/);
+        if (!name) {
+          ctx.ui.notify("Usage: /memory brain create <name>", "warning");
+          return;
+        }
+        const config = loadMemoryConfig(os.homedir());
+        const brainPath = path.join(os.homedir(), ".pi", "memory-brains", name);
+        config.brains[name] = { path: brainPath };
+        saveMemoryConfig(os.homedir(), config);
+        const result = initVault(brainPath, true);
+        initGitRepo(brainPath);
+        commitVault(brainPath, `init: bootstrap ${name} brain`);
+        ctx.ui.notify(`Created brain ${name} at ${brainPath} with ${result.principlesInstalled} starter principles.`, "success");
+        return;
+      }
+
+      if (trimmed.startsWith("brain map ")) {
+        const [, , projectPath, targetBrain] = trimmed.split(/\s+/);
+        if (!projectPath || !targetBrain) {
+          ctx.ui.notify("Usage: /memory brain map <project-path> <brain>", "warning");
+          return;
+        }
+        const config = loadMemoryConfig(os.homedir());
+        if (!config.brains[targetBrain]) {
+          ctx.ui.notify(`Unknown brain: ${targetBrain}`, "warning");
+          return;
+        }
+        config.projectMappings = config.projectMappings.filter((entry) => entry.projectPath !== path.resolve(projectPath));
+        config.projectMappings.push({ projectPath, brain: targetBrain });
+        saveMemoryConfig(os.homedir(), config);
+        reconstructState(ctx);
+        ctx.ui.notify(`Mapped ${projectPath} to brain ${targetBrain}.`, "success");
+        return;
+      }
+
+      if (trimmed.startsWith("brain unmap ")) {
+        const [, , projectPath] = trimmed.split(/\s+/);
+        if (!projectPath) {
+          ctx.ui.notify("Usage: /memory brain unmap <project-path>", "warning");
+          return;
+        }
+        const config = loadMemoryConfig(os.homedir());
+        config.projectMappings = config.projectMappings.filter((entry) => entry.projectPath !== path.resolve(projectPath));
+        saveMemoryConfig(os.homedir(), config);
+        reconstructState(ctx);
+        ctx.ui.notify(`Unmapped ${projectPath}.`, "success");
+        return;
+      }
+
+      if (trimmed.startsWith("brain remove ")) {
+        const [, , name] = trimmed.split(/\s+/);
+        if (!name) {
+          ctx.ui.notify("Usage: /memory brain remove <name>", "warning");
+          return;
+        }
+        if (name === "main") {
+          ctx.ui.notify("Cannot remove main brain.", "warning");
+          return;
+        }
+        const config = loadMemoryConfig(os.homedir());
+        if (config.projectMappings.some((entry) => entry.brain === name)) {
+          ctx.ui.notify(`Cannot remove ${name}: project mappings still exist.`, "warning");
+          return;
+        }
+        if (!config.brains[name]) {
+          ctx.ui.notify(`Unknown brain: ${name}`, "warning");
+          return;
+        }
+        delete config.brains[name];
+        saveMemoryConfig(os.homedir(), config);
+        reconstructState(ctx);
+        ctx.ui.notify(`Removed brain ${name} from ${getMemoryConfigPath()}. On-disk vault left untouched.`, "success");
+        return;
+      }
 
       if (trimmed === "off") {
         memoryEnabled = false;
@@ -789,8 +908,6 @@ export default function memoryExtension(pi: ExtensionAPI) {
         ctx.ui.notify("Memory: on", "info");
         return;
       }
-
-      const brain = getActiveBrain(ctx);
 
       if (trimmed === "undo") {
         const result = undoLastCommit(brain.vaultDir);

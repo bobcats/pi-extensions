@@ -12,7 +12,7 @@ Extensions and prompt templates for [pi](https://github.com/badlogic/pi-mono).
 | [exa](./exa/) | Adds Exa-powered web search, answers, and research tools |
 | [ext-prof](./ext-prof/) | Profiles extension handler execution time |
 | [files](./files/) | Lists git-tracked and session-referenced files with quick actions |
-| [memory](./memory/) | Persists agent learnings across sessions — reflect, ruminate, dream |
+| [memory](./memory/) | Persists agent learnings across sessions — reflect, ruminate, dream, and named brains |
 | [notify](./notify/) | Sends desktop notifications via OSC 777 when the agent finishes |
 | [session-breakdown](./session-breakdown/) | Shows usage stats, cost by model, and a calendar graph |
 | [subagent](./subagent/) | Delegates tasks to isolated subagents — single, parallel, or chained |
@@ -63,6 +63,19 @@ cd tldraw-desktop && npm test
 ```
 
 Skills live under `./skills/` and are packaged with the repository. For example, `/skill:memory-ingest <input>` writes markdown artifacts to `~/.pi/memories/raw/` and then updates curated notes in `~/.pi/memories/`.
+
+### Memory brains
+
+The memory extension defaults to the `main` brain at `~/.pi/memories`.
+
+Global brain config lives at `~/.pi/memory-config.json`.
+
+Example commands:
+
+```text
+/memory brain create poe
+/memory brain map /Users/brian/code/poe poe
+```
 
 Hot-reload in a running session:
 

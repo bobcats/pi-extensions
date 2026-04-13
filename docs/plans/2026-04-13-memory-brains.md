@@ -174,7 +174,7 @@ When handling `session_start`, `session_switch`, `session_fork`, `session_tree`,
 Run: `cd memory && npm test -- index.test.ts`
 Expected: PASS
 
-- [ ] **Step 7: Commit the brain-aware extension refactor**
+- [x] **Step 7: Commit the brain-aware extension refactor**
 
 ```bash
 git add memory/index.ts memory/dashboard.ts memory/types.ts memory/index.test.ts
@@ -188,7 +188,7 @@ git commit -m "feat: resolve memory vaults by brain"
 - Modify: `memory/index.test.ts`
 - Modify: `README.md`
 
-- [ ] **Step 1: Write failing command tests for brain management**
+- [x] **Step 1: Write failing command tests for brain management**
 
 Cover these command flows:
 - `/memory brain list` shows known brains and marks the active one
@@ -206,12 +206,12 @@ assert.match(message, /poe/);
 assert.match(message, /active/);
 ```
 
-- [ ] **Step 2: Run the targeted tests to verify they fail**
+- [x] **Step 2: Run the targeted tests to verify they fail**
 
 Run: `cd memory && npm test -- index.test.ts`
 Expected: FAIL because the `brain` subcommands do not exist yet.
 
-- [ ] **Step 3: Add `brain` autocomplete entries and command parsing**
+- [x] **Step 3: Add `brain` autocomplete entries and command parsing**
 
 Implement these required subcommands only:
 - `brain list`
@@ -230,7 +230,7 @@ Behavior rules:
 - remove only deletes config state in v1; it does not delete on-disk vault contents
 - success messages should always include the brain name and path or project path that changed
 
-- [ ] **Step 4: Document the commands and config file shape**
+- [x] **Step 4: Document the commands and config file shape**
 
 Update `README.md` with one short section showing:
 - default `main` behavior
@@ -238,7 +238,7 @@ Update `README.md` with one short section showing:
 - example `/memory brain create poe`
 - example `/memory brain map /Users/brian/code/poe poe`
 
-- [ ] **Step 5: Run the updated command tests and make them pass**
+- [x] **Step 5: Run the updated command tests and make them pass**
 
 Run: `cd memory && npm test -- index.test.ts`
 Expected: PASS

@@ -149,3 +149,32 @@ test("memory status and prompt injection use the mapped brain vault", async () =
     restore();
   }
 });
+
+test("memory brain commands manage brains and mappings", async () => {
+  const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "memory-home-"));
+  const { memoryExtension, restore } = await loadExtensionForHome(homeDir);
+
+  try {
+    const harness = createHarness();
+    memoryExtension(harness.pi);
+
+    const memoryCommand = harness.commands.get("memory");
+    assert.ok(memoryCommand);
+
+    await memoryCommand.handler("brain create poe", harness.ctx);
+    await memoryCommand.handler("brain map /tmp/project poe", harness.ctx);
+    await memoryCommand.handler("brain list", harness.ctx);
+    await memoryCommand.handler("brain which", harness.ctx);
+    await memoryCommand.handler("brain remove poe", harness.ctx);
+    await memoryCommand.handler("brain unmap /tmp/project", harness.ctx);
+    await memoryCommand.handler("brain remove poe", harness.ctx);
+
+    const messages = harness.notifications.map((entry) => entry.message).join("\n---\n");
+    assert.match(messages, /main/);
+    assert.match(messages, /poe/);
+    assert.match(messages, /active/);
+    assert.match(messages, /Cannot remove/);
+  } finally {
+    restore();
+  }
+});
