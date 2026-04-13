@@ -297,7 +297,7 @@ Verify `log_operation` writes to `<activeBrain.vaultDir>/memory-operations.jsonl
 Run: `cd memory && npm test -- qmd.test.ts index.test.ts`
 Expected: PASS
 
-- [ ] **Step 6: Commit the per-brain isolation work**
+- [x] **Step 6: Commit the per-brain isolation work**
 
 ```bash
 git add memory/qmd.ts memory/qmd.test.ts memory/index.ts memory/index.test.ts
@@ -310,12 +310,12 @@ git commit -m "feat: isolate memory indexing and history by brain"
 - Modify: any files from prior tasks if verification finds gaps
 - Test: `memory/*.test.ts`
 
-- [ ] **Step 1: Run the full memory extension test suite**
+- [x] **Step 1: Run the full memory extension test suite**
 
 Run: `cd memory && npm test`
 Expected: PASS across all existing and new tests.
 
-- [ ] **Step 2: Manually smoke-test the expected CLI flow in a temp home directory**
+- [x] **Step 2: Manually smoke-test the expected CLI flow in a temp home directory**
 
 Run commands equivalent to:
 
@@ -339,11 +339,11 @@ Expected:
 - `search_memory` reads only from the mapped brain's QMD collection
 - `log_operation` appends only to the mapped brain's `memory-operations.jsonl`
 
-- [ ] **Step 3: Remove any dead constants or helper assumptions left from single-vault mode**
+- [x] **Step 3: Remove any dead constants or helper assumptions left from single-vault mode**
 
 Clean up leftover `VAULT_DIR` assumptions, duplicated path joins, and any status text that still implies there is only one vault.
 
-- [ ] **Step 4: Re-run the full test suite after cleanup**
+- [x] **Step 4: Re-run the full test suite after cleanup**
 
 Run: `cd memory && npm test`
 Expected: PASS
