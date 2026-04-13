@@ -243,7 +243,7 @@ Update `README.md` with one short section showing:
 Run: `cd memory && npm test -- index.test.ts`
 Expected: PASS
 
-- [ ] **Step 6: Commit the brain command surface**
+- [x] **Step 6: Commit the brain command surface**
 
 ```bash
 git add memory/index.ts memory/index.test.ts README.md
@@ -258,7 +258,7 @@ git commit -m "feat: add memory brain management commands"
 - Modify: `memory/index.ts`
 - Test: `memory/index.test.ts`
 
-- [ ] **Step 1: Write failing QMD tests for per-brain collection naming**
+- [x] **Step 1: Write failing QMD tests for per-brain collection naming**
 
 Add tests for a helper like:
 
@@ -269,12 +269,12 @@ assert.equal(collectionNameForBrain("poe"), "memory-poe");
 
 Also verify `toVaultPath` still resolves paths correctly when a collection name is provided.
 
-- [ ] **Step 2: Run the QMD test file to verify it fails**
+- [x] **Step 2: Run the QMD test file to verify it fails**
 
 Run: `cd memory && npm test -- qmd.test.ts`
 Expected: FAIL because QMD is still hard-coded to the `memory` collection.
 
-- [ ] **Step 3: Make QMD helpers accept a brain/collection argument**
+- [x] **Step 3: Make QMD helpers accept a brain/collection argument**
 
 Refactor signatures to be explicit:
 
@@ -288,11 +288,11 @@ export function ensureCollection(collection: string, vaultDir: string): Promise<
 
 Use `memory` for `main` to preserve backward compatibility. Use deterministic names for other brains, such as `memory-<brain>`.
 
-- [ ] **Step 4: Make operation history and git actions stay inside the active brain only**
+- [x] **Step 4: Make operation history and git actions stay inside the active brain only**
 
 Verify `log_operation` writes to `<activeBrain.vaultDir>/memory-operations.jsonl` and all `undo`, `log`, and `getChangedFiles` calls use that same vault path. Add or extend tests if any of these still accidentally hit the old default path.
 
-- [ ] **Step 5: Run the focused QMD and extension tests and make them pass**
+- [x] **Step 5: Run the focused QMD and extension tests and make them pass**
 
 Run: `cd memory && npm test -- qmd.test.ts index.test.ts`
 Expected: PASS

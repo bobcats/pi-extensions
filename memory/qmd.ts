@@ -6,13 +6,21 @@
 import { execFile, execFileSync } from "node:child_process";
 
 const QMD_BIN = "qmd";
-const COLLECTION_NAME = "memory";
-const VIRTUAL_PATH_PREFIX = `qmd://${COLLECTION_NAME}/`;
+const LEGACY_COLLECTION_NAME = "memory";
 
-/** Convert a QMD virtual path (qmd://memory/...) to a filesystem path under the vault. */
-export function toVaultPath(vaultDir: string, qmdPath: string): string {
-  if (qmdPath.startsWith(VIRTUAL_PATH_PREFIX)) {
-    return vaultDir + "/" + qmdPath.slice(VIRTUAL_PATH_PREFIX.length);
+function virtualPathPrefix(collection: string): string {
+  return `qmd://${collection}/`;
+}
+
+export function collectionNameForBrain(brain: string): string {
+  return brain === "main" ? LEGACY_COLLECTION_NAME : `memory-${brain}`;
+}
+
+/** Convert a QMD virtual path (qmd://collection/...) to a filesystem path under the vault. */
+export function toVaultPath(vaultDir: string, qmdPath: string, collection: string): string {
+  const prefix = virtualPathPrefix(collection);
+  if (qmdPath.startsWith(prefix)) {
+    return vaultDir + "/" + qmdPath.slice(prefix.length);
   }
   return qmdPath;
 }
@@ -60,6 +68,7 @@ function parseResult(r: QmdRawResult): QmdSearchResult {
 
 /** Build the QMD CLI arguments for hybrid vault search. */
 export function buildSearchArgs(
+  collection: string,
   query: string,
   options?: { limit?: number; minScore?: number },
 ): string[] {
@@ -67,7 +76,7 @@ export function buildSearchArgs(
   const minScore = options?.minScore ?? 0;
   const args = ["query", query, "--json", "-n", String(limit)];
   if (minScore > 0) args.push("--min-score", String(minScore));
-  args.push("-c", COLLECTION_NAME);
+  args.push("-c", collection);
   return args;
 }
 
@@ -77,10 +86,11 @@ export function buildSearchArgs(
  * Returns [] if qmd is not available or the query fails.
  */
 export function search(
+  collection: string,
   query: string,
   options?: { limit?: number; minScore?: number },
 ): Promise<QmdSearchResult[]> {
-  const args = buildSearchArgs(query, options);
+  const args = buildSearchArgs(collection, query, options);
 
   return new Promise((resolve) => {
     execFile(QMD_BIN, args, { timeout: 120_000 }, (err, stdout, stderr) => {
@@ -92,8 +102,6 @@ export function search(
         return;
       }
       try {
-        // qmd query prints progress lines before the JSON array —
-        // extract only the JSON portion.
         const jsonStart = stdout.indexOf("[");
         if (jsonStart < 0) {
           resolve([]);
@@ -113,9 +121,9 @@ export function search(
  * Run `qmd update` to re-index the memory collection.
  * Fire-and-forget — errors are swallowed.
  */
-export function update(): Promise<void> {
+export function update(collection: string): Promise<void> {
   return new Promise((resolve) => {
-    execFile(QMD_BIN, ["update", "-c", COLLECTION_NAME], { timeout: 30_000 }, () => {
+    execFile(QMD_BIN, ["update", "-c", collection], { timeout: 30_000 }, () => {
       resolve();
     });
   });
@@ -125,9 +133,9 @@ export function update(): Promise<void> {
  * Run `qmd embed` to generate/refresh vector embeddings.
  * Fire-and-forget — errors are swallowed.
  */
-export function embed(): Promise<void> {
+export function embed(collection: string): Promise<void> {
   return new Promise((resolve) => {
-    execFile(QMD_BIN, ["embed", "-c", COLLECTION_NAME], { timeout: 120_000 }, () => {
+    execFile(QMD_BIN, ["embed", "-c", collection], { timeout: 120_000 }, () => {
       resolve();
     });
   });
@@ -137,18 +145,17 @@ export function embed(): Promise<void> {
  * Ensure the memory vault is registered as a QMD collection.
  * Idempotent — just tries `collection add` and treats "already exists" as success.
  */
-export function ensureCollection(vaultDir: string): Promise<boolean> {
+export function ensureCollection(collection: string, vaultDir: string): Promise<boolean> {
   return new Promise((resolve) => {
     execFile(
       QMD_BIN,
-      ["collection", "add", vaultDir, "--name", COLLECTION_NAME],
+      ["collection", "add", vaultDir, "--name", collection],
       { timeout: 30_000 },
       (err, stdout, stderr) => {
         if (!err) {
           resolve(true);
           return;
         }
-        // "already exists" is success
         if (stderr?.includes("already exists") || stdout?.includes("already exists")) {
           resolve(true);
           return;

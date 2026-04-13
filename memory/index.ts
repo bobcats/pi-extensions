@@ -188,7 +188,8 @@ export default function memoryExtension(pi: ExtensionAPI) {
     }
     qmdAvailable = isQmdInstalled;
     if (qmdAvailable) {
-      qmd.ensureCollection(brain.vaultDir).then(() => qmd.embed()).catch(() => {});
+      const collection = qmd.collectionNameForBrain(brain.name);
+      qmd.ensureCollection(collection, brain.vaultDir).then(() => qmd.embed(collection)).catch(() => {});
     }
 
     updateWidget(ctx);
@@ -422,7 +423,8 @@ export default function memoryExtension(pi: ExtensionAPI) {
         };
       }
 
-      const results = await qmd.search(params.query, {
+      const collection = qmd.collectionNameForBrain(brain.name);
+      const results = await qmd.search(collection, params.query, {
         limit: params.limit ?? 5,
       });
 
@@ -440,7 +442,7 @@ export default function memoryExtension(pi: ExtensionAPI) {
       const lines = results.map(
         (r, i) =>
           `${i + 1}. **${r.title}** (${Math.round(r.score * 100)}%)\n` +
-          `   File: ${qmd.toVaultPath(brain.vaultDir, r.file)}\n` +
+          `   File: ${qmd.toVaultPath(brain.vaultDir, r.file, collection)}\n` +
           (r.snippet ? `   ${r.snippet}\n` : ""),
       );
 
@@ -541,7 +543,8 @@ export default function memoryExtension(pi: ExtensionAPI) {
 
       // Auto-index QMD after vault changes
       if (qmdAvailable && result.committed) {
-        qmd.update().then(() => qmd.embed()).catch(() => {});
+        const collection = qmd.collectionNameForBrain(brain.name);
+        qmd.update(collection).then(() => qmd.embed(collection)).catch(() => {});
       }
 
       runningOperation = null;
@@ -993,14 +996,15 @@ export default function memoryExtension(pi: ExtensionAPI) {
           return;
         }
         ctx.ui.notify(`Searching vault for: ${query}`, "info");
-        const results = await qmd.search(query, { limit: 10 });
+        const collection = qmd.collectionNameForBrain(brain.name);
+        const results = await qmd.search(collection, query, { limit: 10 });
         if (results.length === 0) {
           ctx.ui.notify(`No results for "${query}"`, "info");
           return;
         }
         const lines = results.map(
           (r, i) =>
-            `${i + 1}. ${Math.round(r.score * 100)}% ${r.title}\n   ${qmd.toVaultPath(brain.vaultDir, r.file)}`,
+            `${i + 1}. ${Math.round(r.score * 100)}% ${r.title}\n   ${qmd.toVaultPath(brain.vaultDir, r.file, collection)}`,
         );
         ctx.ui.notify(lines.join("\n"), "info");
         return;
@@ -1029,7 +1033,8 @@ export default function memoryExtension(pi: ExtensionAPI) {
           initGitRepo(brain.vaultDir);
           commitVault(brain.vaultDir, "init: update vault with starter principles");
           if (qmdAvailable) {
-            qmd.ensureCollection(brain.vaultDir).then(() => qmd.update()).catch(() => {});
+            const collection = qmd.collectionNameForBrain(brain.name);
+            qmd.ensureCollection(collection, brain.vaultDir).then(() => qmd.update(collection)).catch(() => {});
           }
           updateWidget(ctx);
           ctx.ui.notify(`Vault updated with ${result.principlesInstalled} starter principles.`, "success");
@@ -1040,7 +1045,8 @@ export default function memoryExtension(pi: ExtensionAPI) {
         initGitRepo(brain.vaultDir);
         commitVault(brain.vaultDir, "init: bootstrap vault with starter principles");
         if (qmdAvailable) {
-          qmd.ensureCollection(brain.vaultDir).then(() => qmd.update()).catch(() => {});
+          const collection = qmd.collectionNameForBrain(brain.name);
+          qmd.ensureCollection(collection, brain.vaultDir).then(() => qmd.update(collection)).catch(() => {});
         }
         memoryEnabled = true;
         updateWidget(ctx);

@@ -178,3 +178,50 @@ test("memory brain commands manage brains and mappings", async () => {
     restore();
   }
 });
+
+test("log_operation writes history into the mapped brain vault only", async () => {
+  const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "memory-home-"));
+  const mainVaultDir = path.join(homeDir, ".pi", "memories");
+  const poeVaultDir = path.join(homeDir, ".pi", "memory-brains", "poe");
+  const configPath = path.join(homeDir, ".pi", "memory-config.json");
+  fs.mkdirSync(path.dirname(configPath), { recursive: true });
+  fs.mkdirSync(mainVaultDir, { recursive: true });
+  fs.mkdirSync(poeVaultDir, { recursive: true });
+  fs.writeFileSync(path.join(mainVaultDir, "index.md"), "# Memory\n");
+  fs.writeFileSync(path.join(poeVaultDir, "index.md"), "# Memory\n");
+  fs.writeFileSync(configPath, JSON.stringify({
+    defaultBrain: "main",
+    brains: {
+      main: { path: mainVaultDir },
+      poe: { path: poeVaultDir },
+    },
+    projectMappings: [
+      { projectPath: "/tmp/project", brain: "poe" },
+    ],
+  }));
+
+  const { memoryExtension, restore } = await loadExtensionForHome(homeDir);
+
+  try {
+    const harness = createHarness();
+    memoryExtension(harness.pi);
+
+    const logOperationTool = harness.tools.get("log_operation");
+    assert.ok(logOperationTool);
+
+    fs.writeFileSync(path.join(poeVaultDir, "note.md"), "# Note\n");
+    await logOperationTool.execute(
+      "tool-1",
+      { type: "reflect", status: "keep", description: "Store poe note", findings_count: 1 },
+      new AbortController().signal,
+      () => {},
+      harness.ctx,
+    );
+
+    const poeOperations = fs.readFileSync(path.join(poeVaultDir, "memory-operations.jsonl"), "utf-8");
+    assert.match(poeOperations, /Store poe note/);
+    assert.equal(fs.existsSync(path.join(mainVaultDir, "memory-operations.jsonl")), false);
+  } finally {
+    restore();
+  }
+});
