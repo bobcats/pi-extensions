@@ -27,7 +27,8 @@ import { OPERATIONS_FILE, readVaultIndex, listVaultFiles, countVaultFiles, initV
 import { MINER_AGENT_PATH, SCRIPTS_DIR, parseRuminateArgs, extractAndBatch, buildRuminatePrompt } from "./session.js";
 import { formatElapsed, formatRelativeTime, STATUS_ICONS, parseOperationsJSONL, renderDashboardLines } from "./dashboard.js";
 import { buildReflectPrompt, buildDreamPrompt } from "./prompts.js";
-import type { OperationType, OperationStatus, OperationResult, MemoryState } from "./types.js";
+import { loadMemoryConfig, resolveActiveBrain } from "./config.js";
+import type { ActiveBrain, OperationType, OperationStatus, OperationResult, MemoryState } from "./types.js";
 
 // ---------------------------------------------------------------------------
 // Types (extension-local)
@@ -77,10 +78,6 @@ const SearchMemoryParams = Type.Object({
     }),
   ),
 });
-
-
-const VAULT_DIR = path.join(os.homedir(), ".pi", "memories");
-const OPERATIONS_PATH = path.join(VAULT_DIR, OPERATIONS_FILE);
 
 export default function memoryExtension(pi: ExtensionAPI) {
   // Register miner agent with the subagent extension.
@@ -147,19 +144,32 @@ export default function memoryExtension(pi: ExtensionAPI) {
     operations: [],
     dreamCycle: 0,
   };
+  let activeBrain: ActiveBrain = {
+    name: "main",
+    vaultDir: path.join(os.homedir(), ".pi", "memories"),
+    source: "default",
+  };
+
+  const getActiveBrain = (ctx: ExtensionContext): ActiveBrain => {
+    activeBrain = resolveActiveBrain(loadMemoryConfig(os.homedir()), ctx.cwd);
+    return activeBrain;
+  };
+
+  const getOperationsPath = (brain: ActiveBrain): string => path.join(brain.vaultDir, OPERATIONS_FILE);
 
   // -----------------------------------------------------------------------
   // State reconstruction
   // -----------------------------------------------------------------------
 
   const reconstructState = (ctx: ExtensionContext) => {
+    const brain = getActiveBrain(ctx);
+
     state = {
       operations: [],
       dreamCycle: 0,
     };
 
-    // Read from memory-operations.jsonl in the vault
-    const jsonlPath = OPERATIONS_PATH;
+    const jsonlPath = getOperationsPath(brain);
     try {
       if (fs.existsSync(jsonlPath)) {
         state.operations = parseOperationsJSONL(fs.readFileSync(jsonlPath, "utf-8"));
@@ -168,18 +178,16 @@ export default function memoryExtension(pi: ExtensionAPI) {
       // No JSONL yet
     }
 
-    // Initialize vault git repo if it exists
-    if (fs.existsSync(VAULT_DIR)) {
-      initGitRepo(VAULT_DIR);
+    if (fs.existsSync(brain.vaultDir)) {
+      initGitRepo(brain.vaultDir);
     }
 
-    // Initialize QMD collection (async, non-blocking)
     if (isQmdInstalled === null) {
       isQmdInstalled = qmd.isQmdAvailable();
     }
     qmdAvailable = isQmdInstalled;
     if (qmdAvailable) {
-      qmd.ensureCollection(VAULT_DIR).then(() => qmd.embed()).catch(() => {});
+      qmd.ensureCollection(brain.vaultDir).then(() => qmd.embed()).catch(() => {});
     }
 
     updateWidget(ctx);
@@ -189,7 +197,8 @@ export default function memoryExtension(pi: ExtensionAPI) {
     if (!ctx.hasUI) return;
     lastCtx = ctx;
 
-    const fileCount = countVaultFiles(VAULT_DIR);
+    const brain = getActiveBrain(ctx);
+    const fileCount = countVaultFiles(brain.vaultDir);
     if (state.operations.length === 0 && fileCount === 0) {
       ctx.ui.setWidget("memory", undefined);
       return;
@@ -201,7 +210,7 @@ export default function memoryExtension(pi: ExtensionAPI) {
         const lines: string[] = [];
 
         const hintText = " ctrl+b collapse • ctrl+shift+b fullscreen ";
-        const label = "🧠 memory";
+        const label = `🧠 memory (${brain.name})`;
         const fillLen = Math.max(0, width - 3 - 1 - label.length - 1 - hintText.length);
         lines.push(
           truncateToWidth(
@@ -213,18 +222,18 @@ export default function memoryExtension(pi: ExtensionAPI) {
           )
         );
 
-        lines.push(...renderDashboardLines(state, width, theme, countVaultFiles(VAULT_DIR)));
+        lines.push(...renderDashboardLines(state, width, theme, countVaultFiles(brain.vaultDir)));
 
         return new Text(lines.join("\n"), 0, 0);
       });
     } else {
       ctx.ui.setWidget("memory", (_tui, theme) => {
-        const fc = countVaultFiles(VAULT_DIR);
+        const fc = countVaultFiles(brain.vaultDir);
         const kept = state.operations.filter((r) => r.status === "keep").length;
         const last = state.operations.length > 0 ? state.operations[state.operations.length - 1] : null;
 
         const parts = [
-          theme.fg("accent", "🧠"),
+          theme.fg("accent", `🧠 ${brain.name}`),
           theme.fg("muted", ` ${fc} ${fc === 1 ? "file" : "files"}`),
           theme.fg("dim", " │ "),
           theme.fg("text", `${state.operations.length} ops`),
@@ -273,11 +282,12 @@ export default function memoryExtension(pi: ExtensionAPI) {
     if (now - lastAutoResumeTime < 5 * 60 * 1000) return;
     lastAutoResumeTime = now;
 
-    const journalPath = path.join(VAULT_DIR, "dream-journal.md");
+    const brain = getActiveBrain(ctx);
+    const journalPath = path.join(brain.vaultDir, "dream-journal.md");
     const hasJournal = fs.existsSync(journalPath);
 
     let resumeMsg =
-      `Dream loop ended (likely context limit). Resume the dream — read ${VAULT_DIR}/index.md for vault contents.`;
+      `Dream loop ended (likely context limit). Resume the dream — read ${brain.vaultDir}/index.md for vault contents.`;
     if (hasJournal) {
       resumeMsg += ` Check ${journalPath} for promising paths to explore. Prune stale entries.`;
     }
@@ -292,16 +302,22 @@ export default function memoryExtension(pi: ExtensionAPI) {
   pi.on("before_agent_start", async (event, _ctx) => {
     if (!memoryEnabled) return;
 
-    const indexContent = readVaultIndex(VAULT_DIR);
+    const previousVaultDir = activeBrain.vaultDir;
+    const brain = getActiveBrain(_ctx);
+    if (brain.vaultDir !== previousVaultDir) {
+      reconstructState(_ctx);
+    }
+
+    const indexContent = readVaultIndex(brain.vaultDir);
     if (!indexContent) return;
 
-    const fileCount = countVaultFiles(VAULT_DIR);
+    const fileCount = countVaultFiles(brain.vaultDir);
     let extra =
       "\n\n## Agent Memory\n\n" +
       "Before starting work, read the memory files relevant to this task. " +
       "The vault index below shows what's available. Memory files contain past mistakes, " +
       "project architecture, and patterns — skipping them leads to repeated errors.\n\n" +
-      `### Memory vault (${VAULT_DIR}/) — ${fileCount} files\n\n${indexContent}`;
+      `### Memory vault (${brain.vaultDir}/) — ${fileCount} files\n\n${indexContent}`;
 
     if (qmdAvailable) {
       extra +=
@@ -310,10 +326,10 @@ export default function memoryExtension(pi: ExtensionAPI) {
     }
 
     if (dreamMode) {
-      const journalPath = path.join(VAULT_DIR, "dream-journal.md");
+      const journalPath = path.join(brain.vaultDir, "dream-journal.md");
       const hasJournal = fs.existsSync(journalPath);
 
-      extra += "\n\n" + buildDreamPrompt(VAULT_DIR, consecutiveNoops, SCRIPTS_DIR);
+      extra += "\n\n" + buildDreamPrompt(brain.vaultDir, consecutiveNoops, SCRIPTS_DIR);
 
       if (hasJournal) {
         extra += `\n\n💡 Dream journal exists at ${journalPath} — check it for promising paths to explore. Prune stale entries.`;
@@ -326,11 +342,12 @@ export default function memoryExtension(pi: ExtensionAPI) {
   });
 
   const startReflect = (ctx: ExtensionContext, reason?: string) => {
+    const brain = getActiveBrain(ctx);
     memoryEnabled = true;
     updateWidget(ctx);
-    ctx.ui.notify("Reflecting on this session…", "info");
+    ctx.ui.notify(`Reflecting on this session (${brain.name})…`, "info");
     const extraReason = reason?.trim() ? `\n\nRequested reason: ${reason.trim()}` : "";
-    pi.sendUserMessage(buildReflectPrompt(VAULT_DIR) + extraReason, { deliverAs: "followUp" });
+    pi.sendUserMessage(buildReflectPrompt(brain.vaultDir) + extraReason, { deliverAs: "followUp" });
   };
 
   // -----------------------------------------------------------------------
@@ -392,12 +409,13 @@ export default function memoryExtension(pi: ExtensionAPI) {
     parameters: SearchMemoryParams,
 
     async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
+      const brain = getActiveBrain(_ctx);
       if (!qmdAvailable) {
         return {
           content: [
             {
               type: "text",
-              text: "qmd is not installed. Install with: npm i -g @tobilu/qmd\nFalling back to vault index at " + VAULT_DIR + "/index.md",
+              text: "qmd is not installed. Install with: npm i -g @tobilu/qmd\nFalling back to vault index at " + brain.vaultDir + "/index.md",
             },
           ],
         };
@@ -412,7 +430,7 @@ export default function memoryExtension(pi: ExtensionAPI) {
           content: [
             {
               type: "text",
-              text: `No results found for "${params.query}". Try broader terms or check ${VAULT_DIR}/index.md directly.`,
+              text: `No results found for "${params.query}". Try broader terms or check ${brain.vaultDir}/index.md directly.`,
             },
           ],
         };
@@ -421,7 +439,7 @@ export default function memoryExtension(pi: ExtensionAPI) {
       const lines = results.map(
         (r, i) =>
           `${i + 1}. **${r.title}** (${Math.round(r.score * 100)}%)\n` +
-          `   File: ${qmd.toVaultPath(VAULT_DIR, r.file)}\n` +
+          `   File: ${qmd.toVaultPath(brain.vaultDir, r.file)}\n` +
           (r.snippet ? `   ${r.snippet}\n` : ""),
       );
 
@@ -479,9 +497,10 @@ export default function memoryExtension(pi: ExtensionAPI) {
     parameters: LogOperationParams,
 
     async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
+      const brain = getActiveBrain(_ctx);
       const t0 = runningOperation?.startedAt ?? Date.now();
-      const filesChanged = getChangedFiles(VAULT_DIR);
-      const result = commitVault(VAULT_DIR, `${params.type}: ${params.description}`);
+      const filesChanged = getChangedFiles(brain.vaultDir);
+      const result = commitVault(brain.vaultDir, `${params.type}: ${params.description}`);
 
       const operation: OperationResult = {
         type: params.type as OperationType,
@@ -509,7 +528,7 @@ export default function memoryExtension(pi: ExtensionAPI) {
 
       // Append to JSONL
       try {
-        const jsonlPath = OPERATIONS_PATH;
+        const jsonlPath = getOperationsPath(brain);
         fs.mkdirSync(path.dirname(jsonlPath), { recursive: true });
         fs.appendFileSync(jsonlPath, JSON.stringify({
           operationType: operation.type,
@@ -581,8 +600,9 @@ export default function memoryExtension(pi: ExtensionAPI) {
   pi.registerShortcut("ctrl+b", {
     description: "Toggle memory dashboard",
     handler: async (ctx) => {
-      if (state.operations.length === 0 && countVaultFiles(VAULT_DIR) === 0) {
-        ctx.ui.notify("No vault yet — run /memory init to get started", "info");
+      const brain = getActiveBrain(ctx);
+      if (state.operations.length === 0 && countVaultFiles(brain.vaultDir) === 0) {
+        ctx.ui.notify(`No vault yet for ${brain.name} — run /memory init to get started`, "info");
         return;
       }
       dashboardExpanded = !dashboardExpanded;
@@ -597,8 +617,9 @@ export default function memoryExtension(pi: ExtensionAPI) {
   pi.registerShortcut("ctrl+shift+b", {
     description: "Fullscreen memory dashboard",
     handler: async (ctx) => {
-      if (state.operations.length === 0 && countVaultFiles(VAULT_DIR) === 0) {
-        ctx.ui.notify("No vault yet — run /memory init", "info");
+      const brain = getActiveBrain(ctx);
+      if (state.operations.length === 0 && countVaultFiles(brain.vaultDir) === 0) {
+        ctx.ui.notify(`No vault yet for ${brain.name} — run /memory init`, "info");
         return;
       }
 
@@ -617,7 +638,7 @@ export default function memoryExtension(pi: ExtensionAPI) {
             render(width: number): string[] {
               const termH = process.stdout.rows || 40;
               // Content gets the full width — no box borders
-              const content = renderDashboardLines(state, width, theme, countVaultFiles(VAULT_DIR), 0);
+              const content = renderDashboardLines(state, width, theme, countVaultFiles(brain.vaultDir), 0);
 
               // Add running operation indicator
               if (runningOperation) {
@@ -769,8 +790,10 @@ export default function memoryExtension(pi: ExtensionAPI) {
         return;
       }
 
+      const brain = getActiveBrain(ctx);
+
       if (trimmed === "undo") {
-        const result = undoLastCommit(VAULT_DIR);
+        const result = undoLastCommit(brain.vaultDir);
         if (result.success === false) {
           ctx.ui.notify(`Cannot undo: ${result.error}`, "warning");
         } else {
@@ -781,7 +804,7 @@ export default function memoryExtension(pi: ExtensionAPI) {
       }
 
       if (trimmed === "log") {
-        const entries = getGitLog(VAULT_DIR, 20);
+        const entries = getGitLog(brain.vaultDir, 20);
         if (entries.length === 0) {
           ctx.ui.notify("No vault history found.", "info");
         } else {
@@ -803,7 +826,7 @@ export default function memoryExtension(pi: ExtensionAPI) {
         }
 
         ctx.ui.notify("Extracting sessions…", "info");
-        const result = extractAndBatch(ctx.cwd, { fromDate, toDate });
+        const result = extractAndBatch(ctx.cwd, { fromDate, toDate }, undefined, brain.vaultDir);
         if ("error" in result) {
           ctx.ui.notify(result.error, "warning");
           return;
@@ -813,7 +836,7 @@ export default function memoryExtension(pi: ExtensionAPI) {
           `Found ${result.conversationCount} sessions in ${result.batches.length} batches. Sending to miners…`,
           "info",
         );
-        pi.sendUserMessage(buildRuminatePrompt(result, VAULT_DIR));
+        pi.sendUserMessage(buildRuminatePrompt(result, brain.vaultDir));
         return;
       }
 
@@ -824,7 +847,7 @@ export default function memoryExtension(pi: ExtensionAPI) {
         updateWidget(ctx);
         ctx.ui.notify("Dream mode started", "info");
         pi.sendUserMessage(
-          `Dream mode active. Read ${VAULT_DIR}/index.md and ${VAULT_DIR}/dream-journal.md, ` +
+          `Dream mode active. Read ${brain.vaultDir}/index.md and ${brain.vaultDir}/dream-journal.md, ` +
           `then start your first cycle. Call log_operation after each batch of changes. NEVER STOP until interrupted.`
         );
         return;
@@ -860,17 +883,17 @@ export default function memoryExtension(pi: ExtensionAPI) {
         }
         const lines = results.map(
           (r, i) =>
-            `${i + 1}. ${Math.round(r.score * 100)}% ${r.title}\n   ${qmd.toVaultPath(VAULT_DIR, r.file)}`,
+            `${i + 1}. ${Math.round(r.score * 100)}% ${r.title}\n   ${qmd.toVaultPath(brain.vaultDir, r.file)}`,
         );
         ctx.ui.notify(lines.join("\n"), "info");
         return;
       }
 
       if (trimmed === "init") {
-        const hasVaultAlready = fs.existsSync(path.join(VAULT_DIR, "index.md"));
+        const hasVaultAlready = fs.existsSync(path.join(brain.vaultDir, "index.md"));
 
         if (hasVaultAlready) {
-          const existingFiles = listVaultFiles(VAULT_DIR);
+          const existingFiles = listVaultFiles(brain.vaultDir);
           const addLabel = "Add missing starter principles only";
           const replaceLabel = "Replace all principles with defaults (keeps other files)";
           const cancelLabel = "Cancel";
@@ -881,43 +904,45 @@ export default function memoryExtension(pi: ExtensionAPI) {
           if (choice === cancelLabel || choice === undefined) return;
 
           if (choice === replaceLabel) {
-            fs.rmSync(path.join(VAULT_DIR, "principles"), { recursive: true, force: true });
-            fs.rmSync(path.join(VAULT_DIR, "principles.md"), { force: true });
+            fs.rmSync(path.join(brain.vaultDir, "principles"), { recursive: true, force: true });
+            fs.rmSync(path.join(brain.vaultDir, "principles.md"), { force: true });
           }
 
-          const result = initVault(VAULT_DIR, true);
-          initGitRepo(VAULT_DIR);
-          commitVault(VAULT_DIR, "init: update vault with starter principles");
+          const result = initVault(brain.vaultDir, true);
+          initGitRepo(brain.vaultDir);
+          commitVault(brain.vaultDir, "init: update vault with starter principles");
           if (qmdAvailable) {
-            qmd.ensureCollection(VAULT_DIR).then(() => qmd.update()).catch(() => {});
+            qmd.ensureCollection(brain.vaultDir).then(() => qmd.update()).catch(() => {});
           }
           updateWidget(ctx);
           ctx.ui.notify(`Vault updated with ${result.principlesInstalled} starter principles.`, "success");
           return;
         }
 
-        const result = initVault(VAULT_DIR, true);
-        initGitRepo(VAULT_DIR);
-        commitVault(VAULT_DIR, "init: bootstrap vault with starter principles");
+        const result = initVault(brain.vaultDir, true);
+        initGitRepo(brain.vaultDir);
+        commitVault(brain.vaultDir, "init: bootstrap vault with starter principles");
         if (qmdAvailable) {
-          qmd.ensureCollection(VAULT_DIR).then(() => qmd.update()).catch(() => {});
+          qmd.ensureCollection(brain.vaultDir).then(() => qmd.update()).catch(() => {});
         }
         memoryEnabled = true;
         updateWidget(ctx);
         ctx.ui.notify(
           `Vault initialized with ${result.principlesInstalled} starter principles.\n` +
-          `Location: ${VAULT_DIR}/`,
+          `Location: ${brain.vaultDir}/`,
           "success",
         );
         return;
       }
 
       // Default: show status
-      const fileCount = countVaultFiles(VAULT_DIR);
-      const hasVault = fs.existsSync(path.join(VAULT_DIR, "index.md"));
-      const hasJournal = fs.existsSync(path.join(VAULT_DIR, "dream-journal.md"));
+      const fileCount = countVaultFiles(brain.vaultDir);
+      const hasVault = fs.existsSync(path.join(brain.vaultDir, "index.md"));
+      const hasJournal = fs.existsSync(path.join(brain.vaultDir, "dream-journal.md"));
       ctx.ui.notify(
         `Memory: ${memoryEnabled ? "on" : "off"}\n` +
+        `Brain: ${brain.name}\n` +
+        `Location: ${brain.vaultDir}\n` +
         `Vault: ${hasVault ? `${fileCount} files` : "no vault"}\n` +
         `Operations: ${state.operations.length}\n` +
         `Dream: ${dreamMode ? `active (cycle ${state.dreamCycle})` : "off"}` +

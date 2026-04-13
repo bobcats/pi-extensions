@@ -105,7 +105,7 @@ Include tests for:
 Run: `cd memory && npm test -- config.test.ts`
 Expected: PASS
 
-- [ ] **Step 6: Commit the config foundation**
+- [x] **Step 6: Commit the config foundation**
 
 ```bash
 git add memory/config.ts memory/config.test.ts memory/types.ts docs/design/2026-04-13-memory-brains.md docs/plans/2026-04-13-memory-brains.md
@@ -120,7 +120,7 @@ git commit -m "feat: add memory brain config resolution"
 - Modify: `memory/types.ts`
 - Test: `memory/index.test.ts`
 
-- [ ] **Step 1: Write failing extension tests for active-brain selection**
+- [x] **Step 1: Write failing extension tests for active-brain selection**
 
 Add tests that:
 - create a fake home dir with config mapping `/tmp/project` to `poe`
@@ -134,12 +134,12 @@ assert.match(notification.message, /Brain: poe/);
 assert.match(notification.message, /memory-brains\/poe/);
 ```
 
-- [ ] **Step 2: Run the targeted extension tests to verify they fail**
+- [x] **Step 2: Run the targeted extension tests to verify they fail**
 
 Run: `cd memory && npm test -- index.test.ts`
 Expected: FAIL because `index.ts` still uses the `VAULT_DIR` constant everywhere.
 
-- [ ] **Step 3: Replace the global `VAULT_DIR`/`OPERATIONS_PATH` constants with resolved brain state**
+- [x] **Step 3: Replace the global `VAULT_DIR`/`OPERATIONS_PATH` constants with resolved brain state**
 
 Refactor `memory/index.ts` so one helper computes the current brain from `ctx.cwd` and cached global config:
 
@@ -161,15 +161,15 @@ Then thread `activeBrain.vaultDir` and `activeBrain.name` through:
 
 Use one small local accessor instead of repeatedly re-reading ad hoc paths.
 
-- [ ] **Step 4: Update dashboard/status text so the active brain is visible**
+- [x] **Step 4: Update dashboard/status text so the active brain is visible**
 
 Add `Brain: <name>` to status output and show the brain in the collapsed or expanded widget summary if it fits cleanly. Keep it terse; no wall of metadata.
 
-- [ ] **Step 5: Ensure brain changes are recomputed on session lifecycle events**
+- [x] **Step 5: Ensure brain changes are recomputed on session lifecycle events**
 
 When handling `session_start`, `session_switch`, `session_fork`, `session_tree`, and `before_agent_start`, rebuild state from the resolved brain for the current `ctx.cwd` so a project switch cannot keep stale history from another brain.
 
-- [ ] **Step 6: Run the focused extension tests and make them pass**
+- [x] **Step 6: Run the focused extension tests and make them pass**
 
 Run: `cd memory && npm test -- index.test.ts`
 Expected: PASS

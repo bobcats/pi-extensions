@@ -103,3 +103,49 @@ test("dream auto-resume queues follow-up message from agent_end", async () => {
     restore();
   }
 });
+
+test("memory status and prompt injection use the mapped brain vault", async () => {
+  const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "memory-home-"));
+  const poeVaultDir = path.join(homeDir, ".pi", "memory-brains", "poe");
+  const configPath = path.join(homeDir, ".pi", "memory-config.json");
+  fs.mkdirSync(path.dirname(configPath), { recursive: true });
+  fs.mkdirSync(poeVaultDir, { recursive: true });
+  fs.writeFileSync(path.join(poeVaultDir, "index.md"), "# Memory\n- [[poe-note]]\n");
+  fs.writeFileSync(configPath, JSON.stringify({
+    defaultBrain: "main",
+    brains: {
+      main: { path: path.join(homeDir, ".pi", "memories") },
+      poe: { path: poeVaultDir },
+    },
+    projectMappings: [
+      { projectPath: "/tmp/project", brain: "poe" },
+    ],
+  }));
+
+  const { memoryExtension, restore } = await loadExtensionForHome(homeDir);
+
+  try {
+    const harness = createHarness();
+    memoryExtension(harness.pi);
+
+    const memoryCommand = harness.commands.get("memory");
+    const beforeAgentStart = harness.handlers.get("before_agent_start");
+
+    assert.ok(memoryCommand);
+    assert.ok(beforeAgentStart);
+
+    await memoryCommand.handler("", harness.ctx);
+
+    const notification = harness.notifications[harness.notifications.length - 1];
+    assert.match(notification.message, /Brain: poe/);
+    assert.match(notification.message, /memory-brains\/poe/);
+    assert.doesNotMatch(notification.message, /\.pi\/memories/);
+
+    const result = await beforeAgentStart({ systemPrompt: "base" }, harness.ctx);
+    assert.ok(result);
+    assert.match(result.systemPrompt, /memory-brains\/poe/);
+    assert.doesNotMatch(result.systemPrompt, /\.pi\/memories/);
+  } finally {
+    restore();
+  }
+});
