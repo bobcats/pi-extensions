@@ -26,6 +26,19 @@ function truncate(text: string, max: number): string {
 	return text.length > max ? text.slice(0, max) + "..." : text;
 }
 
+function firstUserMessageFromBranch(ctx: any): any | null {
+	const branch = ctx?.sessionManager?.getBranch?.();
+	if (!Array.isArray(branch)) return null;
+
+	for (const entry of branch) {
+		if (entry?.type !== "message") continue;
+		const message = (entry as any).message;
+		if (message?.role === "user") return message;
+	}
+
+	return null;
+}
+
 export function createAutoNameExtension(deps: {
 	completeFn?: typeof complete;
 } = {}) {
@@ -40,8 +53,9 @@ export function createAutoNameExtension(deps: {
 			const lastAssistant = [...messages].reverse().find((m) => m.role === "assistant");
 			if ((lastAssistant as any)?.stopReason === "aborted") return;
 
-			const firstUser = messages.find((m) => m.role === "user");
-			const userText = truncate(textOf(firstUser), 1000);
+			const firstSessionUser = firstUserMessageFromBranch(ctx);
+			const firstTurnUser = messages.find((m) => m.role === "user");
+			const userText = truncate(textOf(firstSessionUser) || textOf(firstTurnUser), 1000);
 			if (!userText) return;
 
 			const model = ctx.modelRegistry.find(AUTO_NAME_PROVIDER, AUTO_NAME_MODEL);

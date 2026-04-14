@@ -83,7 +83,7 @@ test("uses getApiKeyAndHeaders and names the session", async () => {
   assert.deepEqual(completeCall?.options, { apiKey: "test-key", headers: { "x-test": "1" }, maxTokens: 30 });
 });
 
-test("uses first user message only in naming prompt", async () => {
+test("prefers first session user message for naming prompt", async () => {
   const harness = createHarness();
   let promptText = "";
 
@@ -108,19 +108,54 @@ test("uses first user message only in naming prompt", async () => {
   await handler(
     {
       messages: [
-        { role: "user", content: [{ type: "text", text: "first user message" }] },
+        { role: "user", content: [{ type: "text", text: "first turn user message" }] },
         { role: "assistant", content: [{ type: "text", text: "tail the log and paste it" }], stopReason: "stop" },
-        { role: "user", content: [{ type: "text", text: "second user message" }] },
+        { role: "user", content: [{ type: "text", text: "meta follow-up message" }] },
       ],
     },
     harness.ctx,
   );
 
-  assert.match(promptText, /<message>first user message<\/message>/);
-  assert.doesNotMatch(promptText, /second user message/);
+  assert.match(promptText, /<message>debug the auto-name extension<\/message>/);
+  assert.doesNotMatch(promptText, /first turn user message/);
+  assert.doesNotMatch(promptText, /meta follow-up message/);
   assert.doesNotMatch(promptText, /tail the log and paste it/);
-  assert.doesNotMatch(promptText, /debug the auto-name extension/);
   assert.doesNotMatch(promptText, /I found the provider error and added logging\./);
+});
+
+test("falls back to current turn messages when session branch has no user message", async () => {
+  const harness = createHarness();
+  let promptText = "";
+
+  harness.ctx.sessionManager.getBranch = () => [
+    { type: "session_info", name: "Some name" },
+    { type: "message", message: { role: "assistant", content: [{ type: "text", text: "No user messages in branch" }] } },
+  ];
+
+  createAutoNameExtension({
+    completeFn: async (_model, context) => {
+      promptText = context.messages[0].content[0].text;
+      return {
+        role: "assistant",
+        content: [{ type: "text", text: "Fix extension naming" }],
+      };
+    },
+  })(harness.pi);
+
+  const handler = harness.handlers.get("agent_end");
+  assert.ok(handler);
+
+  await handler(
+    {
+      messages: [
+        { role: "user", content: [{ type: "text", text: "event turn first user" }] },
+        { role: "assistant", content: [{ type: "text", text: "I will inspect the extension." }], stopReason: "stop" },
+      ],
+    },
+    harness.ctx,
+  );
+
+  assert.match(promptText, /<message>event turn first user<\/message>/);
 });
 
 test("skips naming when auth resolution fails", async () => {
