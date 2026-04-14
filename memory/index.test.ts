@@ -225,3 +225,30 @@ test("log_operation writes history into the mapped brain vault only", async () =
     restore();
   }
 });
+
+test("brain commands reject invalid names and duplicate creates with clear messages", async () => {
+  const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "memory-home-"));
+  const { memoryExtension, restore } = await loadExtensionForHome(homeDir);
+
+  try {
+    const harness = createHarness();
+    memoryExtension(harness.pi);
+
+    const memoryCommand = harness.commands.get("memory");
+    assert.ok(memoryCommand);
+
+    await memoryCommand.handler("brain create Poe!", harness.ctx);
+    await memoryCommand.handler("brain create poe", harness.ctx);
+    await memoryCommand.handler("brain create poe", harness.ctx);
+    await memoryCommand.handler("brain unmap /tmp/unknown-project", harness.ctx);
+    await memoryCommand.handler("brain list", harness.ctx);
+
+    const messages = harness.notifications.map((entry) => entry.message).join("\n---\n");
+    assert.match(messages, /Invalid brain name/);
+    assert.match(messages, /already exists/);
+    assert.match(messages, /No mapping found/);
+    assert.match(messages, /default/);
+  } finally {
+    restore();
+  }
+});

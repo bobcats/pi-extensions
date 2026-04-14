@@ -157,6 +157,7 @@ export default function memoryExtension(pi: ExtensionAPI) {
 
   const getOperationsPath = (brain: ActiveBrain): string => path.join(brain.vaultDir, OPERATIONS_FILE);
   const getMemoryConfigPath = (): string => path.join(os.homedir(), MEMORY_CONFIG_FILE);
+  const isValidBrainName = (value: string): boolean => /^[a-z0-9-]+$/.test(value);
 
   // -----------------------------------------------------------------------
   // State reconstruction
@@ -795,7 +796,10 @@ export default function memoryExtension(pi: ExtensionAPI) {
         const lines = Object.entries(config.brains)
           .sort(([a], [b]) => a.localeCompare(b))
           .map(([name, definition]) => {
-            const suffix = name === brain.name ? " (active)" : "";
+            const flags = [name === config.defaultBrain ? "default" : "", name === brain.name ? "active" : ""]
+              .filter(Boolean)
+              .join(", ");
+            const suffix = flags ? ` (${flags})` : "";
             return `${name}${suffix} — ${definition.path}`;
           });
         ctx.ui.notify(`Brains (${getMemoryConfigPath()}):\n${lines.join("\n")}`, "info");
@@ -816,7 +820,15 @@ export default function memoryExtension(pi: ExtensionAPI) {
           ctx.ui.notify("Usage: /memory brain add <name> [path]", "warning");
           return;
         }
+        if (!isValidBrainName(name)) {
+          ctx.ui.notify("Invalid brain name. Use lowercase letters, numbers, and hyphens only.", "warning");
+          return;
+        }
         const config = loadMemoryConfig(os.homedir());
+        if (config.brains[name]) {
+          ctx.ui.notify(`Brain ${name} already exists at ${config.brains[name].path}.`, "warning");
+          return;
+        }
         const brainPath = rest.length > 0 ? rest.join(" ") : path.join(os.homedir(), ".pi", "memory-brains", name);
         config.brains[name] = { path: brainPath };
         saveMemoryConfig(os.homedir(), config);
@@ -830,7 +842,15 @@ export default function memoryExtension(pi: ExtensionAPI) {
           ctx.ui.notify("Usage: /memory brain create <name>", "warning");
           return;
         }
+        if (!isValidBrainName(name)) {
+          ctx.ui.notify("Invalid brain name. Use lowercase letters, numbers, and hyphens only.", "warning");
+          return;
+        }
         const config = loadMemoryConfig(os.homedir());
+        if (config.brains[name]) {
+          ctx.ui.notify(`Brain ${name} already exists at ${config.brains[name].path}.`, "warning");
+          return;
+        }
         const brainPath = path.join(os.homedir(), ".pi", "memory-brains", name);
         config.brains[name] = { path: brainPath };
         saveMemoryConfig(os.homedir(), config);
@@ -867,7 +887,13 @@ export default function memoryExtension(pi: ExtensionAPI) {
           return;
         }
         const config = loadMemoryConfig(os.homedir());
-        config.projectMappings = config.projectMappings.filter((entry) => entry.projectPath !== path.resolve(projectPath));
+        const resolvedProjectPath = path.resolve(projectPath);
+        const hadMapping = config.projectMappings.some((entry) => entry.projectPath === resolvedProjectPath);
+        if (!hadMapping) {
+          ctx.ui.notify(`No mapping found for ${projectPath}.`, "info");
+          return;
+        }
+        config.projectMappings = config.projectMappings.filter((entry) => entry.projectPath !== resolvedProjectPath);
         saveMemoryConfig(os.homedir(), config);
         reconstructState(ctx);
         ctx.ui.notify(`Unmapped ${projectPath}.`, "success");
