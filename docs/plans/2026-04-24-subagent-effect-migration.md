@@ -88,7 +88,7 @@ Preserve these current behaviors unless a test proves this inventory is wrong:
 - Create temporarily: `/tmp/pi-effect-probe-*/index.ts`
 - No committed repo files changed in this task
 
-- [ ] **Step 1: Verify the repo starts clean except for this plan if it is uncommitted**
+- [x] **Step 1: Verify the repo starts clean except for this plan if it is uncommitted**
 
 Run:
 
@@ -98,7 +98,7 @@ git status --short
 
 Expected: either clean, or only `?? docs/plans/2026-04-24-subagent-effect-migration.md` before this plan is committed. Do not start the spike with unrelated worktree changes.
 
-- [ ] **Step 2: Create a temporary probe directory**
+- [x] **Step 2: Create a temporary probe directory**
 
 Run:
 
@@ -109,7 +109,7 @@ printf '%s\n' "$PROBE_DIR"
 
 Expected: prints a path like `/tmp/pi-effect-probe-AbCdEf`. Keep this shell open or export `PROBE_DIR` again in later commands.
 
-- [ ] **Step 3: Write the probe package manifest**
+- [x] **Step 3: Write the probe package manifest**
 
 Run:
 
@@ -128,7 +128,7 @@ JSON
 
 Expected: `cat "$PROBE_DIR/package.json"` shows the manifest above.
 
-- [ ] **Step 4: Write the probe extension**
+- [x] **Step 4: Write the probe extension**
 
 Run:
 
@@ -241,7 +241,7 @@ TS
 
 Expected: `wc -l "$PROBE_DIR/index.ts"` reports a non-empty TypeScript file.
 
-- [ ] **Step 5: Install probe dependency**
+- [x] **Step 5: Install probe dependency**
 
 Run:
 
@@ -251,7 +251,7 @@ cd "$PROBE_DIR" && npm install
 
 Expected: npm installs `effect` and creates `$PROBE_DIR/package-lock.json`.
 
-- [ ] **Step 6: Start pi with the probe extension in a private tmux session**
+- [x] **Step 6: Start pi with the probe extension in a private tmux session**
 
 Run:
 
@@ -279,7 +279,7 @@ Or to capture output once:
 tmux -S "$SOCKET" capture-pane -p -J -t pi-effect-probe:0.0 -S -200
 ```
 
-- [ ] **Step 7: Drive the probe commands through tmux**
+- [x] **Step 7: Drive the probe commands through tmux**
 
 Run:
 
@@ -297,7 +297,7 @@ sleep 3
 
 Expected: commands complete without starting a model turn. The log file should contain Effect markers.
 
-- [ ] **Step 8: Verify probe markers and cleanup behavior**
+- [x] **Step 8: Verify probe markers and cleanup behavior**
 
 Run:
 
@@ -321,7 +321,7 @@ bg-resource:release
 fiber:interrupted
 ```
 
-- [ ] **Step 9: Verify no probe child process remains**
+- [x] **Step 9: Verify no probe child process remains**
 
 Run:
 
@@ -336,7 +336,7 @@ fi
 
 Expected: prints `no leaked probe child`.
 
-- [ ] **Step 10: Verify probe tmux resources before cleanup**
+- [x] **Step 10: Verify probe tmux resources before cleanup**
 
 Run:
 
@@ -347,7 +347,7 @@ tmux -S "$SOCKET" list-panes -a
 
 Expected: only the `pi-effect-probe` session and its expected pane are present on the private probe socket.
 
-- [ ] **Step 11: Stop and clean up the probe session**
+- [x] **Step 11: Stop and clean up the probe session**
 
 Run:
 
@@ -360,7 +360,7 @@ tmux -S "$SOCKET" list-panes -a 2>/dev/null || true
 
 Expected: probe files are gone, and the private socket has no remaining `pi-effect-probe` session or panes.
 
-- [ ] **Step 12: Record the spike result for the PR summary**
+- [x] **Step 12: Record the spike result for the PR summary**
 
 Create a local note outside the repo or in your implementation notes with:
 
@@ -391,7 +391,7 @@ Expected: no repo source changes from the spike.
 - Create: `subagent/request.ts`
 - Create: `subagent/request.test.ts`
 
-- [ ] **Step 1: Install Effect at the repo root**
+- [x] **Step 1: Install Effect at the repo root**
 
 Run:
 
@@ -401,7 +401,7 @@ npm install effect@^3.21.2
 
 Expected: `package.json` gains a root `dependencies.effect` entry and `package-lock.json` is created or updated.
 
-- [ ] **Step 2: Verify Effect imports in this repo**
+- [x] **Step 2: Verify Effect imports in this repo**
 
 Run:
 
@@ -411,7 +411,7 @@ node -e 'import("effect").then(({ Effect }) => Effect.runPromise(Effect.succeed(
 
 Expected: prints `effect-ok`.
 
-- [ ] **Step 3: Write failing request parser tests**
+- [x] **Step 3: Write failing request parser tests**
 
 Create `subagent/request.test.ts`:
 
@@ -546,7 +546,7 @@ describe("parseSubagentRequest", () => {
 });
 ```
 
-- [ ] **Step 4: Run request tests and verify they fail**
+- [x] **Step 4: Run request tests and verify they fail**
 
 Run:
 
@@ -556,7 +556,7 @@ npx tsx --test --test-timeout=5000 subagent/request.test.ts
 
 Expected: FAIL because `subagent/request.ts`, `subagent/types.ts`, and `subagent/errors.ts` do not exist.
 
-- [ ] **Step 5: Create tagged errors**
+- [x] **Step 5: Create tagged errors**
 
 Create `subagent/errors.ts`:
 
@@ -646,7 +646,7 @@ export function errorToMessage(error: SubagentError): string {
 }
 ```
 
-- [ ] **Step 6: Create shared internal types**
+- [x] **Step 6: Create shared internal types**
 
 Create `subagent/types.ts`:
 
@@ -747,7 +747,7 @@ export type SubagentRequest =
   | { readonly type: "asyncParallel"; readonly tasks: readonly ParallelTaskRequest[]; readonly rejectedTasks: readonly RejectedAsyncTaskRequest[]; readonly options: RunOptions };
 ```
 
-- [ ] **Step 7: Create request parser**
+- [x] **Step 7: Create request parser**
 
 Create `subagent/request.ts`:
 
@@ -872,7 +872,7 @@ export function projectAgentsForConfirmation(request: SubagentRequest): AgentCon
 }
 ```
 
-- [ ] **Step 8: Run request tests and verify they pass**
+- [x] **Step 8: Run request tests and verify they pass**
 
 Run:
 
@@ -882,7 +882,7 @@ npx tsx --test --test-timeout=5000 subagent/request.test.ts
 
 Expected: PASS.
 
-- [ ] **Step 9: Run existing subagent tests**
+- [x] **Step 9: Run existing subagent tests**
 
 Run:
 
@@ -892,7 +892,7 @@ npx tsx --test --test-timeout=5000 subagent/*.test.ts
 
 Expected: all existing and new tests pass.
 
-- [ ] **Step 10: Commit the dependency and type foundation**
+- [x] **Step 10: Commit the dependency and type foundation**
 
 Run:
 
@@ -909,7 +909,7 @@ Expected: commit succeeds.
 - Create: `subagent/temp-effect.ts`
 - Create: `subagent/temp-effect.test.ts`
 
-- [ ] **Step 1: Write failing temp cleanup tests**
+- [x] **Step 1: Write failing temp cleanup tests**
 
 Create `subagent/temp-effect.test.ts`:
 
@@ -960,7 +960,7 @@ describe("temp-effect", () => {
 });
 ```
 
-- [ ] **Step 2: Run temp tests and verify they fail**
+- [x] **Step 2: Run temp tests and verify they fail**
 
 Run:
 
@@ -970,7 +970,7 @@ npx tsx --test --test-timeout=5000 subagent/temp-effect.test.ts
 
 Expected: FAIL because `subagent/temp-effect.ts` does not exist.
 
-- [ ] **Step 3: Implement scoped temp helpers**
+- [x] **Step 3: Implement scoped temp helpers**
 
 Create `subagent/temp-effect.ts`:
 
@@ -1036,7 +1036,7 @@ export function adoptTempFiles(paths: readonly string[]): Effect.Effect<void> {
 }
 ```
 
-- [ ] **Step 4: Run temp tests and verify they pass**
+- [x] **Step 4: Run temp tests and verify they pass**
 
 Run:
 
@@ -1046,7 +1046,7 @@ npx tsx --test --test-timeout=5000 subagent/temp-effect.test.ts
 
 Expected: PASS.
 
-- [ ] **Step 5: Run all current subagent tests**
+- [x] **Step 5: Run all current subagent tests**
 
 Run:
 
@@ -1056,7 +1056,7 @@ npx tsx --test --test-timeout=5000 subagent/*.test.ts
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit temp helpers**
+- [x] **Step 6: Commit temp helpers**
 
 Run:
 
@@ -1073,7 +1073,7 @@ Expected: commit succeeds.
 - Create: `subagent/process-effect.ts`
 - Create: `subagent/process-effect.test.ts`
 
-- [ ] **Step 1: Write failing tests for child process event parsing and abort cleanup**
+- [x] **Step 1: Write failing tests for child process event parsing and abort cleanup**
 
 Create `subagent/process-effect.test.ts` with fake child processes:
 
@@ -1203,7 +1203,7 @@ describe("process-effect", () => {
 });
 ```
 
-- [ ] **Step 2: Run process tests and verify they fail**
+- [x] **Step 2: Run process tests and verify they fail**
 
 Run:
 
@@ -1213,7 +1213,7 @@ npx tsx --test --test-timeout=5000 subagent/process-effect.test.ts
 
 Expected: FAIL because `subagent/process-effect.ts` does not exist.
 
-- [ ] **Step 3: Implement the process runner**
+- [x] **Step 3: Implement the process runner**
 
 Create `subagent/process-effect.ts`. Move the logic from current `runSingleAgent` into this file, with these exported pieces:
 
@@ -1319,7 +1319,7 @@ Then implement `runSingleAgentEffect(input)` as an `Effect.async` or `Effect.acq
 
 Keep the implementation local to `subagent`; do not introduce a shared Effect helper.
 
-- [ ] **Step 4: Run process tests and verify they pass**
+- [x] **Step 4: Run process tests and verify they pass**
 
 Run:
 
@@ -1329,7 +1329,7 @@ npx tsx --test --test-timeout=5000 subagent/process-effect.test.ts
 
 Expected: PASS.
 
-- [ ] **Step 5: Run all subagent tests**
+- [x] **Step 5: Run all subagent tests**
 
 Run:
 
@@ -1339,7 +1339,7 @@ npx tsx --test --test-timeout=5000 subagent/*.test.ts
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit process runner**
+- [x] **Step 6: Commit process runner**
 
 Run:
 
@@ -1357,7 +1357,7 @@ Expected: commit succeeds.
 - Create: `subagent/runtime.test.ts`
 - Modify: `subagent/index.ts`
 
-- [ ] **Step 1: Write failing runtime orchestration tests**
+- [x] **Step 1: Write failing runtime orchestration tests**
 
 Create `subagent/runtime.test.ts` with fake process runner tests:
 
@@ -1450,7 +1450,7 @@ describe("runSubagentRequest", () => {
 });
 ```
 
-- [ ] **Step 2: Run runtime tests and verify they fail**
+- [x] **Step 2: Run runtime tests and verify they fail**
 
 Run:
 
@@ -1460,7 +1460,7 @@ npx tsx --test --test-timeout=5000 subagent/runtime.test.ts
 
 Expected: FAIL because `subagent/runtime.ts` does not exist.
 
-- [ ] **Step 3: Implement runtime orchestration**
+- [x] **Step 3: Implement runtime orchestration**
 
 Create `subagent/runtime.ts` with these exports:
 
@@ -1512,7 +1512,7 @@ Then implement `runSubagentRequest(request, deps)`:
 
 Keep formatting equivalent to current `index.ts` content strings.
 
-- [ ] **Step 4: Run runtime tests and verify they pass**
+- [x] **Step 4: Run runtime tests and verify they pass**
 
 Run:
 
@@ -1522,7 +1522,7 @@ npx tsx --test --test-timeout=5000 subagent/runtime.test.ts
 
 Expected: PASS.
 
-- [ ] **Step 5: Update `subagent/index.ts` to use request parsing and runtime for sync modes**
+- [x] **Step 5: Update `subagent/index.ts` to use request parsing and runtime for sync modes**
 
 Modify `subagent/index.ts`:
 
@@ -1538,7 +1538,7 @@ Modify `subagent/index.ts`:
 
 Do not migrate async branches in this task except to keep them compiling with moved types.
 
-- [ ] **Step 6: Run all subagent tests**
+- [x] **Step 6: Run all subagent tests**
 
 Run:
 
@@ -1548,7 +1548,7 @@ npx tsx --test --test-timeout=5000 subagent/*.test.ts
 
 Expected: PASS.
 
-- [ ] **Step 7: Run a no-model import smoke test**
+- [x] **Step 7: Run a no-model import smoke test**
 
 Run:
 
@@ -1564,7 +1564,7 @@ npx tsx -e 'import("./subagent/runtime.ts").then(() => console.log("runtime impo
 
 Expected: prints `runtime import ok`.
 
-- [ ] **Step 8: Commit synchronous runtime migration**
+- [x] **Step 8: Commit synchronous runtime migration**
 
 Run:
 
@@ -1582,7 +1582,7 @@ Expected: commit succeeds.
 - Create: `subagent/tmux-effect.test.ts`
 - Modify: `subagent/tmux.ts` to keep low-level tmux helpers exportable for the wrapper
 
-- [ ] **Step 1: Write failing tmux wrapper tests**
+- [x] **Step 1: Write failing tmux wrapper tests**
 
 Create `subagent/tmux-effect.test.ts`:
 
@@ -1638,7 +1638,7 @@ describe("tmux-effect", () => {
 });
 ```
 
-- [ ] **Step 2: Run tmux tests and verify they fail**
+- [x] **Step 2: Run tmux tests and verify they fail**
 
 Run:
 
@@ -1648,7 +1648,7 @@ npx tsx --test --test-timeout=5000 subagent/tmux-effect.test.ts
 
 Expected: FAIL because `subagent/tmux-effect.ts` does not exist.
 
-- [ ] **Step 3: Implement tmux Effect wrappers**
+- [x] **Step 3: Implement tmux Effect wrappers**
 
 Create `subagent/tmux-effect.ts`:
 
@@ -1741,7 +1741,7 @@ export function pollForExitEffect(
 }
 ```
 
-- [ ] **Step 4: Run tmux tests and verify they pass**
+- [x] **Step 4: Run tmux tests and verify they pass**
 
 Run:
 
@@ -1751,7 +1751,7 @@ npx tsx --test --test-timeout=5000 subagent/tmux-effect.test.ts
 
 Expected: PASS.
 
-- [ ] **Step 5: Run all subagent tests**
+- [x] **Step 5: Run all subagent tests**
 
 Run:
 
@@ -1761,7 +1761,7 @@ npx tsx --test --test-timeout=5000 subagent/*.test.ts
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit tmux wrappers**
+- [x] **Step 6: Commit tmux wrappers**
 
 Run:
 
@@ -1781,7 +1781,7 @@ Expected: commit succeeds.
 - Modify: `subagent/index.ts`
 - Modify: `subagent/widget.ts` to import `AsyncRun` from `subagent/types.ts`
 
-- [ ] **Step 1: Write failing async owner lifecycle tests**
+- [x] **Step 1: Write failing async owner lifecycle tests**
 
 Create `subagent/async-owner.test.ts`:
 
@@ -1833,7 +1833,7 @@ describe("createAsyncOwner", () => {
 });
 ```
 
-- [ ] **Step 2: Run async owner tests and verify they fail**
+- [x] **Step 2: Run async owner tests and verify they fail**
 
 Run:
 
@@ -1843,7 +1843,7 @@ npx tsx --test --test-timeout=5000 subagent/async-owner.test.ts
 
 Expected: FAIL because `subagent/async-owner.ts` does not exist.
 
-- [ ] **Step 3: Implement async owner**
+- [x] **Step 3: Implement async owner**
 
 Create `subagent/async-owner.ts`:
 
@@ -1896,7 +1896,7 @@ export function createAsyncOwner(deps: AsyncOwnerDeps): AsyncOwner {
 }
 ```
 
-- [ ] **Step 4: Run async owner tests and verify they pass**
+- [x] **Step 4: Run async owner tests and verify they pass**
 
 Run:
 
@@ -1906,7 +1906,7 @@ npx tsx --test --test-timeout=5000 subagent/async-owner.test.ts
 
 Expected: PASS.
 
-- [ ] **Step 5: Wire async owner into `subagent/index.ts` shutdown**
+- [x] **Step 5: Wire async owner into `subagent/index.ts` shutdown**
 
 Modify `subagent/index.ts`:
 
@@ -1915,7 +1915,7 @@ Modify `subagent/index.ts`:
 - Keep `closeWindow`/`closePane` fallback cleanup during this transition, but avoid double-closing causing errors by preserving existing try/catch behavior.
 - Keep `stopWidgetRefresh()`, `asyncRuns.clear()`, `asyncBatches.clear()`, and `latestCtx = null`.
 
-- [ ] **Step 6: Run all subagent tests**
+- [x] **Step 6: Run all subagent tests**
 
 Run:
 
@@ -1925,7 +1925,7 @@ npx tsx --test --test-timeout=5000 subagent/*.test.ts
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit async owner**
+- [x] **Step 7: Commit async owner**
 
 Run:
 
@@ -1946,7 +1946,7 @@ Expected: commit succeeds.
 - Modify: `subagent/runtime.test.ts`
 - Modify: `subagent/tmux-effect.test.ts`
 
-- [ ] **Step 1: Add failing runtime tests for async start requests**
+- [x] **Step 1: Add failing runtime tests for async start requests**
 
 Append to `subagent/runtime.test.ts`:
 
@@ -1995,7 +1995,7 @@ it("preserves async parallel rejected task reporting while valid tasks start", a
 });
 ```
 
-- [ ] **Step 2: Run runtime tests and verify async tests fail**
+- [x] **Step 2: Run runtime tests and verify async tests fail**
 
 Run:
 
@@ -2005,7 +2005,7 @@ npx tsx --test --test-timeout=5000 subagent/runtime.test.ts
 
 Expected: FAIL until `runSubagentRequest` handles async output exactly.
 
-- [ ] **Step 3: Implement async start helpers in `runtime.ts`**
+- [x] **Step 3: Implement async start helpers in `runtime.ts`**
 
 Add runtime dependencies for async start that create tmux resources and register watchers:
 
@@ -2029,7 +2029,7 @@ Implementation rules:
 - If an async parallel request contains only rejected tasks, return the current `No async subagents started.` error behavior after sending the invalid-agent messages.
 - Use existing `buildAsyncPiCommand` behavior exactly: same `--session`, model, tools, thinking, skills, extension/no-extension, system prompt, cwd, and sentinel echo.
 
-- [ ] **Step 4: Replace old async functions in `index.ts`**
+- [x] **Step 4: Replace old async functions in `index.ts`**
 
 Move these behaviors into `runtime.ts`, `async-owner.ts`, or `tmux-effect.ts`, then delete the old local functions from `index.ts`:
 
@@ -2041,7 +2041,7 @@ Move these behaviors into `runtime.ts`, `async-owner.ts`, or `tmux-effect.ts`, t
 
 Move `buildAsyncPiCommand` to `runtime.ts` so `index.ts` stays focused on Pi adapter and rendering responsibilities.
 
-- [ ] **Step 5: Preserve async watcher completion behavior**
+- [x] **Step 5: Preserve async watcher completion behavior**
 
 In the watcher Effect, preserve current completion behavior:
 
@@ -2061,7 +2061,7 @@ pi.events.emit("notify", { title: `Subagent done: ${run.agent}`, body: exitCode 
 
 Expected: async result messages render exactly as before.
 
-- [ ] **Step 6: Run async-related tests**
+- [x] **Step 6: Run async-related tests**
 
 Run:
 
@@ -2071,7 +2071,7 @@ npx tsx --test --test-timeout=5000 subagent/runtime.test.ts subagent/async-owner
 
 Expected: PASS.
 
-- [ ] **Step 7: Run all subagent tests**
+- [x] **Step 7: Run all subagent tests**
 
 Run:
 
@@ -2081,7 +2081,7 @@ npx tsx --test --test-timeout=5000 subagent/*.test.ts
 
 Expected: PASS.
 
-- [ ] **Step 8: Commit async migration**
+- [x] **Step 8: Commit async migration**
 
 Run:
 
@@ -2101,7 +2101,7 @@ Expected: commit succeeds.
 - Modify: `subagent/runtime.ts`
 - Modify tests as needed for moved exports
 
-- [ ] **Step 1: Remove obsolete local types/constants from `index.ts`**
+- [x] **Step 1: Remove obsolete local types/constants from `index.ts`**
 
 Delete local definitions that now live in `subagent/types.ts`:
 
@@ -2116,7 +2116,7 @@ Delete local definitions that now live in `subagent/types.ts`:
 
 Expected: `index.ts` imports these from `./types.ts`.
 
-- [ ] **Step 2: Remove obsolete local process helpers from `index.ts`**
+- [x] **Step 2: Remove obsolete local process helpers from `index.ts`**
 
 Delete local helpers that now live in `process-effect.ts`, `runtime.ts`, or `temp-effect.ts`:
 
@@ -2127,7 +2127,7 @@ Delete local helpers that now live in `process-effect.ts`, `runtime.ts`, or `tem
 
 Expected: `index.ts` no longer spawns child `pi` directly.
 
-- [ ] **Step 3: Replace broad `any` outside Pi renderer interop boundaries**
+- [x] **Step 3: Replace broad `any` outside Pi renderer interop boundaries**
 
 Search:
 
@@ -2137,7 +2137,7 @@ rg "\bany\b|Record<string, any>" subagent --glob '*.ts'
 
 Expected: remaining `any` usages are limited to Pi renderer interop boundaries where the upstream API lacks a narrow local type. Runtime modules must not contain broad `any` or `Record<string, any>` types.
 
-- [ ] **Step 4: Run all subagent tests**
+- [x] **Step 4: Run all subagent tests**
 
 Run:
 
@@ -2147,7 +2147,7 @@ npx tsx --test --test-timeout=5000 subagent/*.test.ts
 
 Expected: PASS.
 
-- [ ] **Step 5: Run slop scan on the touched TypeScript subtree**
+- [x] **Step 5: Run slop scan on the touched TypeScript subtree**
 
 Use the pi tool:
 
@@ -2157,7 +2157,7 @@ slop_scan path="subagent" maxFindings=20
 
 Expected: no high-confidence findings that indicate avoidable AI slop in touched code. Treat findings as leads; fix real issues.
 
-- [ ] **Step 6: Commit cleanup**
+- [x] **Step 6: Commit cleanup**
 
 Run:
 
@@ -2173,7 +2173,7 @@ Expected: commit succeeds.
 **Files:**
 - No source files unless verification reveals bugs
 
-- [ ] **Step 1: Run the full subagent test suite**
+- [x] **Step 1: Run the full subagent test suite**
 
 Run:
 
@@ -2183,7 +2183,7 @@ npx tsx --test --test-timeout=5000 subagent/*.test.ts
 
 Expected: PASS.
 
-- [ ] **Step 2: Run root import smoke check for the extension**
+- [x] **Step 2: Run root import smoke check for the extension**
 
 Run:
 
@@ -2193,7 +2193,7 @@ npx tsx -e 'import("./subagent/index.ts").then(() => console.log("subagent exten
 
 Expected: prints `subagent extension import ok`.
 
-- [ ] **Step 3: Create deterministic fake child `pi` and temporary agents**
+- [x] **Step 3: Create deterministic fake child `pi` and temporary agents**
 
 Create a temp HOME for agent discovery and a fake `pi` executable for child subagent processes. The parent pi process still uses the real `pi`; only spawned subagents use the fake child process through `PATH`.
 
@@ -2246,7 +2246,7 @@ chmod +x "$SUBAGENT_FAKE_BIN/pi"
 
 Expected: `$REAL_PI` points to the real pi binary, two temporary agents exist, and `$SUBAGENT_FAKE_BIN/pi` is executable.
 
-- [ ] **Step 4: Start a real pi session in tmux with fake child `pi` on PATH**
+- [x] **Step 4: Start a real pi session in tmux with fake child `pi` on PATH**
 
 Run:
 
@@ -2275,7 +2275,7 @@ Or to capture output once:
 tmux -S "$SOCKET" capture-pane -p -J -t pi-subagent-effect-check:0.0 -S -200
 ```
 
-- [ ] **Step 5: Verify sync single through the real Pi tool path**
+- [x] **Step 5: Verify sync single through the real Pi tool path**
 
 From the implementation pi session, call the `subagent` tool with:
 
@@ -2285,7 +2285,7 @@ From the implementation pi session, call the `subagent` tool with:
 
 Expected: the tool result content contains `fake:sync-single-ok`, and details mode is `single` with one successful result.
 
-- [ ] **Step 6: Verify sync parallel ordering through the real Pi tool path**
+- [x] **Step 6: Verify sync parallel ordering through the real Pi tool path**
 
 From the implementation pi session, call the `subagent` tool with:
 
@@ -2295,7 +2295,7 @@ From the implementation pi session, call the `subagent` tool with:
 
 Expected: the tool result content lists outputs in source order: `fake:parallel-first`, then `fake:parallel-slow-ok`, then `fake:parallel-third`, even though the second task is delayed.
 
-- [ ] **Step 7: Verify sync chain `{previous}` propagation through the real Pi tool path**
+- [x] **Step 7: Verify sync chain `{previous}` propagation through the real Pi tool path**
 
 From the implementation pi session, call the `subagent` tool with:
 
@@ -2305,7 +2305,7 @@ From the implementation pi session, call the `subagent` tool with:
 
 Expected: the final tool result contains `fake:chain-second sees fake:chain-first`.
 
-- [ ] **Step 8: Verify async single through real tmux**
+- [x] **Step 8: Verify async single through real tmux**
 
 From the implementation pi session, call the `subagent` tool with:
 
@@ -2322,7 +2322,7 @@ Expected for async single:
 - `subagent_result` message contains `fake:async-single-ok`
 - temp session file is removed
 
-- [ ] **Step 9: Verify async parallel cleanup through real tmux**
+- [x] **Step 9: Verify async parallel cleanup through real tmux**
 
 From the implementation pi session, call the `subagent` tool with:
 
@@ -2338,7 +2338,7 @@ Expected:
 - result messages contain `fake:async-parallel-first` and `fake:async-parallel-slow-ok`
 - widget clears after all runs complete
 
-- [ ] **Step 10: Verify reload and shutdown interruption cleanup**
+- [x] **Step 10: Verify reload and shutdown interruption cleanup**
 
 From the implementation pi session, call the `subagent` tool with:
 
@@ -2399,7 +2399,7 @@ find "${TMPDIR:-/tmp}" -maxdepth 2 -name 'pi-subagent-*' -print
 
 Expected after shutdown: no watcher pane/window, child `pi` process, or temp `pi-subagent-*` file remains.
 
-- [ ] **Step 11: Stop runtime verification tmux session and remove temporary runtime fixtures**
+- [x] **Step 11: Stop runtime verification tmux session and remove temporary runtime fixtures**
 
 Run:
 
@@ -2410,7 +2410,7 @@ rm -rf "$SUBAGENT_CHECK_HOME" "$SUBAGENT_FAKE_BIN"
 
 Expected: session is gone, the temporary HOME is removed, and the fake child `pi` directory is removed.
 
-- [ ] **Step 12: Run final slop scan checkpoint**
+- [x] **Step 12: Run final slop scan checkpoint**
 
 Use the pi tool:
 
@@ -2420,7 +2420,7 @@ slop_scan path="subagent" maxFindings=20
 
 Expected: no actionable findings remain in touched code.
 
-- [ ] **Step 13: Run final git diff review**
+- [x] **Step 13: Run final git diff review**
 
 Run:
 
@@ -2432,7 +2432,7 @@ git diff -- subagent package.json package-lock.json
 
 Expected: only intended subagent and dependency changes are present.
 
-- [ ] **Step 14: Verify no uncommitted verification fixes remain**
+- [x] **Step 14: Verify no uncommitted verification fixes remain**
 
 Run:
 
@@ -2447,7 +2447,7 @@ Expected: no uncommitted source changes remain. If runtime verification found a 
 **Files:**
 - No source files unless checks reveal issues
 
-- [ ] **Step 1: Run complete subagent test suite one more time**
+- [x] **Step 1: Run complete subagent test suite one more time**
 
 Run:
 
@@ -2457,7 +2457,7 @@ npx tsx --test --test-timeout=5000 subagent/*.test.ts
 
 Expected: PASS.
 
-- [ ] **Step 2: Run dependency import check**
+- [x] **Step 2: Run dependency import check**
 
 Run:
 
@@ -2467,7 +2467,7 @@ node -e 'import("effect").then(({ Effect }) => Effect.runPromise(Effect.succeed(
 
 Expected: prints `effect-ok`.
 
-- [ ] **Step 3: Run final slop scan**
+- [x] **Step 3: Run final slop scan**
 
 Use the pi tool:
 
@@ -2477,7 +2477,7 @@ slop_scan path="subagent" maxFindings=20
 
 Expected: no actionable findings remain.
 
-- [ ] **Step 4: Review commits**
+- [x] **Step 4: Review commits**
 
 Run:
 
@@ -2487,7 +2487,7 @@ git log --oneline --decorate -8
 
 Expected: recent commits show the planned incremental migration checkpoints.
 
-- [ ] **Step 5: Prepare completion summary**
+- [x] **Step 5: Prepare completion summary**
 
 Write a short summary for the PR/session containing:
 
