@@ -4,6 +4,7 @@ import { CREATE_HANDOFF_CONTEXT_SYSTEM_PROMPT, createHandoffExtension, generateH
 
 function createHarness() {
   const commandMap = new Map<string, any>();
+  const toolMap = new Map<string, any>();
   const notifications: Array<{ message: string; level: string }> = [];
   const confirmations: Array<{ title: string; message: string }> = [];
   const editorTexts: string[] = [];
@@ -26,6 +27,7 @@ function createHarness() {
 
   return {
     commandMap,
+    toolMap,
     notifications,
     confirmations,
     editorTexts,
@@ -56,6 +58,9 @@ function createHarness() {
     pi: {
       registerCommand(name: string, spec: any) {
         commandMap.set(name, spec);
+      },
+      registerTool(spec: any) {
+        toolMap.set(spec.name, spec);
       },
       setSessionName() {
         setSessionNameCalls += 1;
@@ -283,6 +288,36 @@ test("falls back to ctx.model when preferred summary model auth fails", async ()
     undefined,
     "should not emit an error when fallback auth is usable",
   );
+});
+
+test("handoff tool prepares a slash command in interactive mode without switching sessions", async () => {
+  const harness = createHarness();
+  createHandoffExtension()(harness.pi);
+  const tool = harness.toolMap.get("handoff");
+
+  const result = await tool.execute("call-1", { goal: "continue the auth cleanup" }, undefined, undefined, harness.ctx);
+
+  assert.equal(harness.editorTexts.at(-1), "/handoff continue the auth cleanup");
+  assert.deepEqual(harness.notifications, [
+    { message: "Handoff command ready in editor. Submit to continue.", level: "info" },
+  ]);
+  assert.equal(harness.newSessionCalls, 0);
+  assert.equal(result.details.requiresUserSubmit, true);
+  assert.equal(result.details.command, "/handoff continue the auth cleanup");
+});
+
+test("handoff tool reports interactive mode requirement without touching the editor", async () => {
+  const harness = createHarness();
+  (harness.ctx as any).hasUI = false;
+  createHandoffExtension()(harness.pi);
+  const tool = harness.toolMap.get("handoff");
+
+  const result = await tool.execute("call-1", { goal: "continue the auth cleanup" }, undefined, undefined, harness.ctx);
+
+  assert.equal(harness.editorTexts.length, 0);
+  assert.equal(harness.newSessionCalls, 0);
+  assert.equal(result.details.ok, false);
+  assert.match(result.content[0].text, /requires interactive mode/);
 });
 
 test("happy path: preferred summary model available, generates summary, switches session, prefills editor", async () => {

@@ -1,6 +1,7 @@
 import { complete, type Message } from "@mariozechner/pi-ai";
 import type { ExtensionAPI, SessionEntry } from "@mariozechner/pi-coding-agent";
 import { BorderedLoader, convertToLlm, serializeConversation } from "@mariozechner/pi-coding-agent";
+import { Type } from "@sinclair/typebox";
 
 export const CREATE_HANDOFF_CONTEXT_SYSTEM_PROMPT = `Extract relevant context from the conversation. Write from first person
 perspective ("I did...", "I told you...").
@@ -53,6 +54,14 @@ type AuthResult = AuthOk | AuthError;
 type SummaryModelResolution = {
   model: { provider: string; id: string };
   auth: AuthOk;
+};
+
+type HandoffToolContext = {
+  hasUI: boolean;
+  ui: {
+    setEditorText(text: string): void;
+    notify(message: string, level: string): void;
+  };
 };
 
 type ReplacementSessionContext = {
@@ -182,6 +191,38 @@ function buildFinalPrompt(params: { goal: string; summary: string; parentSession
   return `${goal}\n\n${parentSection}In the handoff note below, "I" refers to the previous assistant.\n\n<handoff_note>\n${summary}\n</handoff_note>`;
 }
 
+function prepareToolHandoff(ctx: HandoffToolContext, params: { goal: string }) {
+  if (!ctx.hasUI) {
+    return {
+      content: [
+        {
+          type: "text" as const,
+          text: "Handoff via the handoff tool requires interactive mode. Run `/handoff ...` in an interactive Pi session.",
+        },
+      ],
+      details: { ok: false },
+    };
+  }
+
+  const command = `/handoff ${params.goal}`;
+  ctx.ui.setEditorText(command);
+  ctx.ui.notify("Handoff command ready in editor. Submit to continue.", "info");
+
+  return {
+    content: [
+      {
+        type: "text" as const,
+        text: "Prepared a `/handoff ...` command in the editor. Submit it to create the new session safely.",
+      },
+    ],
+    details: {
+      ok: true,
+      command,
+      requiresUserSubmit: true,
+    },
+  };
+}
+
 async function generateSummaryWithLoader(params: {
   ctx: HandoffCommandContext;
   completeFn: typeof complete;
@@ -298,6 +339,24 @@ export function createHandoffExtension(deps: HandoffDeps = {}) {
   const SUMMARY_MODEL = deps.summaryModel ?? "gpt-5.3-codex";
 
   return function handoff(pi: ExtensionAPI) {
+    pi.registerTool({
+      name: "handoff",
+      label: "Handoff",
+      description:
+        "Prepare a safe `/handoff <goal>` command in the editor for the user to submit. ONLY use this when the user explicitly asks for a handoff. The tool does not switch sessions or auto-submit.",
+      promptSnippet: "Prepare a safe `/handoff <goal>` command in the editor for the user to review and submit.",
+      promptGuidelines: [
+        "Only use the handoff tool when the user explicitly asks for a handoff.",
+        "The handoff tool only drafts a slash command; the user must submit it to create the new session.",
+      ],
+      parameters: Type.Object({
+        goal: Type.String({ description: "The goal/task for the new session" }),
+      }),
+      async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+        return prepareToolHandoff(ctx as HandoffToolContext, { goal: params.goal });
+      },
+    });
+
     pi.registerCommand("handoff", {
       description: "Transfer context to a new focused session",
       handler: async (args: string, ctx: any) => {

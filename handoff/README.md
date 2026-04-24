@@ -25,6 +25,20 @@ Examples:
 5. Pre-fills the new session's editor with the goal, `/skill:session-query`, the visible parent session path, a brief framing sentence, then the summary wrapped in `<handoff_note>...</handoff_note>` — goal first so the top line shows what this handoff is about
 6. User reviews and presses Enter to submit
 
+## Agent-callable tool
+
+This extension also registers a safe `handoff` tool for agents.
+
+The tool only prepares this command in the editor:
+
+```text
+/handoff <goal>
+```
+
+It does **not** create a new session, switch sessions, send a message, or auto-submit anything. The user must review the drafted slash command and press Enter.
+
+In non-interactive mode, the tool returns a clear error explaining that an interactive Pi session is required and does not touch the editor.
+
 ## Guardrails and error handling
 
 - `!ctx.hasUI` → `Handoff requires interactive mode.`
@@ -80,7 +94,7 @@ That lets the child model call the `session_query` tool if the handoff note miss
 
 ## Deliberate non-features
 
-- **No agent-callable `handoff` tool** — users who want a handoff mid-turn can type `/handoff` themselves
+- **No auto-switching tool** — the agent-callable `handoff` tool only drafts `/handoff <goal>` in the editor and requires user submission
 - **No `-mode` / `-model` flags** — out of scope; users can change the model after switching via pi's normal model picker
 - **No auto-submit** — user presses Enter after reviewing the pre-filled editor
 
