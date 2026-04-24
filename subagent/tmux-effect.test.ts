@@ -58,4 +58,19 @@ describe("tmux-effect", () => {
 		);
 		assert.deepEqual(ops.closedWindows, ["@9"]);
 	});
+
+	it("reads a deep enough screen buffer by default to catch sentinel lines", async () => {
+		let capturedLines: number | undefined;
+		const ops = {
+			...fakeOps(["__SUBAGENT_DONE_0__"]),
+			readScreen: async (_pane: string, lines?: number) => {
+				capturedLines = lines;
+				return "__SUBAGENT_DONE_0__";
+			},
+		} as TmuxOps;
+
+		const code = await Effect.runPromise(pollForExitEffect("%1", { ops }));
+		assert.equal(code, 0);
+		assert.equal(capturedLines, 200);
+	});
 });

@@ -64,14 +64,15 @@ export function adoptWindow(windowId: string, ops: TmuxOps = liveTmuxOps): Effec
 
 export function pollForExitEffect(
 	pane: string,
-	options: { ops?: TmuxOps; intervalMs?: number; onTick?: () => void },
+	options: { ops?: TmuxOps; intervalMs?: number; onTick?: () => void; screenLines?: number },
 ): Effect.Effect<number, TmuxCommandFailed> {
 	const ops = options.ops ?? liveTmuxOps;
 	const intervalMs = options.intervalMs ?? 1000;
+	const screenLines = options.screenLines ?? 200;
 
 	return Effect.gen(function* loop() {
 		const screen = yield* Effect.tryPromise({
-			try: () => ops.readScreen(pane, 5),
+			try: () => ops.readScreen(pane, screenLines),
 			catch: (cause) => new TmuxCommandFailed({ command: "capture-pane", cause }),
 		});
 		const match = screen.match(/__SUBAGENT_DONE_(\d+)__/);
