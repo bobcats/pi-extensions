@@ -5,18 +5,7 @@
 
 import type { ExtensionContext } from "@mariozechner/pi-coding-agent";
 import { truncateToWidth, visibleWidth } from "@mariozechner/pi-tui";
-
-export interface AsyncRun {
-	id: string;
-	agent: string;
-	task: string;
-	startedAt: number;
-	pane: string;
-	sessionFile: string;
-	tempFiles: string[];
-	batchId?: string;
-	windowId?: string;
-}
+import type { AsyncRun } from "./types.ts";
 
 const ACCENT = "\x1b[38;2;77;163;255m";
 const RST = "\x1b[0m";

@@ -24,6 +24,7 @@ import type { ExtensionContext } from "@mariozechner/pi-coding-agent";
 import { type ExtensionAPI, getMarkdownTheme } from "@mariozechner/pi-coding-agent";
 import { Container, Markdown, Spacer, Text } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
+import { createAsyncOwner } from "./async-owner.js";
 import { type AgentConfig, type AgentScope, discoverAgents } from "./agents.js";
 import { getSavedScopedModelIds, resolveModelOverride } from "./model-selection.js";
 import { parseSubagentRequest, projectAgentsForConfirmation } from "./request.js";
@@ -300,40 +301,56 @@ function watchAsyncRun(
 	asyncBatches: Map<string, AsyncBatch>,
 	latestCtx: ExtensionContext | null,
 	run: AsyncRun,
-): void {
-	const watcherAbort = new AbortController();
-	pollForExit(run.pane, watcherAbort.signal, {
-		interval: 1000,
-		onTick: () => updateWidget(latestCtx, asyncRuns),
-	})
-		.then((exitCode) => {
-			const summary = readLastAssistantMessage(run.sessionFile);
-
-			asyncRuns.delete(run.id);
-			updateWidget(latestCtx, asyncRuns);
-
-			if (run.batchId) finishBatchRun(asyncBatches, run);
-			else closePane(run.pane);
-
-			cleanupAsyncTempFiles(run.tempFiles);
-
-			const status = exitCode === 0 ? "completed" : `failed (exit ${exitCode})`;
-			pi.sendMessage(
-				{
-					customType: "subagent_result",
-					content: `Async subagent "${run.agent}" ${status} (run: ${run.id}).\n\n${summary}`,
-					display: true,
-					details: { runId: run.id, agent: run.agent, task: run.task, exitCode },
-				},
-				{ triggerTurn: true, deliverAs: "steer" },
-			);
-
-			pi.events.emit("notify", {
-				title: `Subagent done: ${run.agent}`,
-				body: exitCode === 0 ? "Completed" : "Failed",
-			});
+): Effect.Effect<void> {
+	return Effect.async<void>((resume) => {
+		const watcherAbort = new AbortController();
+		pollForExit(run.pane, watcherAbort.signal, {
+			interval: 1000,
+			onTick: () => updateWidget(latestCtx, asyncRuns),
 		})
-		.catch(() => {
+			.then((exitCode) => {
+				const summary = readLastAssistantMessage(run.sessionFile);
+
+				asyncRuns.delete(run.id);
+				updateWidget(latestCtx, asyncRuns);
+
+				if (run.batchId) finishBatchRun(asyncBatches, run);
+				else {
+					try { closePane(run.pane); } catch {}
+				}
+
+				cleanupAsyncTempFiles(run.tempFiles);
+
+				const status = exitCode === 0 ? "completed" : `failed (exit ${exitCode})`;
+				pi.sendMessage(
+					{
+						customType: "subagent_result",
+						content: `Async subagent "${run.agent}" ${status} (run: ${run.id}).\n\n${summary}`,
+						display: true,
+						details: { runId: run.id, agent: run.agent, task: run.task, exitCode },
+					},
+					{ triggerTurn: true, deliverAs: "steer" },
+				);
+
+				pi.events.emit("notify", {
+					title: `Subagent done: ${run.agent}`,
+					body: exitCode === 0 ? "Completed" : "Failed",
+				});
+				resume(Effect.void);
+			})
+			.catch(() => {
+				asyncRuns.delete(run.id);
+				updateWidget(latestCtx, asyncRuns);
+				if (run.batchId) finishBatchRun(asyncBatches, run);
+				else {
+					try { closePane(run.pane); } catch {}
+				}
+				cleanupAsyncTempFiles(run.tempFiles);
+				resume(Effect.void);
+			});
+
+		return Effect.sync(() => {
+			watcherAbort.abort();
 			asyncRuns.delete(run.id);
 			updateWidget(latestCtx, asyncRuns);
 			if (run.batchId) finishBatchRun(asyncBatches, run);
@@ -342,13 +359,13 @@ function watchAsyncRun(
 			}
 			cleanupAsyncTempFiles(run.tempFiles);
 		});
+	});
 }
 
 function runSingleAsyncAgent(
-	pi: ExtensionAPI,
 	asyncRuns: Map<string, AsyncRun>,
-	asyncBatches: Map<string, AsyncBatch>,
 	latestCtx: ExtensionContext | null,
+	asyncOwner: { start(run: AsyncRun): void },
 	defaultCwd: string,
 	agent: AgentConfig,
 	task: string,
@@ -373,16 +390,16 @@ function runSingleAsyncAgent(
 	};
 	asyncRuns.set(runId, run);
 	startWidgetRefresh(latestCtx, asyncRuns);
-	watchAsyncRun(pi, asyncRuns, asyncBatches, latestCtx, run);
+	asyncOwner.start(run);
 
 	return { runId };
 }
 
 function runParallelAsyncBatch(
-	pi: ExtensionAPI,
 	asyncRuns: Map<string, AsyncRun>,
 	asyncBatches: Map<string, AsyncBatch>,
 	latestCtx: ExtensionContext | null,
+	asyncOwner: { start(run: AsyncRun): void },
 	defaultCwd: string,
 	tasks: Array<{ agent: AgentConfig; task: string; cwd?: string }>,
 	thinking: string | undefined,
@@ -446,7 +463,7 @@ function runParallelAsyncBatch(
 
 	for (const runId of runIds) {
 		const run = asyncRuns.get(runId);
-		if (run) watchAsyncRun(pi, asyncRuns, asyncBatches, latestCtx, run);
+		if (run) asyncOwner.start(run);
 	}
 	startWidgetRefresh(latestCtx, asyncRuns);
 	return { batchId, runIds, windowName };
@@ -676,12 +693,16 @@ export default function (pi: ExtensionAPI) {
 	const asyncRuns = new Map<string, AsyncRun>();
 	const asyncBatches = new Map<string, AsyncBatch>();
 	let latestCtx: ExtensionContext | null = null;
+	const asyncOwner = createAsyncOwner({
+		runWatcher: (run) => watchAsyncRun(pi, asyncRuns, asyncBatches, latestCtx, run),
+	});
 
 	pi.on("session_start", (_event: any, ctx: ExtensionContext) => {
 		latestCtx = ctx;
 	});
 
-	pi.on("session_shutdown", () => {
+	pi.on("session_shutdown", async () => {
+		await asyncOwner.shutdown();
 		for (const batch of asyncBatches.values()) {
 			try { closeWindow(batch.windowId); } catch {}
 		}
@@ -828,10 +849,9 @@ Project agents are repo-controlled. Only continue for trusted repositories.`,
 
 				if (request.type === "asyncSingle") {
 					const { runId } = runSingleAsyncAgent(
-						pi,
 						asyncRuns,
-						asyncBatches,
 						latestCtx,
+						asyncOwner,
 						ctx.cwd,
 						request.agent,
 						request.task,
@@ -869,10 +889,10 @@ ${rejected.reason}`,
 				}
 
 				const { runIds, windowName } = runParallelAsyncBatch(
-					pi,
 					asyncRuns,
 					asyncBatches,
 					latestCtx,
+					asyncOwner,
 					ctx.cwd,
 					[...request.tasks],
 					request.options.thinking,
