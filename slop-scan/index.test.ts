@@ -58,6 +58,19 @@ test("default export factory can be constructed with real slop-scan imports", ()
   assert.doesNotThrow(() => createSlopScanExtension());
 });
 
+test("tool prompt guidance describes checkpoint behavior", () => {
+  const harness = createHarness();
+  createSlopScanExtension({ scanRepository: async () => sampleReport() as any })(harness.pi);
+
+  const tool = harness.tools.get("slop_scan");
+  const guidelines = tool.promptGuidelines.join("\n");
+
+  assert.match(guidelines, /code-review and refactor/);
+  assert.match(guidelines, /before claiming completion/);
+  assert.match(guidelines, /Do not run slop_scan after every edit/);
+  assert.match(guidelines, /leads, not proof/);
+});
+
 async function tempProject() {
   const dir = await mkdtemp(path.join(os.tmpdir(), "pi-slop-scan-test-"));
   await mkdir(path.join(dir, "src"), { recursive: true });

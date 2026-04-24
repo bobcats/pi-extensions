@@ -15,6 +15,7 @@ Extensions and prompt templates for [pi](https://github.com/badlogic/pi-mono).
 | [memory](./memory/) | Persists agent learnings across sessions — reflect, ruminate, dream, and named brains |
 | [notify](./notify/) | Sends desktop notifications via OSC 777 when the agent finishes |
 | [session-breakdown](./session-breakdown/) | Shows usage stats, cost by model, and a calendar graph |
+| [slop-scan](./slop-scan/) | Adds a `slop_scan` checkpoint tool and `/slop-scan` command for JS/TS slop analysis |
 | [subagent](./subagent/) | Delegates tasks to isolated subagents — single, parallel, or chained |
 | [tldraw-desktop](./tldraw-desktop/) | Reads and manipulates tldraw desktop canvases |
 
@@ -59,6 +60,7 @@ cd confirm-rm && npm test
 cd exa && npm test
 cd ext-prof && npm test
 cd memory && npm test
+cd slop-scan && npm test
 cd tldraw-desktop && npm test
 ```
 
