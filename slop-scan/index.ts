@@ -1,8 +1,9 @@
-import { realpath, stat } from "node:fs/promises";
+import { mkdtemp, realpath, stat, writeFile } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
-import type { AnalysisResult } from "slop-scan";
+import type { AnalysisResult, DirectoryScore, FileScore, Finding } from "slop-scan";
 
 export interface SlopScanDeps {
   scanRepository?: (rootDir: string) => Promise<AnalysisResult>;
@@ -16,6 +17,31 @@ interface RunSlopScanOptions {
 }
 
 const DEFAULT_MAX_FINDINGS = 10;
+const MAX_FINDINGS = 50;
+const HOTSPOT_LIMIT = 5;
+
+function clampFindings(value: number | undefined): number {
+  const candidate = value ?? DEFAULT_MAX_FINDINGS;
+  if (!Number.isFinite(candidate)) return DEFAULT_MAX_FINDINGS;
+  return Math.max(0, Math.min(MAX_FINDINGS, Math.trunc(candidate)));
+}
+
+function formatNumber(value: number | null | undefined): string {
+  if (value === null || value === undefined || !Number.isFinite(value)) return "n/a";
+  if (Number.isInteger(value)) return String(value);
+  return value.toFixed(2);
+}
+
+function truncateLine(value: string, max = 160): string {
+  return value.length <= max ? value : `${value.slice(0, max)}…`;
+}
+
+function firstLocation(finding: Finding): string {
+  const location = finding.locations?.[0];
+  if (!location) return finding.path ?? finding.scope ?? "unknown";
+  const column = location.column ? `:${location.column}` : "";
+  return `${location.path}:${location.line}${column}`;
+}
 
 function normalizePathArg(input: string | undefined): string {
   const trimmed = input?.trim();
@@ -66,11 +92,63 @@ async function runSlopScan(options: RunSlopScanOptions, deps: Required<SlopScanD
 }
 
 function formatScanResult(report: AnalysisResult, options: { maxFindings?: number; reportPath?: string }) {
+  const maxFindings = clampFindings(options.maxFindings);
+  const fileScores = [...(report.fileScores ?? [])]
+    .sort((a: FileScore, b: FileScore) => b.score - a.score)
+    .slice(0, HOTSPOT_LIMIT);
+  const directoryScores = [...(report.directoryScores ?? [])]
+    .sort((a: DirectoryScore, b: DirectoryScore) => b.score - a.score)
+    .slice(0, HOTSPOT_LIMIT);
+  const findings = [...(report.findings ?? [])]
+    .sort((a: Finding, b: Finding) => b.score - a.score)
+    .slice(0, maxFindings);
+
+  const lines = [
+    `Slop scan: ${report.summary.findingCount} finding(s), score ${formatNumber(report.summary.repoScore)}`,
+    `Root: ${report.rootDir}`,
+    `Files: ${report.summary.fileCount}, directories: ${report.summary.directoryCount}, functions: ${report.summary.functionCount}, logical lines: ${report.summary.logicalLineCount}`,
+    `Normalized: score/file ${formatNumber(report.summary.normalized.scorePerFile)}, score/KLOC ${formatNumber(report.summary.normalized.scorePerKloc)}, findings/KLOC ${formatNumber(report.summary.normalized.findingsPerKloc)}`,
+  ];
+
+  if (fileScores.length > 0) {
+    lines.push("", "Top file hotspots:");
+    for (const item of fileScores) {
+      lines.push(`- ${item.path}: score ${formatNumber(item.score)}, ${item.findingCount} finding(s)`);
+    }
+  }
+
+  if (directoryScores.length > 0) {
+    lines.push("", "Top directory hotspots:");
+    for (const item of directoryScores) {
+      lines.push(`- ${item.path}: score ${formatNumber(item.score)}, ${item.findingCount} finding(s)`);
+    }
+  }
+
+  if (findings.length > 0) {
+    lines.push("", `Top findings (${findings.length}/${report.findings.length}):`);
+    for (const finding of findings) {
+      lines.push(`- ${finding.severity} ${finding.ruleId}: ${finding.message}`);
+      lines.push(`  at ${firstLocation(finding)}`);
+      for (const evidence of (finding.evidence ?? []).slice(0, 2)) {
+        lines.push(`  evidence: ${truncateLine(String(evidence))}`);
+      }
+    }
+  } else {
+    lines.push("", "No slop-scan findings.");
+  }
+
+  if (options.reportPath) {
+    lines.push("", `Full report: ${options.reportPath}`);
+  }
+
   return {
-    text: `Slop scan: ${report.summary.findingCount} finding(s) in ${report.summary.fileCount} file(s).${options.reportPath ? `\nFull report: ${options.reportPath}` : ""}`,
+    text: lines.join("\n"),
     details: {
       rootDir: report.rootDir,
       summary: report.summary,
+      fileScores,
+      directoryScores,
+      findings,
       reportPath: options.reportPath,
     },
   };
@@ -124,8 +202,11 @@ async function defaultScanRepository(_rootDir: string): Promise<AnalysisResult> 
   throw new Error("default slop-scan integration is not implemented yet");
 }
 
-async function writeReportToTempFile(_report: AnalysisResult): Promise<string | undefined> {
-  return undefined;
+async function writeReportToTempFile(report: AnalysisResult): Promise<string> {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "pi-slop-scan-"));
+  const reportPath = path.join(dir, "report.json");
+  await writeFile(reportPath, JSON.stringify(report, null, 2), "utf8");
+  return reportPath;
 }
 
 export default createSlopScanExtension();

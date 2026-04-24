@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, realpath, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, realpath, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { createSlopScanExtension } from "./index.ts";
@@ -108,32 +108,166 @@ test("rejects file targets including pi-style mentions", async () => {
   );
 });
 
-function sampleReport() {
-  return {
+test("formats compact summary and caps findings", async () => {
+  const cwd = await tempProject();
+  const harness = createHarness();
+  createSlopScanExtension({
+    scanRepository: async (rootDir) => sampleReport({ rootDir }),
+    writeReport: async () => "/tmp/slop-report.json",
+  })(harness.pi);
+
+  const tool = harness.tools.get("slop_scan");
+  const result = await tool.execute("1", { maxFindings: 2 }, undefined, undefined, { cwd } as any);
+
+  assert.match(result.content[0].text, /Slop scan/);
+  assert.match(result.content[0].text, /3 finding\(s\)/);
+  assert.match(result.content[0].text, /Top file hotspots/);
+  assert.match(result.content[0].text, /errors.empty-catch/);
+  assert.match(result.content[0].text, /structure.pass-through-wrapper/);
+  assert.doesNotMatch(result.content[0].text, /comments.placeholder-comments/);
+  assert.equal(result.details.findings.length, 2);
+  assert.equal(result.details.fileScores.length, 5);
+  assert.equal(result.details.directoryScores.length, 5);
+  assert.equal(result.details.reportPath, "/tmp/slop-report.json");
+});
+
+test("clamps maxFindings to 50 and does not store full report in details", async () => {
+  const cwd = await tempProject();
+  const manyFindings = Array.from({ length: 60 }, (_, index) => ({
+    ruleId: `rule.${index}`,
+    family: "test",
+    severity: "weak",
+    scope: "file",
+    message: `Finding ${index}`,
+    evidence: [],
+    score: 1,
+    locations: [{ path: `src/${index}.ts`, line: 1 }],
+    path: `src/${index}.ts`,
+  }));
+  const harness = createHarness();
+  createSlopScanExtension({
+    scanRepository: async (rootDir) => sampleReport({ rootDir, findings: manyFindings, summary: { ...sampleReport().summary, findingCount: 60 } }),
+    writeReport: async () => "/tmp/slop-report.json",
+  })(harness.pi);
+
+  const tool = harness.tools.get("slop_scan");
+  const result = await tool.execute("1", { maxFindings: 500 }, undefined, undefined, { cwd } as any);
+
+  assert.equal(result.details.findings.length, 50);
+  assert.equal(result.details.files, undefined);
+  assert.equal(result.details.config, undefined);
+});
+
+test("continues when report writing fails", async () => {
+  const cwd = await tempProject();
+  const harness = createHarness();
+  createSlopScanExtension({
+    scanRepository: async (rootDir) => sampleReport({ rootDir }),
+    writeReport: async () => {
+      throw new Error("disk full");
+    },
+  })(harness.pi);
+
+  const tool = harness.tools.get("slop_scan");
+  const result = await tool.execute("1", {}, undefined, undefined, { cwd } as any);
+
+  assert.equal(result.details.reportPath, undefined);
+  assert.doesNotMatch(result.content[0].text, /Full report:/);
+});
+
+test("default report writer writes full JSON to a temp file", async () => {
+  const cwd = await tempProject();
+  const harness = createHarness();
+  createSlopScanExtension({
+    scanRepository: async (rootDir) => sampleReport({ rootDir }),
+  })(harness.pi);
+
+  const tool = harness.tools.get("slop_scan");
+  const result = await tool.execute("1", {}, undefined, undefined, { cwd } as any);
+
+  assert.match(result.details.reportPath, /report\.json$/);
+  const raw = await readFile(result.details.reportPath, "utf8");
+  const parsed = JSON.parse(raw);
+  assert.equal(parsed.rootDir, cwd);
+  assert.ok(Array.isArray(parsed.findings));
+});
+
+function sampleReport(overrides: Partial<any> = {}) {
+  const report = {
     rootDir: "/tmp/project",
     config: { ignores: [], plugins: {}, extends: [], rules: {}, overrides: [] },
     summary: {
-      fileCount: 0,
-      directoryCount: 0,
-      findingCount: 0,
-      repoScore: 0,
-      physicalLineCount: 0,
-      logicalLineCount: 0,
-      functionCount: 0,
+      fileCount: 3,
+      directoryCount: 2,
+      findingCount: 3,
+      repoScore: 7.5,
+      physicalLineCount: 120,
+      logicalLineCount: 90,
+      functionCount: 12,
       normalized: {
-        scorePerFile: null,
-        scorePerKloc: null,
-        scorePerFunction: null,
-        findingsPerFile: null,
-        findingsPerKloc: null,
-        findingsPerFunction: null,
+        scorePerFile: 2.5,
+        scorePerKloc: 83.33,
+        scorePerFunction: 0.625,
+        findingsPerFile: 1,
+        findingsPerKloc: 33.33,
+        findingsPerFunction: 0.25,
       },
     },
     files: [],
     directories: [],
-    findings: [],
-    fileScores: [],
-    directoryScores: [],
-    repoScore: 0,
-  } as any;
+    findings: [
+      {
+        ruleId: "errors.empty-catch",
+        family: "errors",
+        severity: "strong",
+        scope: "file",
+        message: "Empty catch block",
+        evidence: ["catch {}"],
+        score: 3,
+        locations: [{ path: "src/a.ts", line: 10, column: 5 }],
+        path: "src/a.ts",
+      },
+      {
+        ruleId: "structure.pass-through-wrapper",
+        family: "structure",
+        severity: "medium",
+        scope: "file",
+        message: "Pass-through wrapper",
+        evidence: ["return inner(...args)"],
+        score: 2,
+        locations: [{ path: "src/b.ts", line: 3 }],
+        path: "src/b.ts",
+      },
+      {
+        ruleId: "comments.placeholder-comments",
+        family: "comments",
+        severity: "weak",
+        scope: "file",
+        message: "Placeholder comment",
+        evidence: ["placeholder implementation"],
+        score: 1,
+        locations: [{ path: "src/c.ts", line: 1 }],
+        path: "src/c.ts",
+      },
+    ],
+    fileScores: [
+      { path: "src/a.ts", score: 3, findingCount: 1 },
+      { path: "src/b.ts", score: 2, findingCount: 1 },
+      { path: "src/c.ts", score: 1, findingCount: 1 },
+      { path: "src/d.ts", score: 0.5, findingCount: 1 },
+      { path: "src/e.ts", score: 0.25, findingCount: 1 },
+      { path: "src/f.ts", score: 0.1, findingCount: 1 },
+    ],
+    directoryScores: [
+      { path: "src", score: 6, findingCount: 3 },
+      { path: "tests", score: 1, findingCount: 1 },
+      { path: "examples", score: 0.5, findingCount: 1 },
+      { path: "scripts", score: 0.25, findingCount: 1 },
+      { path: "lib", score: 0.2, findingCount: 1 },
+      { path: "bin", score: 0.1, findingCount: 1 },
+    ],
+    repoScore: 7.5,
+  };
+
+  return { ...report, ...overrides } as any;
 }
