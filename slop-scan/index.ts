@@ -200,8 +200,17 @@ export function createSlopScanExtension(deps: SlopScanDeps = {}) {
 
     pi.registerCommand("slop-scan", {
       description: "Scan current project or subtree with slop-scan",
-      handler: async (_args, ctx) => {
-        ctx.ui.notify("slop-scan placeholder", "info");
+      handler: async (args, ctx) => {
+        try {
+          const result = await runSlopScan(
+            { cwd: ctx.cwd, path: args.trim() || "." },
+            resolvedDeps,
+          );
+          ctx.ui.notify(result.text, "info");
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          ctx.ui.notify(`slop-scan failed: ${message}`, "error");
+        }
       },
     });
   };

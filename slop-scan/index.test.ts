@@ -23,6 +23,21 @@ function createHarness() {
   };
 }
 
+function createCommandCtx(cwd: string) {
+  const notifications: Array<{ message: string; level: string }> = [];
+  return {
+    notifications,
+    ctx: {
+      cwd,
+      ui: {
+        notify(message: string, level: string) {
+          notifications.push({ message, level });
+        },
+      },
+    } as any,
+  };
+}
+
 test("registers slop_scan tool", () => {
   const harness = createHarness();
   createSlopScanExtension({ scanRepository: async () => sampleReport() })(harness.pi);
@@ -128,6 +143,38 @@ test("uses the target directory as the scan and config root", async () => {
   await tool.execute("1", { path: "src" }, undefined, undefined, { cwd } as any);
 
   assert.deepEqual(calls, [path.join(cwd, "src")]);
+});
+
+test("command reports successful scan", async () => {
+  const cwd = await tempProject();
+  const harness = createHarness();
+  createSlopScanExtension({
+    scanRepository: async (rootDir) => sampleReport({ rootDir }),
+    writeReport: async () => "/tmp/report.json",
+  })(harness.pi);
+
+  const { ctx, notifications } = createCommandCtx(cwd);
+  const command = harness.commands.get("slop-scan");
+  await command.handler("src", ctx);
+
+  assert.equal(notifications.length, 1);
+  assert.equal(notifications[0].level, "info");
+  assert.match(notifications[0].message, /Slop scan/);
+  assert.match(notifications[0].message, /Full report: \/tmp\/report\.json/);
+});
+
+test("command reports errors", async () => {
+  const cwd = await tempProject();
+  const harness = createHarness();
+  createSlopScanExtension({ scanRepository: async () => sampleReport() })(harness.pi);
+
+  const { ctx, notifications } = createCommandCtx(cwd);
+  const command = harness.commands.get("slop-scan");
+  await command.handler("@src/file.ts", ctx);
+
+  assert.equal(notifications.length, 1);
+  assert.equal(notifications[0].level, "error");
+  assert.match(notifications[0].message, /scans directories, not files/);
 });
 
 test("formats compact summary and caps findings", async () => {
