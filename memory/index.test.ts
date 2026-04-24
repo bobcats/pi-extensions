@@ -4,6 +4,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { pathToFileURL } from "node:url";
+import { setTimeout as delay } from "node:timers/promises";
 
 function createHarness() {
   const handlers = new Map<string, Function>();
@@ -11,6 +12,8 @@ function createHarness() {
   const tools = new Map<string, any>();
   const sendUserMessageCalls: Array<{ content: string; options?: Record<string, unknown> }> = [];
   const notifications: Array<{ message: string; level: string }> = [];
+  let idle = true;
+  let hasPendingMessages = false;
 
   return {
     handlers,
@@ -37,9 +40,21 @@ function createHarness() {
         on() {},
       },
     } as never,
+    setIdle(value: boolean) {
+      idle = value;
+    },
+    setHasPendingMessages(value: boolean) {
+      hasPendingMessages = value;
+    },
     ctx: {
       hasUI: true,
       cwd: "/tmp/project",
+      isIdle() {
+        return idle;
+      },
+      hasPendingMessages() {
+        return hasPendingMessages;
+      },
       ui: {
         notify(message: string, level: string) {
           notifications.push({ message, level });
@@ -68,7 +83,7 @@ async function loadExtensionForHome(homeDir: string) {
   };
 }
 
-test("dream auto-resume queues follow-up message from agent_end", async () => {
+test("dream auto-resume waits for settled window and sends a plain user message", async () => {
   const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "memory-home-"));
   const { memoryExtension, restore } = await loadExtensionForHome(homeDir);
 
@@ -97,8 +112,12 @@ test("dream auto-resume queues follow-up message from agent_end", async () => {
 
     await agentEnd({}, harness.ctx);
 
+    assert.equal(harness.sendUserMessageCalls.length, 1);
+
+    await delay(900);
+
     assert.equal(harness.sendUserMessageCalls.length, 2);
-    assert.deepEqual(harness.sendUserMessageCalls[1].options, { deliverAs: "followUp" });
+    assert.equal(harness.sendUserMessageCalls[1].options, undefined);
   } finally {
     restore();
   }

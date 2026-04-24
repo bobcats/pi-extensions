@@ -124,8 +124,12 @@ export default function memoryExtension(pi: ExtensionAPI) {
   let isQmdInstalled: boolean | null = null;
 
   // Auto-resume tracking for dream mode
+  const DREAM_AUTORESUME_COOLDOWN_MS = 5 * 60 * 1000;
+  const DREAM_SETTLED_WINDOW_MS = 800;
   let lastAutoResumeTime = 0;
   let operationsThisSession = 0;
+  let pendingResumeMessage: string | null = null;
+  let pendingResumeTimer: ReturnType<typeof setTimeout> | null = null;
 
   // Throttle tool-driven reflect requests to avoid accidental loops/spam
   let lastReflectRequestAt = 0;
@@ -260,14 +264,60 @@ export default function memoryExtension(pi: ExtensionAPI) {
     }
   };
 
+  const isAgentSettled = (ctx: ExtensionContext): boolean => {
+    const isIdle = typeof ctx.isIdle === "function" ? ctx.isIdle() : true;
+    const hasPendingMessages = typeof ctx.hasPendingMessages === "function" ? ctx.hasPendingMessages() : false;
+    return isIdle && !hasPendingMessages;
+  };
+
+  const pausePendingResume = (): void => {
+    if (!pendingResumeTimer) return;
+    clearTimeout(pendingResumeTimer);
+    pendingResumeTimer = null;
+  };
+
+  const cancelPendingResume = (): void => {
+    pausePendingResume();
+    pendingResumeMessage = null;
+  };
+
+  const sendPendingResumeIfReady = (ctx: ExtensionContext): void => {
+    if (!pendingResumeMessage) return;
+    if (!dreamMode) {
+      cancelPendingResume();
+      return;
+    }
+    if (!isAgentSettled(ctx)) return;
+    if (Date.now() - lastAutoResumeTime < DREAM_AUTORESUME_COOLDOWN_MS) return;
+
+    const message = pendingResumeMessage;
+    cancelPendingResume();
+    lastAutoResumeTime = Date.now();
+    pi.sendUserMessage(message);
+  };
+
+  const schedulePendingResume = (ctx: ExtensionContext, message: string): void => {
+    pausePendingResume();
+    pendingResumeMessage = message;
+    pendingResumeTimer = setTimeout(() => sendPendingResumeIfReady(ctx), DREAM_SETTLED_WINDOW_MS);
+  };
+
+  const reschedulePendingResume = (ctx: ExtensionContext): void => {
+    if (!pendingResumeMessage) return;
+    schedulePendingResume(ctx, pendingResumeMessage);
+  };
+
   pi.on("session_start", async (_e, ctx) => reconstructState(ctx));
   pi.on("session_switch", async (_e, ctx) => reconstructState(ctx));
   pi.on("session_fork", async (_e, ctx) => reconstructState(ctx));
   pi.on("session_tree", async (_e, ctx) => reconstructState(ctx));
+  pi.on("session_before_compact", async () => pausePendingResume());
+  pi.on("session_compact", async (_e, ctx) => reschedulePendingResume(ctx));
 
   // Reset per-session operation counter when agent starts
   pi.on("agent_start", async () => {
     operationsThisSession = 0;
+    pausePendingResume();
   });
 
   // Clear running operation state when agent stops; auto-resume dream if active
@@ -281,9 +331,7 @@ export default function memoryExtension(pi: ExtensionAPI) {
     if (operationsThisSession === 0) return;
 
     // Rate-limit auto-resume to once every 5 minutes
-    const now = Date.now();
-    if (now - lastAutoResumeTime < 5 * 60 * 1000) return;
-    lastAutoResumeTime = now;
+    if (Date.now() - lastAutoResumeTime < DREAM_AUTORESUME_COOLDOWN_MS) return;
 
     const brain = getActiveBrain(ctx);
     const journalPath = path.join(brain.vaultDir, "dream-journal.md");
@@ -298,7 +346,7 @@ export default function memoryExtension(pi: ExtensionAPI) {
       resumeMsg += ` NOTE: ${consecutiveNoops} consecutive noop cycles before reset — stop exploring and start restructuring.`;
     }
 
-    pi.sendUserMessage(resumeMsg, { deliverAs: "followUp" });
+    schedulePendingResume(ctx, resumeMsg);
   });
 
   // Inject vault content into system prompt
@@ -987,6 +1035,7 @@ export default function memoryExtension(pi: ExtensionAPI) {
       }
 
       if (trimmed === "dream") {
+        cancelPendingResume();
         dreamMode = true;
         state.dreamCycle = 1;
         consecutiveNoops = 0;
@@ -1000,6 +1049,7 @@ export default function memoryExtension(pi: ExtensionAPI) {
       }
 
       if (trimmed === "cancel dream") {
+        cancelPendingResume();
         dreamMode = false;
         state.dreamCycle = 0;
         updateWidget(ctx);
