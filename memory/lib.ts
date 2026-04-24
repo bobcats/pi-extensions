@@ -6,18 +6,16 @@ export const OPERATIONS_FILE = "memory-operations.jsonl";
 const CONTENT_DIR = path.join(import.meta.dirname, "content");
 
 export function readVaultIndex(dir: string): string | null {
-  try {
-    return fs.readFileSync(path.join(dir, "index.md"), "utf-8").trim() || null;
-  } catch {
-    return null;
-  }
+  const indexPath = path.join(dir, "index.md");
+  if (!fs.existsSync(indexPath)) return null;
+  return fs.readFileSync(indexPath, "utf-8").trim() || null;
 }
 
 export function listVaultFiles(dir: string): string[] {
+  if (!fs.existsSync(dir)) return [];
   const results: string[] = [];
   function walk(currentDir: string, prefix: string) {
-    let entries: fs.Dirent[];
-    try { entries = fs.readdirSync(currentDir, { withFileTypes: true }); } catch { return; }
+    const entries = fs.readdirSync(currentDir, { withFileTypes: true });
     for (const entry of entries) {
       if (entry.name.startsWith(".")) continue;
       if (entry.name === "dream-journal.md" || entry.name === OPERATIONS_FILE) continue;
@@ -112,10 +110,10 @@ export function initVault(vaultDir: string, includePrinciples: boolean): { creat
 }
 
 export function buildVaultSnapshot(dir: string): string {
+  if (!fs.existsSync(dir)) return "";
   const sections: string[] = [];
   function walk(currentDir: string, prefix: string) {
-    let entries: fs.Dirent[];
-    try { entries = fs.readdirSync(currentDir, { withFileTypes: true }); } catch { return; }
+    const entries = fs.readdirSync(currentDir, { withFileTypes: true });
     const sorted = [...entries].sort((a, b) => a.name.localeCompare(b.name));
     for (const entry of sorted) {
       if (entry.name.startsWith(".")) continue;

@@ -42,6 +42,13 @@ test("readVaultIndex returns null for empty file", () => {
   assert.strictEqual(readVaultIndex(dir), null);
 });
 
+test("readVaultIndex surfaces invalid index path errors", () => {
+  const dir = tmpDir();
+  fs.mkdirSync(path.join(dir, "index.md"));
+
+  assert.throws(() => readVaultIndex(dir), /EISDIR|illegal operation|is a directory/);
+});
+
 // --- listVaultFiles ---
 
 test("listVaultFiles returns .md slugs excluding index.md", () => {
@@ -80,6 +87,14 @@ test("listVaultFiles skips dotfiles and special files", () => {
 
 test("listVaultFiles returns empty array for nonexistent dir", () => {
   assert.deepStrictEqual(listVaultFiles("/nonexistent"), []);
+});
+
+test("listVaultFiles surfaces invalid vault root errors", () => {
+  const dir = tmpDir();
+  const filePath = path.join(dir, "vault.md");
+  fs.writeFileSync(filePath, "not a directory");
+
+  assert.throws(() => listVaultFiles(filePath), /ENOTDIR|not a directory/);
 });
 
 test("listVaultFiles returns sorted results", () => {
@@ -167,6 +182,14 @@ test("buildVaultSnapshot includes nested files", () => {
 
 test("buildVaultSnapshot returns empty string for missing dir", () => {
   assert.strictEqual(buildVaultSnapshot("/nonexistent"), "");
+});
+
+test("buildVaultSnapshot surfaces invalid vault root errors", () => {
+  const dir = tmpDir();
+  const filePath = path.join(dir, "vault.md");
+  fs.writeFileSync(filePath, "not a directory");
+
+  assert.throws(() => buildVaultSnapshot(filePath), /ENOTDIR|not a directory/);
 });
 
 test("buildVaultSnapshot skips non-md files", () => {
