@@ -16,6 +16,7 @@ import { spawn } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { Effect } from "effect";
 import type { AgentToolResult } from "@mariozechner/pi-agent-core";
 import type { Message } from "@mariozechner/pi-ai";
 import { StringEnum } from "@mariozechner/pi-ai";
@@ -25,6 +26,8 @@ import { Container, Markdown, Spacer, Text } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
 import { type AgentConfig, type AgentScope, discoverAgents } from "./agents.js";
 import { getSavedScopedModelIds, resolveModelOverride } from "./model-selection.js";
+import { parseSubagentRequest, projectAgentsForConfirmation } from "./request.js";
+import { getFinalOutput, runSubagentRequest } from "./runtime.js";
 import {
 	isTmuxAvailable,
 	createPaneInWindow,
@@ -39,7 +42,18 @@ import {
 	shellEscape,
 	tileWindow,
 } from "./tmux.js";
-import { type AsyncRun, updateWidget, startWidgetRefresh, stopWidgetRefresh } from "./widget.js";
+import {
+	COLLAPSED_ITEM_COUNT,
+	MAX_CONCURRENCY,
+	MAX_PARALLEL_TASKS,
+	SPAWN_STAGGER_MS,
+	type AsyncBatch,
+	type AsyncRun,
+	type SingleResult,
+	type SubagentDetails,
+	type UsageStats,
+} from "./types.js";
+import { updateWidget, startWidgetRefresh, stopWidgetRefresh } from "./widget.js";
 
 const BUNDLED_AGENTS_DIR = path.join(import.meta.dirname, "agents");
 
@@ -71,11 +85,6 @@ function resolveSkillPath(skillName: string, cwd: string): string | null {
 	}
 	return null;
 }
-const MAX_PARALLEL_TASKS = 8;
-const MAX_CONCURRENCY = 4;
-const SPAWN_STAGGER_MS = 2000;
-const COLLAPSED_ITEM_COUNT = 10;
-
 function formatTokens(count: number): string {
 	if (count < 1000) return count.toString();
 	if (count < 10000) return `${(count / 1000).toFixed(1)}k`;
@@ -175,57 +184,6 @@ function formatToolCall(
 			return themeFg("accent", toolName) + themeFg("dim", ` ${preview}`);
 		}
 	}
-}
-
-interface UsageStats {
-	input: number;
-	output: number;
-	cacheRead: number;
-	cacheWrite: number;
-	cost: number;
-	contextTokens: number;
-	turns: number;
-}
-
-interface SingleResult {
-	agent: string;
-	agentSource: "user" | "project" | "unknown";
-	task: string;
-	exitCode: number;
-	messages: Message[];
-	stderr: string;
-	usage: UsageStats;
-	model?: string;
-	stopReason?: string;
-	errorMessage?: string;
-	step?: number;
-}
-
-interface SubagentDetails {
-	mode: "single" | "parallel" | "chain";
-	agentScope: AgentScope;
-	projectAgentsDir: string | null;
-	results: SingleResult[];
-}
-
-interface AsyncBatch {
-	id: string;
-	windowId: string;
-	windowName: string;
-	paneIds: string[];
-	pendingRunIds: Set<string>;
-}
-
-function getFinalOutput(messages: Message[]): string {
-	for (let i = messages.length - 1; i >= 0; i--) {
-		const msg = messages[i];
-		if (msg.role === "assistant") {
-			for (const part of msg.content) {
-				if (part.type === "text") return part.text;
-			}
-		}
-	}
-	return "";
 }
 
 type DisplayItem = { type: "text"; text: string } | { type: "toolCall"; name: string; args: Record<string, any> };
@@ -796,11 +754,6 @@ export default function (pi: ExtensionAPI) {
 				};
 			}
 
-			const hasChain = (params.chain?.length ?? 0) > 0;
-			const hasTasks = (params.tasks?.length ?? 0) > 0;
-			const hasSingle = Boolean(params.agent && params.task);
-			const modeCount = Number(hasChain) + Number(hasTasks) + Number(hasSingle);
-
 			const makeDetails =
 				(mode: "single" | "parallel" | "chain") =>
 				(results: SingleResult[]): SubagentDetails => ({
@@ -810,46 +763,62 @@ export default function (pi: ExtensionAPI) {
 					results,
 				});
 
-			if (modeCount !== 1) {
-				const available = agents.map((a) => `${a.name} (${a.source})`).join(", ") || "none";
+			const modeFromRequest = (type: string): "single" | "parallel" | "chain" => {
+				if (type === "chain") return "chain";
+				if (type === "parallel" || type === "asyncParallel") return "parallel";
+				return "single";
+			};
+
+			let request: Parameters<typeof projectAgentsForConfirmation>[0];
+			try {
+				request = await Effect.runPromise(
+					parseSubagentRequest({
+						params,
+						agents,
+						defaultCwd: ctx.cwd,
+						agentScope,
+						projectAgentsDir: discovery.projectAgentsDir,
+						selectedModel,
+					}),
+				);
+			} catch (error) {
+				const text =
+					error &&
+					typeof error === "object" &&
+					"message" in error &&
+					typeof (error as { message?: unknown }).message === "string"
+						? (error as { message: string }).message
+						: String(error);
 				return {
-					content: [
-						{
-							type: "text",
-							text: `Invalid parameters. Provide exactly one mode.\nAvailable agents: ${available}`,
-						},
-					],
+					content: [{ type: "text", text }],
 					details: makeDetails("single")([]),
 				};
 			}
 
+			const requestMode = modeFromRequest(request.type);
+
 			if ((agentScope === "project" || agentScope === "both") && confirmProjectAgents && ctx.hasUI) {
-				const requestedAgentNames = new Set<string>();
-				if (params.chain) for (const step of params.chain) requestedAgentNames.add(step.agent);
-				if (params.tasks) for (const t of params.tasks) requestedAgentNames.add(t.agent);
-				if (params.agent) requestedAgentNames.add(params.agent);
-
-				const projectAgentsRequested = Array.from(requestedAgentNames)
-					.map((name) => agents.find((a) => a.name === name))
-					.filter((a): a is AgentConfig => a?.source === "project");
-
+				const projectAgentsRequested = projectAgentsForConfirmation(request);
 				if (projectAgentsRequested.length > 0) {
 					const names = projectAgentsRequested.map((a) => a.name).join(", ");
 					const dir = discovery.projectAgentsDir ?? "(unknown)";
 					const ok = await ctx.ui.confirm(
 						"Run project-local agents?",
-						`Agents: ${names}\nSource: ${dir}\n\nProject agents are repo-controlled. Only continue for trusted repositories.`,
+						`Agents: ${names}
+Source: ${dir}
+
+Project agents are repo-controlled. Only continue for trusted repositories.`,
 					);
-					if (!ok)
+					if (!ok) {
 						return {
 							content: [{ type: "text", text: "Canceled: project-local agents not approved." }],
-							details: makeDetails(hasChain ? "chain" : hasTasks ? "parallel" : "single")([]),
+							details: makeDetails(requestMode)([]),
 						};
+					}
 				}
 			}
 
-			// Async mode — spawn into tmux panes, return immediately
-			if (params.async) {
+			if (request.type === "asyncSingle" || request.type === "asyncParallel") {
 				if (!isTmuxAvailable()) {
 					return {
 						content: [{ type: "text", text: "async: true requires tmux. Start pi inside a tmux session." }],
@@ -857,262 +826,95 @@ export default function (pi: ExtensionAPI) {
 					};
 				}
 
-				if (hasChain) {
-					return {
-						content: [{ type: "text", text: "async: true is not supported for chains (steps depend on {previous})." }],
-						details: makeDetails("chain")([]),
-					};
-				}
-
-				if (hasSingle && params.agent && params.task) {
-					const agent = agents.find((a) => a.name === params.agent);
-					if (!agent) {
-						return {
-							content: [{ type: "text", text: `Unknown agent: "${params.agent}"` }],
-							details: makeDetails("single")([]),
-						};
-					}
+				if (request.type === "asyncSingle") {
 					const { runId } = runSingleAsyncAgent(
 						pi,
 						asyncRuns,
 						asyncBatches,
 						latestCtx,
 						ctx.cwd,
-						agent,
-						params.task,
-						params.cwd,
-						params.thinking,
-						selectedModel ?? agent.model,
+						request.agent,
+						request.task,
+						request.cwd,
+						request.options.thinking,
+						request.model,
 					);
+
 					return {
-						content: [{ type: "text", text: `Started async subagent "${params.agent}" (run: ${runId})` }],
+						content: [{ type: "text", text: `Started async subagent "${request.agent.name}" (run: ${runId})` }],
 						details: makeDetails("single")([]),
 					};
 				}
 
-				if (hasTasks && params.tasks) {
-					const batchTasks: Array<{ agent: AgentConfig; task: string; cwd?: string }> = [];
-					for (const t of params.tasks) {
-						const agent = agents.find((a) => a.name === t.agent);
-						if (!agent) {
-							pi.sendMessage(
-								{
-									customType: "subagent_result",
-									content: `Async subagent "${t.agent}" failed (invalid agent).\n\nUnknown agent: "${t.agent}"`,
-									display: true,
-									details: { runId: null, agent: t.agent, task: t.task, exitCode: 1 },
-								},
-								{ triggerTurn: true, deliverAs: "steer" },
-							);
-							continue;
-						}
-						batchTasks.push({ agent, task: t.task, cwd: t.cwd });
-					}
-
-					if (batchTasks.length === 0) {
-						return {
-							content: [{ type: "text", text: "No async subagents started." }],
-							details: makeDetails("parallel")([]),
-							isError: true,
-						};
-					}
-
-					const { runIds, windowName } = runParallelAsyncBatch(
-						pi,
-						asyncRuns,
-						asyncBatches,
-						latestCtx,
-						ctx.cwd,
-						batchTasks,
-						params.thinking,
-						selectedModel,
-					);
-					return {
-						content: [
-							{ type: "text", text: `Started ${runIds.length} async subagents in tmux window "${windowName}"` },
-						],
-						details: makeDetails("parallel")([]),
-					};
-				}
-			}
-
-			if (params.chain && params.chain.length > 0) {
-				const results: SingleResult[] = [];
-				let previousOutput = "";
-
-				for (let i = 0; i < params.chain.length; i++) {
-					const step = params.chain[i];
-					const taskWithContext = step.task.replace(/\{previous\}/g, previousOutput);
-
-					// Create update callback that includes all previous results
-					const chainUpdate: OnUpdateCallback | undefined = onUpdate
-						? (partial) => {
-								// Combine completed results with current streaming result
-								const currentResult = partial.details?.results[0];
-								if (currentResult) {
-									const allResults = [...results, currentResult];
-									onUpdate({
-										content: partial.content,
-										details: makeDetails("chain")(allResults),
-									});
-								}
-							}
-						: undefined;
-
-					const result = await runSingleAgent(
-						ctx.cwd,
-						agents,
-						step.agent,
-						taskWithContext,
-						step.cwd,
-						params.thinking,
-						selectedModel ?? agents.find((a) => a.name === step.agent)?.model,
-						i + 1,
-						signal,
-						chainUpdate,
-						makeDetails("chain"),
-					);
-					results.push(result);
-
-					const isError =
-						result.exitCode !== 0 || result.stopReason === "error" || result.stopReason === "aborted";
-					if (isError) {
-						const errorMsg =
-							result.errorMessage || result.stderr || getFinalOutput(result.messages) || "(no output)";
-						return {
-							content: [{ type: "text", text: `Chain stopped at step ${i + 1} (${step.agent}): ${errorMsg}` }],
-							details: makeDetails("chain")(results),
-							isError: true,
-						};
-					}
-					previousOutput = getFinalOutput(result.messages);
-				}
-				return {
-					content: [{ type: "text", text: getFinalOutput(results[results.length - 1].messages) || "(no output)" }],
-					details: makeDetails("chain")(results),
-				};
-			}
-
-			if (params.tasks && params.tasks.length > 0) {
-				if (params.tasks.length > MAX_PARALLEL_TASKS)
-					return {
-						content: [
-							{
-								type: "text",
-								text: `Too many parallel tasks (${params.tasks.length}). Max is ${MAX_PARALLEL_TASKS}.`,
-							},
-						],
-						details: makeDetails("parallel")([]),
-					};
-
-				// Track all results for streaming updates
-				const allResults: SingleResult[] = new Array(params.tasks.length);
-
-				// Initialize placeholder results
-				for (let i = 0; i < params.tasks.length; i++) {
-					allResults[i] = {
-						agent: params.tasks[i].agent,
-						agentSource: "unknown",
-						task: params.tasks[i].task,
-						exitCode: -1, // -1 = still running
-						messages: [],
-						stderr: "",
-						usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: 0, turns: 0 },
-					};
-				}
-
-				const emitParallelUpdate = () => {
-					if (onUpdate) {
-						const running = allResults.filter((r) => r.exitCode === -1).length;
-						const done = allResults.filter((r) => r.exitCode !== -1).length;
-						onUpdate({
-							content: [
-								{ type: "text", text: `Parallel: ${done}/${allResults.length} done, ${running} running...` },
-							],
-							details: makeDetails("parallel")([...allResults]),
-						});
-					}
-				};
-
-				const results = await mapWithConcurrencyLimit(params.tasks, MAX_CONCURRENCY, async (t, index) => {
-					// Stagger spawns to avoid pi settings file lock contention (proper-lockfile sync, no retries)
-					if (index > 0) await new Promise((r) => setTimeout(r, index * SPAWN_STAGGER_MS));
-					const result = await runSingleAgent(
-						ctx.cwd,
-						agents,
-						t.agent,
-						t.task,
-						t.cwd,
-						params.thinking,
-						selectedModel ?? agents.find((a) => a.name === t.agent)?.model,
-						undefined,
-						signal,
-						// Per-task update callback
-						(partial) => {
-							if (partial.details?.results[0]) {
-								allResults[index] = partial.details.results[0];
-								emitParallelUpdate();
-							}
-						},
-						makeDetails("parallel"),
-					);
-					allResults[index] = result;
-					emitParallelUpdate();
-					return result;
-				});
-
-				const successCount = results.filter((r) => r.exitCode === 0).length;
-				const summaries = results.map((r) => {
-					const output = getFinalOutput(r.messages);
-					const status = r.exitCode === 0 ? "completed" : "failed";
-					return `## [${r.agent}] ${status}\n\n${output || "(no output)"}`;
-				});
-				return {
-					content: [
+				for (const rejected of request.rejectedTasks) {
+					pi.sendMessage(
 						{
-							type: "text",
-							text: `Parallel: ${successCount}/${results.length} succeeded\n\n${summaries.join("\n\n---\n\n")}`,
-						},
-					],
-					details: makeDetails("parallel")(results),
-				};
-			}
+							customType: "subagent_result",
+							content: `Async subagent "${rejected.agent}" failed (invalid agent).
 
-			if (params.agent && params.task) {
-				const result = await runSingleAgent(
-					ctx.cwd,
-					agents,
-					params.agent,
-					params.task,
-					params.cwd,
-					params.thinking,
-					selectedModel ?? agents.find((a) => a.name === params.agent)?.model,
-					undefined,
-					signal,
-					onUpdate,
-					makeDetails("single"),
-				);
-				const isError = result.exitCode !== 0 || result.stopReason === "error" || result.stopReason === "aborted";
-				if (isError) {
-					const errorMsg =
-						result.errorMessage || result.stderr || getFinalOutput(result.messages) || "(no output)";
+${rejected.reason}`,
+							display: true,
+							details: { runId: null, agent: rejected.agent, task: rejected.task, exitCode: 1 },
+						},
+						{ triggerTurn: true, deliverAs: "steer" },
+					);
+				}
+
+				if (request.tasks.length === 0) {
 					return {
-						content: [{ type: "text", text: `Agent ${result.stopReason || "failed"}: ${errorMsg}` }],
-						details: makeDetails("single")([result]),
+						content: [{ type: "text", text: "No async subagents started." }],
+						details: makeDetails("parallel")([]),
 						isError: true,
 					};
 				}
+
+				const { runIds, windowName } = runParallelAsyncBatch(
+					pi,
+					asyncRuns,
+					asyncBatches,
+					latestCtx,
+					ctx.cwd,
+					[...request.tasks],
+					request.options.thinking,
+					request.options.selectedModel,
+				);
 				return {
-					content: [{ type: "text", text: getFinalOutput(result.messages) || "(no output)" }],
-					details: makeDetails("single")([result]),
+					content: [{ type: "text", text: `Started ${runIds.length} async subagents in tmux window "${windowName}"` }],
+					details: makeDetails("parallel")([]),
 				};
 			}
 
-			const available = agents.map((a) => `${a.name} (${a.source})`).join(", ") || "none";
-			return {
-				content: [{ type: "text", text: `Invalid parameters. Available agents: ${available}` }],
-				details: makeDetails("single")([]),
-			};
+			try {
+				const output = await Effect.runPromise(
+					runSubagentRequest(request, {
+						startAsyncSingle: () => Effect.die("not used"),
+						startAsyncParallel: () => Effect.die("not used"),
+						onUpdate,
+						makeDetails,
+						resolveSkillPath,
+					}),
+					{ signal },
+				);
+
+				return {
+					content: [{ type: "text", text: output.contentText }],
+					details: makeDetails(output.mode)(output.results),
+					isError: output.isError,
+				};
+			} catch (error) {
+				const text =
+					error &&
+					typeof error === "object" &&
+					"message" in error &&
+					typeof (error as { message?: unknown }).message === "string"
+						? (error as { message: string }).message
+						: String(error);
+				return {
+					content: [{ type: "text", text }],
+					details: makeDetails(requestMode)([]),
+					isError: true,
+				};
+			}
 		},
 
 		renderCall(args, theme) {
