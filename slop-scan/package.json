@@ -1,0 +1,16 @@
+{
+  "name": "pi-slop-scan",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "tsx --test --test-timeout=5000 *.test.ts"
+  },
+  "dependencies": {
+    "slop-scan": "^0.3.0"
+  },
+  "devDependencies": {
+    "@mariozechner/pi-coding-agent": "*",
+    "@sinclair/typebox": "*",
+    "tsx": "^4.20.0"
+  }
+}
