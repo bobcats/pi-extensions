@@ -3,10 +3,34 @@
   "version": "0.1.0",
   "private": false,
   "license": "MIT",
-  "keywords": ["pi-package"],
+  "keywords": [
+    "pi-package"
+  ],
   "pi": {
-    "extensions": ["./ext-prof/index.ts", "./confirm-rm/index.ts", "./memory/index.ts", "./notify/index.ts", "./context/index.ts", "./files/index.ts", "./session-breakdown/index.ts", "./subagent/index.ts", "./tldraw-desktop/index.ts", "./exa/index.ts", "./slop-scan/index.ts", "./hypura/index.ts", "./auto-name-session/index.ts", "./handoff/index.ts"],
-    "prompts": ["./prompts"],
-    "skills": ["./skills"]
+    "extensions": [
+      "./ext-prof/index.ts",
+      "./confirm-rm/index.ts",
+      "./memory/index.ts",
+      "./notify/index.ts",
+      "./context/index.ts",
+      "./files/index.ts",
+      "./session-breakdown/index.ts",
+      "./subagent/index.ts",
+      "./tldraw-desktop/index.ts",
+      "./exa/index.ts",
+      "./slop-scan/index.ts",
+      "./hypura/index.ts",
+      "./auto-name-session/index.ts",
+      "./handoff/index.ts"
+    ],
+    "prompts": [
+      "./prompts"
+    ],
+    "skills": [
+      "./skills"
+    ]
+  },
+  "dependencies": {
+    "effect": "^3.21.2"
   }
 }
