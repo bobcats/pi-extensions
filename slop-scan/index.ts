@@ -3,7 +3,16 @@ import os from "node:os";
 import path from "node:path";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
-import type { AnalysisResult, DirectoryScore, FileScore, Finding } from "slop-scan";
+import {
+  analyzeRepository,
+  buildReportMetadata,
+  createDefaultRegistry,
+  loadConfigFile,
+  type AnalysisResult,
+  type DirectoryScore,
+  type FileScore,
+  type Finding,
+} from "slop-scan";
 
 export interface SlopScanDeps {
   scanRepository?: (rootDir: string) => Promise<AnalysisResult>;
@@ -198,8 +207,17 @@ export function createSlopScanExtension(deps: SlopScanDeps = {}) {
   };
 }
 
-async function defaultScanRepository(_rootDir: string): Promise<AnalysisResult> {
-  throw new Error("default slop-scan integration is not implemented yet");
+async function defaultScanRepository(rootDir: string): Promise<AnalysisResult> {
+  const loadedConfig = await loadConfigFile(rootDir);
+  const registry = createDefaultRegistry();
+
+  for (const plugin of loadedConfig.plugins) {
+    registry.registerPlugin(plugin.namespace, plugin.plugin);
+  }
+
+  const result = await analyzeRepository(rootDir, loadedConfig.config, registry);
+  result.metadata = buildReportMetadata(loadedConfig.config, loadedConfig.plugins);
+  return result;
 }
 
 async function writeReportToTempFile(report: AnalysisResult): Promise<string> {

@@ -39,6 +39,10 @@ test("registers slop-scan command", () => {
   assert.ok(harness.commands.get("slop-scan"));
 });
 
+test("default export factory can be constructed with real slop-scan imports", () => {
+  assert.doesNotThrow(() => createSlopScanExtension());
+});
+
 async function tempProject() {
   const dir = await mkdtemp(path.join(os.tmpdir(), "pi-slop-scan-test-"));
   await mkdir(path.join(dir, "src"), { recursive: true });
@@ -106,6 +110,24 @@ test("rejects file targets including pi-style mentions", async () => {
     () => tool.execute("1", { path: "@src/file.ts" }, undefined, undefined, { cwd } as any),
     /scans directories, not files/,
   );
+});
+
+test("uses the target directory as the scan and config root", async () => {
+  const cwd = await tempProject();
+  const calls: string[] = [];
+  const harness = createHarness();
+  createSlopScanExtension({
+    scanRepository: async (rootDir) => {
+      calls.push(rootDir);
+      return sampleReport({ rootDir });
+    },
+    writeReport: async () => "/tmp/report.json",
+  })(harness.pi);
+
+  const tool = harness.tools.get("slop_scan");
+  await tool.execute("1", { path: "src" }, undefined, undefined, { cwd } as any);
+
+  assert.deepEqual(calls, [path.join(cwd, "src")]);
 });
 
 test("formats compact summary and caps findings", async () => {
