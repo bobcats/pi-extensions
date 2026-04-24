@@ -9,19 +9,22 @@ export interface TempFileResource {
 	filePath: string;
 }
 
-function safeName(value: string): string {
+export function safeTempName(value: string): string {
 	return value.replace(/[^\w.-]+/g, "_");
 }
 
+export function createPromptTempFileSync(agentName: string, content: string): TempFileResource {
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-subagent-"));
+	const filePath = path.join(dir, `prompt-${safeTempName(agentName)}.md`);
+	fs.writeFileSync(filePath, content, { encoding: "utf-8", mode: 0o600 });
+	return { dir, filePath };
+}
+
 function removeTempResource(resource: TempFileResource): Effect.Effect<void> {
-	return Effect.sync(() => {
-		try {
-			fs.unlinkSync(resource.filePath);
-		} catch {}
-		try {
-			fs.rmSync(resource.dir, { recursive: true, force: true });
-		} catch {}
-	});
+	return Effect.try({
+		try: () => fs.rmSync(resource.dir, { recursive: true, force: true }),
+		catch: (cause) => cause,
+	}).pipe(Effect.ignore);
 }
 
 export function makeTempPromptFile(
@@ -30,41 +33,9 @@ export function makeTempPromptFile(
 ): Effect.Effect<TempFileResource, TempResourceFailed> {
 	return Effect.acquireRelease(
 		Effect.try({
-			try: () => {
-				const dir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-subagent-"));
-				const filePath = path.join(dir, `prompt-${safeName(agentName)}.md`);
-				fs.writeFileSync(filePath, content, { encoding: "utf-8", mode: 0o600 });
-				return { dir, filePath };
-			},
+			try: () => createPromptTempFileSync(agentName, content),
 			catch: (cause) => new TempResourceFailed({ operation: "create prompt file", cause }),
 		}),
 		removeTempResource,
-	);
-}
-
-export function makeTempSessionFile(runId: string): Effect.Effect<TempFileResource, TempResourceFailed> {
-	return Effect.acquireRelease(
-		Effect.try({
-			try: () => {
-				const dir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-subagent-session-"));
-				const filePath = path.join(dir, `pi-subagent-${safeName(runId)}.jsonl`);
-				fs.writeFileSync(filePath, "", { encoding: "utf-8", mode: 0o600 });
-				return { dir, filePath };
-			},
-			catch: (cause) => new TempResourceFailed({ operation: "create session file", cause }),
-		}),
-		removeTempResource,
-	);
-}
-
-export function adoptTempFiles(paths: readonly string[]): Effect.Effect<void> {
-	return Effect.addFinalizer(() =>
-		Effect.sync(() => {
-			for (const filePath of paths) {
-				try {
-					fs.rmSync(filePath, { recursive: true, force: true });
-				} catch {}
-			}
-		}),
 	);
 }

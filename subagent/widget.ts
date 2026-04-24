@@ -67,7 +67,7 @@ export function updateWidget(ctx: ExtensionContext | null, runs: Map<string, Asy
 
 	ctx.ui.setWidget(
 		"subagent-status",
-		(_tui: any, _theme: any) => {
+		(_tui: unknown, _theme: unknown) => {
 			return {
 				invalidate() {},
 				render(width: number) {

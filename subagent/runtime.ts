@@ -4,13 +4,15 @@ import * as path from "node:path";
 import { Effect } from "effect";
 import type { AgentToolResult } from "@mariozechner/pi-agent-core";
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
-import { ChildProcessFailed, TmuxCommandFailed, TmuxUnavailable } from "./errors.ts";
+import { ChildProcessFailed, TmuxCommandFailed } from "./errors.ts";
 import { runSingleAgentEffect, type RunSingleAgentEffectInput } from "./process-effect.ts";
+import { createPromptTempFileSync } from "./temp-effect.ts";
 import { liveTmuxOps, pollForExitEffect, requireTmux, type TmuxOps } from "./tmux-effect.ts";
 import {
 	MAX_CONCURRENCY,
 	SPAWN_STAGGER_MS,
 	emptyUsageStats,
+	getFinalOutput,
 	type AsyncBatch,
 	type AsyncRun,
 	type SingleResult,
@@ -57,18 +59,6 @@ export interface AsyncStartDeps extends AsyncWatcherDeps {
 	asyncOwner: { start(run: AsyncRun): void };
 	startWidgetRefresh: (ctx: ExtensionContext | null, runs: Map<string, AsyncRun>) => void;
 	resolveSkillPath: (skillName: string, cwd: string) => string | null;
-}
-
-export function getFinalOutput(messages: SingleResult["messages"]): string {
-	for (let i = messages.length - 1; i >= 0; i--) {
-		const msg = messages[i];
-		if (msg.role === "assistant") {
-			for (const part of msg.content) {
-				if (part.type === "text") return part.text;
-			}
-		}
-	}
-	return "";
 }
 
 function isFailedResult(result: SingleResult): boolean {
@@ -139,22 +129,42 @@ function tmuxTry<A>(command: string, fn: () => A): Effect.Effect<A, TmuxCommandF
 	});
 }
 
-function safeName(value: string): string {
-	return value.replace(/[^\w.-]+/g, "_");
-}
-
-function writePromptToTempFile(agentName: string, prompt: string): { dir: string; filePath: string } {
-	const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-subagent-"));
-	const filePath = path.join(tmpDir, `prompt-${safeName(agentName)}.md`);
-	fs.writeFileSync(filePath, prompt, { encoding: "utf-8", mode: 0o600 });
-	return { dir: tmpDir, filePath };
+function ignoreCleanupFailure(fn: () => void): void {
+	try {
+		fn();
+	} catch (error) {
+		void error;
+	}
 }
 
 function cleanupAsyncTempFiles(tempFiles: string[]): void {
 	for (const filePath of tempFiles) {
-		try {
-			fs.rmSync(filePath, { recursive: true, force: true });
-		} catch {}
+		ignoreCleanupFailure(() => fs.rmSync(filePath, { recursive: true, force: true }));
+	}
+}
+
+function makeRunId(): string {
+	return crypto.randomUUID().slice(0, 8);
+}
+
+function asyncPaneTitle(agentName: string, task: string): string {
+	return `${agentName}: ${task.slice(0, 30)}`;
+}
+
+function createAsyncSessionFile(runId: string): Effect.Effect<{ sessionFile: string; tempFiles: string[] }> {
+	return Effect.sync(() => {
+		const sessionFile = path.join(os.tmpdir(), `pi-subagent-${runId}.jsonl`);
+		fs.writeFileSync(sessionFile, "", { encoding: "utf-8", mode: 0o600 });
+		return { sessionFile, tempFiles: [sessionFile] };
+	});
+}
+
+function readAsyncSummary(deps: AsyncWatcherDeps, sessionFile: string): string {
+	try {
+		return deps.readLastAssistantMessage(sessionFile);
+	} catch (error) {
+		void error;
+		return "(no output)";
 	}
 }
 
@@ -165,9 +175,7 @@ function finishBatchRun(asyncBatches: Map<string, AsyncBatch>, run: AsyncRun, op
 
 	batch.pendingRunIds.delete(run.id);
 	if (batch.pendingRunIds.size === 0) {
-		try {
-			ops.closeWindow(batch.windowId);
-		} catch {}
+		ignoreCleanupFailure(() => ops.closeWindow(batch.windowId));
 		asyncBatches.delete(batch.id);
 	}
 }
@@ -206,7 +214,7 @@ function buildAsyncPiCommand(
 	}
 
 	if (agent.systemPrompt.trim()) {
-		const temp = writePromptToTempFile(agent.name, agent.systemPrompt);
+		const temp = createPromptTempFileSync(agent.name, agent.systemPrompt);
 		args.push("--append-system-prompt", temp.filePath);
 		tempFiles.push(temp.filePath, temp.dir);
 	}
@@ -230,9 +238,7 @@ export function createAsyncRunWatcher(deps: AsyncWatcherDeps): (run: AsyncRun) =
 			deps.updateWidget(deps.latestCtx(), deps.asyncRuns);
 			if (run.batchId) finishBatchRun(deps.asyncBatches, run, ops);
 			else {
-				try {
-					ops.closePane(run.pane);
-				} catch {}
+				ignoreCleanupFailure(() => ops.closePane(run.pane));
 			}
 			cleanupAsyncTempFiles(run.tempFiles);
 		};
@@ -244,7 +250,7 @@ export function createAsyncRunWatcher(deps: AsyncWatcherDeps): (run: AsyncRun) =
 		}).pipe(
 			Effect.tap((exitCode) =>
 				Effect.sync(() => {
-					const summary = deps.readLastAssistantMessage(run.sessionFile);
+					const summary = readAsyncSummary(deps, run.sessionFile);
 					cleanup();
 
 					const status = exitCode === 0 ? "completed" : `failed (exit ${exitCode})`;
@@ -279,12 +285,8 @@ export function createAsyncRuntimeDeps(
 			Effect.gen(function* () {
 				yield* requireTmux(ops);
 
-				const runId = crypto.randomUUID().slice(0, 8);
-				const sessionFile = path.join(os.tmpdir(), `pi-subagent-${runId}.jsonl`);
-				const tempFiles = [sessionFile];
-				yield* Effect.sync(() => {
-					fs.writeFileSync(sessionFile, "", { encoding: "utf-8", mode: 0o600 });
-				});
+				const runId = makeRunId();
+				const { sessionFile, tempFiles } = yield* createAsyncSessionFile(runId);
 
 				const command = buildAsyncPiCommand(
 					request.agent,
@@ -299,7 +301,7 @@ export function createAsyncRuntimeDeps(
 					ops,
 				);
 				const pane = yield* tmuxTry("split-window", () =>
-					ops.createPaneWithCommand(`${request.agent.name}: ${request.task.slice(0, 30)}`, command)
+					ops.createPaneWithCommand(asyncPaneTitle(request.agent.name, request.task), command)
 				);
 
 				const run: AsyncRun = {
@@ -330,12 +332,8 @@ export function createAsyncRuntimeDeps(
 
 				for (let i = 0; i < request.tasks.length; i++) {
 					const task = request.tasks[i];
-					const runId = crypto.randomUUID().slice(0, 8);
-					const sessionFile = path.join(os.tmpdir(), `pi-subagent-${runId}.jsonl`);
-					const tempFiles = [sessionFile];
-					yield* Effect.sync(() => {
-						fs.writeFileSync(sessionFile, "", { encoding: "utf-8", mode: 0o600 });
-					});
+					const runId = makeRunId();
+					const { sessionFile, tempFiles } = yield* createAsyncSessionFile(runId);
 
 					const command = buildAsyncPiCommand(
 						task.agent,
@@ -350,7 +348,7 @@ export function createAsyncRuntimeDeps(
 						ops,
 					);
 
-					const name = `${task.agent.name}: ${task.task.slice(0, 30)}`;
+					const name = asyncPaneTitle(task.agent.name, task.task);
 					let pane: string;
 					if (i === 0 && initialPane) {
 						yield* tmuxTry("send-keys", () => ops.runCommandInPane(initialPane, name, command));
@@ -462,18 +460,17 @@ export function runSubagentRequest(request: SubagentRequest, deps: RuntimeDeps):
 							}
 						: undefined;
 
-					const result = yield* runSingle({
-						defaultCwd: request.options.defaultCwd,
-						agent: step.agent,
-						task: taskWithContext,
-						cwd: step.cwd,
-						thinking: request.options.thinking,
-						model: request.options.selectedModel ?? step.agent.model,
-						step: i + 1,
-						onUpdate: chainUpdate,
-						makeDetails: deps.makeDetails?.("chain"),
-						resolveSkillPath: deps.resolveSkillPath ?? (() => null),
-					});
+					const result = yield* runSingle(
+						buildRunSingleInput(request, deps, {
+							agent: step.agent,
+							task: taskWithContext,
+							cwd: step.cwd,
+							model: request.options.selectedModel ?? step.agent.model,
+							step: i + 1,
+							onUpdate: chainUpdate,
+							makeDetails: deps.makeDetails?.("chain"),
+						}),
+					);
 
 					results.push(result);
 					if (isFailedResult(result)) {
@@ -509,22 +506,21 @@ export function runSubagentRequest(request: SubagentRequest, deps: RuntimeDeps):
 								yield* Effect.sleep(`${index * staggerMs} millis`);
 							}
 
-							const result = yield* runSingle({
-								defaultCwd: request.options.defaultCwd,
-								agent: task.agent,
-								task: task.task,
-								cwd: task.cwd,
-								thinking: request.options.thinking,
-								model: request.options.selectedModel ?? task.agent.model,
-								onUpdate: (partial) => {
-									const current = partial.details?.results[0];
-									if (!current) return;
-									allResults[index] = current;
-									emitParallelProgress(allResults, deps, mode);
-								},
-								makeDetails: deps.makeDetails?.(mode),
-								resolveSkillPath: deps.resolveSkillPath ?? (() => null),
-							});
+							const result = yield* runSingle(
+								buildRunSingleInput(request, deps, {
+									agent: task.agent,
+									task: task.task,
+									cwd: task.cwd,
+									model: request.options.selectedModel ?? task.agent.model,
+									onUpdate: (partial) => {
+										const current = partial.details?.results[0];
+										if (!current) return;
+										allResults[index] = current;
+										emitParallelProgress(allResults, deps, mode);
+									},
+									makeDetails: deps.makeDetails?.(mode),
+								}),
+							);
 
 							allResults[index] = result;
 							emitParallelProgress(allResults, deps, mode);

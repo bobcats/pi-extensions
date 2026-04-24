@@ -2,8 +2,9 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { Effect } from "effect";
 import type { AgentConfig } from "./agents.ts";
-import { emptyUsageStats, type SingleResult, type SubagentRequest } from "./types.ts";
-import { runSubagentRequest } from "./runtime.ts";
+import { emptyUsageStats, type AsyncBatch, type AsyncRun, type SingleResult, type SubagentRequest } from "./types.ts";
+import { createAsyncRunWatcher, runSubagentRequest } from "./runtime.ts";
+import type { TmuxOps } from "./tmux-effect.ts";
 
 const agent: AgentConfig = {
 	name: "worker",
@@ -164,5 +165,61 @@ describe("runSubagentRequest", () => {
 		);
 		assert.deepEqual(rejected, ["missing"]);
 		assert.equal(output.contentText, 'Started 1 async subagents in tmux window "subagents-1"');
+	});
+
+	it("cleans up async runs when reading final output fails", async () => {
+		const asyncRuns = new Map<string, AsyncRun>();
+		const asyncBatches = new Map<string, AsyncBatch>();
+		const sentMessages: string[] = [];
+		let closedPane = false;
+		const run: AsyncRun = {
+			id: "run1",
+			agent: "worker",
+			task: "Async task",
+			startedAt: Date.now(),
+			pane: "%1",
+			sessionFile: "/tmp/malformed-session.jsonl",
+			tempFiles: [],
+		};
+		asyncRuns.set(run.id, run);
+		const tmuxOps: TmuxOps = {
+			isAvailable: () => true,
+			createPaneWithCommand: () => "%1",
+			createWindow: () => "@1",
+			getWindowPanes: () => [],
+			runCommandInPane: () => undefined,
+			createPaneInWindow: () => "%2",
+			tileWindow: () => undefined,
+			closePane: () => {
+				closedPane = true;
+			},
+			closeWindow: () => undefined,
+			readScreen: async () => "__SUBAGENT_DONE_0__",
+			makeBatchWindowName: () => "subagents-1",
+			shellEscape: (value) => value,
+		};
+
+		const watcher = createAsyncRunWatcher({
+			asyncRuns,
+			asyncBatches,
+			latestCtx: () => null,
+			pi: {
+				sendMessage: (message: { content?: string }) => {
+					sentMessages.push(message.content ?? "");
+				},
+				events: { emit: () => undefined },
+			} as Parameters<typeof createAsyncRunWatcher>[0]["pi"],
+			updateWidget: () => undefined,
+			readLastAssistantMessage: () => {
+				throw new Error("malformed session line");
+			},
+			tmuxOps,
+		});
+
+		await Effect.runPromise(watcher(run));
+
+		assert.equal(closedPane, true);
+		assert.equal(asyncRuns.size, 0);
+		assert.match(sentMessages[0], /\(no output\)/);
 	});
 });

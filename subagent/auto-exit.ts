@@ -8,16 +8,19 @@
  */
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 
+type InputEvent = { source?: unknown };
+type ShutdownContext = { shutdown(): void };
+
 export default function (pi: ExtensionAPI) {
 	let userTookOver = false;
 
-	pi.on("input", (event: any) => {
+	pi.on("input", (event: InputEvent | null | undefined) => {
 		if (event?.source === "user") {
 			userTookOver = true;
 		}
 	});
 
-	pi.on("agent_end", (_event: any, ctx: any) => {
+	pi.on("agent_end", (_event: unknown, ctx: ShutdownContext) => {
 		if (!userTookOver) {
 			ctx.shutdown();
 		}

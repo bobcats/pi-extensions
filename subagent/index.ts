@@ -26,10 +26,11 @@ import { createAsyncOwner } from "./async-owner.js";
 import { type AgentConfig, type AgentScope, discoverAgents } from "./agents.js";
 import { getSavedScopedModelIds, resolveModelOverride } from "./model-selection.js";
 import { parseSubagentRequest, projectAgentsForConfirmation } from "./request.js";
-import { createAsyncRunWatcher, createAsyncRuntimeDeps, getFinalOutput, runSubagentRequest } from "./runtime.js";
+import { createAsyncRunWatcher, createAsyncRuntimeDeps, runSubagentRequest } from "./runtime.js";
 import { closePane, closeWindow } from "./tmux.js";
 import {
 	COLLAPSED_ITEM_COUNT,
+	getFinalOutput,
 	type AsyncBatch,
 	type AsyncRun,
 	type SingleResult,
@@ -39,21 +40,45 @@ import { updateWidget, startWidgetRefresh, stopWidgetRefresh } from "./widget.js
 
 const BUNDLED_AGENTS_DIR = path.join(import.meta.dirname, "agents");
 
-function readLastAssistantMessage(sessionFile: string): string {
+function readSessionLines(sessionFile: string): string[] {
 	try {
-		const raw = fs.readFileSync(sessionFile, "utf8");
-		const lines = raw.split("\n").filter((l) => l.trim());
-		for (let i = lines.length - 1; i >= 0; i--) {
-			try {
-				const entry = JSON.parse(lines[i]);
-				if (entry.type === "message" && entry.message?.role === "assistant") {
-					for (const part of entry.message.content) {
-						if (part.type === "text") return part.text;
-					}
-				}
-			} catch {}
+		return fs.readFileSync(sessionFile, "utf8").split("\n").filter((line) => line.trim());
+	} catch {
+		return [];
+	}
+}
+
+function parseSessionLine(line: string): unknown {
+	try {
+		return JSON.parse(line) as unknown;
+	} catch {
+		return null;
+	}
+}
+
+function assistantTextFromSessionEntry(entry: unknown): string | null {
+	if (!entry || typeof entry !== "object") return null;
+	const typedEntry = entry as { type?: unknown; message?: unknown };
+	if (typedEntry.type !== "message" || !typedEntry.message || typeof typedEntry.message !== "object") return null;
+
+	const message = typedEntry.message as { role?: unknown; content?: unknown };
+	if (message.role !== "assistant" || !Array.isArray(message.content)) return null;
+
+	for (const part of message.content) {
+		if (part && typeof part === "object") {
+			const typedPart = part as { type?: unknown; text?: unknown };
+			if (typedPart.type === "text" && typeof typedPart.text === "string") return typedPart.text;
 		}
-	} catch {}
+	}
+	return null;
+}
+
+function readLastAssistantMessage(sessionFile: string): string {
+	const lines = readSessionLines(sessionFile);
+	for (let i = lines.length - 1; i >= 0; i--) {
+		const text = assistantTextFromSessionEntry(parseSessionLine(lines[i]));
+		if (text !== null) return text;
+	}
 	return "(no output)";
 }
 
@@ -103,7 +128,7 @@ function formatUsageStats(
 function formatToolCall(
 	toolName: string,
 	args: Record<string, unknown>,
-	themeFg: (color: any, text: string) => string,
+	themeFg: (color: string, text: string) => string,
 ): string {
 	const shortenPath = (p: string) => {
 		const home = os.homedir();
@@ -168,7 +193,7 @@ function formatToolCall(
 	}
 }
 
-type DisplayItem = { type: "text"; text: string } | { type: "toolCall"; name: string; args: Record<string, any> };
+type DisplayItem = { type: "text"; text: string } | { type: "toolCall"; name: string; args: Record<string, unknown> };
 
 function getDisplayItems(messages: Message[]): DisplayItem[] {
 	const items: DisplayItem[] = [];
@@ -237,17 +262,17 @@ export default function (pi: ExtensionAPI) {
 	});
 	const asyncOwner = createAsyncOwner({ runWatcher });
 
-	pi.on("session_start", (_event: any, ctx: ExtensionContext) => {
+	pi.on("session_start", (_event: unknown, ctx: ExtensionContext) => {
 		latestCtx = ctx;
 	});
 
 	pi.on("session_shutdown", async () => {
 		await asyncOwner.shutdown();
 		for (const batch of asyncBatches.values()) {
-			try { closeWindow(batch.windowId); } catch {}
+			closeWindow(batch.windowId);
 		}
 		for (const run of asyncRuns.values()) {
-			try { closePane(run.pane); } catch {}
+			closePane(run.pane);
 		}
 		stopWidgetRefresh();
 		asyncRuns.clear();
@@ -739,15 +764,24 @@ Project agents are repo-controlled. Only continue for trusted repositories.`,
 		},
 	});
 
-	// Renderer for async subagent completion messages
-	pi.registerMessageRenderer("subagent_result", (message: any, _options: any, theme: any) => {
-		const details = message.details as any;
+	type AsyncResultMessage = {
+		content?: unknown;
+		details?: { agent?: unknown; exitCode?: unknown };
+	};
+	type MessageTheme = {
+		fg(color: string, text: string): string;
+		bold(text: string): string;
+	};
+
+	pi.registerMessageRenderer("subagent_result", (message: AsyncResultMessage, _options: unknown, theme: MessageTheme) => {
+		const details = message.details;
 		if (!details) return undefined;
-		const icon = details.exitCode === 0 ? theme.fg("success", "✓") : theme.fg("error", "✗");
-		const status = details.exitCode === 0 ? "completed" : `failed (exit ${details.exitCode})`;
-		const header = `${icon} ${theme.fg("toolTitle", theme.bold(details.agent))} — ${status}`;
+		const agent = typeof details.agent === "string" ? details.agent : "subagent";
+		const exitCode = typeof details.exitCode === "number" ? details.exitCode : 1;
+		const icon = exitCode === 0 ? theme.fg("success", "✓") : theme.fg("error", "✗");
+		const status = exitCode === 0 ? "completed" : `failed (exit ${exitCode})`;
+		const header = `${icon} ${theme.fg("toolTitle", theme.bold(agent))} — ${status}`;
 		const content = typeof message.content === "string" ? message.content : "";
-		// Strip the header line from content since we render it ourselves
 		const body = content.replace(/^Async subagent "[^"]*" [^\n]*\n\n/, "");
 		const preview = body.length > 200 ? body.slice(0, 200) + "…" : body;
 		const lines = [header, "", ...preview.split("\n")];

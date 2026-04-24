@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import { Effect } from "effect";
-import { makeTempPromptFile, makeTempSessionFile } from "./temp-effect.ts";
+import { makeTempPromptFile } from "./temp-effect.ts";
 
 async function usePromptFile() {
 	let captured = "";
@@ -41,18 +41,4 @@ describe("temp-effect", () => {
 		assert.equal(existsSync(filePath), false);
 	});
 
-	it("creates an async session file path and deletes it when owned by a scope", async () => {
-		let filePath = "";
-		await Effect.runPromise(
-			Effect.scoped(
-				Effect.gen(function* () {
-					const temp = yield* makeTempSessionFile("run123");
-					filePath = temp.filePath;
-					assert.match(filePath, /pi-subagent-run123\.jsonl$/);
-					assert.equal(existsSync(filePath), true);
-				}),
-			),
-		);
-		assert.equal(existsSync(filePath), false);
-	});
 });

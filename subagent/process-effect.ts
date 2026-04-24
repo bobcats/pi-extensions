@@ -6,7 +6,7 @@ import type { Message } from "@mariozechner/pi-ai";
 import type { AgentConfig } from "./agents.ts";
 import { ChildProcessAborted, ChildProcessFailed } from "./errors.ts";
 import { makeTempPromptFile } from "./temp-effect.ts";
-import { emptyUsageStats, type SingleResult, type SubagentDetails } from "./types.ts";
+import { emptyUsageStats, getFinalOutput, type SingleResult, type SubagentDetails } from "./types.ts";
 
 type OnUpdateCallback = (partial: AgentToolResult<SubagentDetails>) => void;
 
@@ -30,18 +30,6 @@ export interface RunSingleAgentEffectInput {
 	spawnPi?: (args: string[], cwd: string) => ChildProcessLike;
 	resolveSkillPath: (skillName: string, cwd: string) => string | null;
 	killGraceMs?: number;
-}
-
-function getFinalOutput(messages: Message[]): string {
-	for (let i = messages.length - 1; i >= 0; i--) {
-		const msg = messages[i];
-		if (msg.role === "assistant") {
-			for (const part of msg.content) {
-				if (part.type === "text") return part.text;
-			}
-		}
-	}
-	return "";
 }
 
 function emitUpdate(input: RunSingleAgentEffectInput, currentResult: SingleResult): void {
@@ -253,7 +241,7 @@ function runSpawnedProcess(
 			finish(Effect.succeed(result));
 		};
 
-		const onError = (cause: unknown) => {
+		const onError = () => {
 			finish(
 				Effect.fail(
 					new ChildProcessFailed({
