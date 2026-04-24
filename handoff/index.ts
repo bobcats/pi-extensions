@@ -55,6 +55,13 @@ type SummaryModelResolution = {
   auth: AuthOk;
 };
 
+type ReplacementSessionContext = {
+  ui: {
+    notify(message: string, level: string): void;
+    setEditorText(text: string): void;
+  };
+};
+
 type HandoffCommandContext = {
   hasUI: boolean;
   model: { provider: string; id: string } | undefined;
@@ -66,7 +73,10 @@ type HandoffCommandContext = {
     getBranch(): SessionEntry[];
     getSessionFile(): string;
   };
-  newSession(options: { parentSession: string }): Promise<{ cancelled: boolean }>;
+  newSession(options: {
+    parentSession: string;
+    withSession?: (ctx: ReplacementSessionContext) => Promise<void>;
+  }): Promise<{ cancelled: boolean }>;
   ui: {
     notify(message: string, level: string): void;
     getEditorText(): string;
@@ -200,11 +210,26 @@ async function applyHandoffToNewSession(params: {
   summary: string;
 }): Promise<boolean> {
   const { ctx, goal, summary } = params;
+  const finalPrompt = `${goal}\n\nIn the handoff note below, "I" refers to the previous assistant.\n\n<handoff_note>\n${summary}\n</handoff_note>`;
+  let postSwitchFailed = false;
 
   let newSessionResult: { cancelled: boolean };
   try {
     newSessionResult = await ctx.newSession({
       parentSession: ctx.sessionManager.getSessionFile(),
+      withSession: async (replacementCtx) => {
+        try {
+          replacementCtx.ui.setEditorText(finalPrompt);
+          replacementCtx.ui.notify("Handoff ready — submit when ready.", "info");
+        } catch {
+          postSwitchFailed = true;
+          try {
+            replacementCtx.ui.notify("Failed to prepare handoff prompt.", "error");
+          } catch {
+            // Ignore replacement-session notification failures.
+          }
+        }
+      },
     });
   } catch {
     ctx.ui.notify("Failed to create new session.", "error");
@@ -216,10 +241,7 @@ async function applyHandoffToNewSession(params: {
     return false;
   }
 
-  const finalPrompt = `${goal}\n\n${summary}`;
-  ctx.ui.setEditorText(finalPrompt);
-  ctx.ui.notify("Handoff ready — submit when ready.", "info");
-  return true;
+  return !postSwitchFailed;
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────

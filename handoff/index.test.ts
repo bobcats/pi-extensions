@@ -11,12 +11,18 @@ function createHarness() {
   let editorText = "";
   let customResult: unknown = null;
   let newSessionCalls = 0;
+  let withSessionCalls = 0;
   let setSessionNameCalls = 0;
   const newSessionArgs: Array<{ parentSession: string }> = [];
   let customCallCount = 0;
   let findCalls = 0;
   let authCalls = 0;
+  let oldContextIsStale = false;
   const callOrder: string[] = [];
+
+  const staleError = () => new Error(
+    'This extension instance is stale after session replacement or reload. Use the provided replacement-session context instead.',
+  );
 
   return {
     commandMap,
@@ -27,6 +33,7 @@ function createHarness() {
     get customCallCount() { return customCallCount; },
     get findCalls() { return findCalls; },
     get authCalls() { return authCalls; },
+    get withSessionCalls() { return withSessionCalls; },
     get callOrder() { return callOrder; },
     setConfirmResult(value: boolean) {
       confirmResult = value;
@@ -82,14 +89,34 @@ function createHarness() {
           return "/tmp/project/.pi/sessions/current.jsonl";
         },
       },
-      newSession: async (options: { parentSession: string }) => {
+      newSession: async (options: { parentSession: string; withSession?: (ctx: any) => Promise<void> }) => {
         newSessionCalls += 1;
-        newSessionArgs.push(options);
+        newSessionArgs.push({ parentSession: options.parentSession });
         callOrder.push("newSession");
+        oldContextIsStale = true;
+
+        if (options.withSession) {
+          withSessionCalls += 1;
+          callOrder.push("withSession");
+          await options.withSession({
+            ui: {
+              notify(message: string, level: string) {
+                notifications.push({ message, level });
+                callOrder.push(`notify:${level}`);
+              },
+              setEditorText(text: string) {
+                editorTexts.push(text);
+                callOrder.push("setEditorText");
+              },
+            },
+          });
+        }
+
         return { cancelled: false };
       },
       ui: {
         notify(message: string, level: string) {
+          if (oldContextIsStale) throw staleError();
           notifications.push({ message, level });
           callOrder.push(`notify:${level}`);
         },
@@ -101,6 +128,7 @@ function createHarness() {
           return confirmResult;
         },
         setEditorText(text: string) {
+          if (oldContextIsStale) throw staleError();
           editorTexts.push(text);
           callOrder.push("setEditorText");
         },
@@ -265,14 +293,11 @@ test("happy path: preferred summary model available, generates summary, switches
   const cmd = harness.commandMap.get("handoff");
   await cmd.handler("continue the auth work", harness.ctx);
   assert.equal(harness.newSessionCalls, 1);
+  assert.equal(harness.withSessionCalls, 1);
   assert.equal(harness.editorTexts.length, 1);
-  assert.ok(
-    harness.editorTexts[0].startsWith("continue the auth work\n\n"),
-    "editor text should be goal + summary",
-  );
-  assert.ok(
-    harness.editorTexts[0].includes("- I already fixed auth."),
-    "editor text should include generated summary",
+  assert.equal(
+    harness.editorTexts[0],
+    "continue the auth work\n\nIn the handoff note below, \"I\" refers to the previous assistant.\n\n<handoff_note>\n- I already fixed auth.\n- Continue in auth/service.ts\n</handoff_note>",
   );
   assert.deepEqual(
     harness.notifications.find((n) => n.level === "info"),
@@ -282,8 +307,8 @@ test("happy path: preferred summary model available, generates summary, switches
   assert.deepEqual(harness.newSessionArgs[0], {
     parentSession: "/tmp/project/.pi/sessions/current.jsonl",
   });
-  // characterization: session switch ordering — newSession before setEditorText before notify
-  assert.deepEqual(harness.callOrder, ["newSession", "setEditorText", "notify:info"]);
+  // characterization: session switch ordering — newSession before withSession work in the replacement ctx
+  assert.deepEqual(harness.callOrder, ["newSession", "withSession", "setEditorText", "notify:info"]);
 });
 
 test("notifies Handoff cancelled when generation is aborted", async () => {

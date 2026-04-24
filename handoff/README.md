@@ -22,7 +22,7 @@ Examples:
 2. Confirms before overwriting any unsubmitted editor text
 3. Generates a first-person handoff summary using Amp's `create_handoff_context` extraction prompt
 4. Creates a new session with `parentSession` tracking
-5. Pre-fills the new session's editor with `goal + summary` — goal first so the top line shows what this handoff is about
+5. Pre-fills the new session's editor with the goal, then a brief framing sentence, then the summary wrapped in `<handoff_note>...</handoff_note>` — goal first so the top line shows what this handoff is about
 6. User reviews and presses Enter to submit
 
 ## Guardrails and error handling
@@ -45,10 +45,15 @@ Prefers `openai-codex/gpt-5.3-codex` for summary generation. Falls back silently
 
 ## Parent session tracking
 
-The new session is created with:
+The new session is created with `parentSession` tracking, and post-switch editor updates run inside `withSession` so the extension uses the fresh replacement-session context instead of the stale pre-switch command context:
 
 ```ts
-ctx.newSession({ parentSession: currentSessionFile })
+ctx.newSession({
+  parentSession: currentSessionFile,
+  withSession: async (ctx) => {
+    ctx.ui.setEditorText(finalPrompt);
+  },
+})
 ```
 
 This writes the parent session path into the new session's file header for future navigation by a `/resume` command or session browser.
