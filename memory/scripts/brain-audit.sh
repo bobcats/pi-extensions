@@ -51,7 +51,7 @@ if (( raw == 0 )); then echo "  None"; fi
 
 # --- Broken wikilinks ---
 echo ""
-echo "=== Broken Wikilinks ==="
+echo "=== Broken Wikilinks (curated notes only) ==="
 broken=0
 while IFS= read -r link; do
   [[ "$link" == "..." ]] && continue
@@ -60,7 +60,7 @@ while IFS= read -r link; do
     echo "  BROKEN: [[$link]] -> $file"
     ((broken++)) || true
   fi
-done < <(grep -roh '\[\[[^]]*\]\]' --include='*.md' . | sed 's/\[\[//;s/\]\]//' | sed 's/|.*//' | sort -u)
+done < <(grep -roh '\[\[[^]]*\]\]' --include='*.md' --exclude-dir='raw' . | sed 's/\[\[//;s/\]\]//' | sed 's/|.*//' | sort -u)
 if (( broken == 0 )); then echo "  None"; fi
 
 # --- Orphan files ---
@@ -69,7 +69,7 @@ echo "=== Orphan Files (not in any index) ==="
 orphans=0
 while IFS= read -r file; do
   slug=$(echo "$file" | sed 's|^\./||; s|\.md$||')
-  if ! grep -rqE "\[\[$slug(\]|\|)" --include='*.md' . 2>/dev/null; then
+  if ! grep -rqE "\[\[$slug(\]|\|)" --include='*.md' --exclude-dir='raw' . 2>/dev/null; then
     echo "  ORPHAN: $file"
     ((orphans++)) || true
   fi
@@ -89,7 +89,7 @@ conn_tmp=$(mktemp)
 for f in ./principles/*.md; do
   [[ "$(basename "$f")" == "index.md" ]] && continue
   name=$(basename "$f" .md)
-  matches=$(grep -rl "principles/$name" --include='*.md' . 2>/dev/null \
+  matches=$(grep -rl "principles/$name" --include='*.md' --exclude-dir='raw' . 2>/dev/null \
     | grep -v "index.md" \
     | grep -v "dream-journal.md" \
     | grep -v "$f" || true)
@@ -114,10 +114,11 @@ rm -f "$conn_tmp"
 
 # --- Concept candidates ---
 echo ""
-echo "=== Concept Candidates ==="
+echo "=== Concept Candidates (curated notes only) ==="
 echo "  (common filename stems appearing in 3+ files, no concept page yet)"
 concept_cand=$(mktemp)
 find . -name '*.md' \
+  -not -path './raw/*' \
   -not -name 'index.md' \
   -not -name 'dream-journal.md' \
   \
@@ -134,7 +135,7 @@ find . -name '*.md' \
     esac
     # skip if a concept page already exists
     # skip if a dedicated page already exists for this term
-    if find . -name "${term}.md" -not -name 'index.md' 2>/dev/null | grep -q .; then continue; fi
+    if find . -name "${term}.md" -not -path './raw/*' -not -name 'index.md' 2>/dev/null | grep -q .; then continue; fi
     printf "  %2d files  %s\n" "$count" "$term"
   done
 rm -f "$concept_cand"
