@@ -1,11 +1,18 @@
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 import { Effect } from "effect";
 import type { AgentToolResult } from "@mariozechner/pi-agent-core";
-import { ChildProcessFailed } from "./errors.ts";
+import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
+import { ChildProcessFailed, TmuxCommandFailed, TmuxUnavailable } from "./errors.ts";
 import { runSingleAgentEffect, type RunSingleAgentEffectInput } from "./process-effect.ts";
+import { liveTmuxOps, pollForExitEffect, requireTmux, type TmuxOps } from "./tmux-effect.ts";
 import {
 	MAX_CONCURRENCY,
 	SPAWN_STAGGER_MS,
 	emptyUsageStats,
+	type AsyncBatch,
+	type AsyncRun,
 	type SingleResult,
 	type SubagentDetails,
 	type SubagentRequest,
@@ -34,6 +41,22 @@ export interface RuntimeOutput {
 	contentText: string;
 	isError?: boolean;
 	asyncStarted?: { runId?: string; runIds?: string[]; windowName?: string };
+}
+
+export interface AsyncWatcherDeps {
+	asyncRuns: Map<string, AsyncRun>;
+	asyncBatches: Map<string, AsyncBatch>;
+	latestCtx: () => ExtensionContext | null;
+	pi: ExtensionAPI;
+	updateWidget: (ctx: ExtensionContext | null, runs: Map<string, AsyncRun>) => void;
+	readLastAssistantMessage: (sessionFile: string) => string;
+	tmuxOps?: TmuxOps;
+}
+
+export interface AsyncStartDeps extends AsyncWatcherDeps {
+	asyncOwner: { start(run: AsyncRun): void };
+	startWidgetRefresh: (ctx: ExtensionContext | null, runs: Map<string, AsyncRun>) => void;
+	resolveSkillPath: (skillName: string, cwd: string) => string | null;
 }
 
 export function getFinalOutput(messages: SingleResult["messages"]): string {
@@ -106,6 +129,282 @@ function buildRunSingleInput(
 		onUpdate: args.onUpdate,
 		makeDetails: args.makeDetails,
 		resolveSkillPath: deps.resolveSkillPath ?? (() => null),
+	};
+}
+
+function tmuxTry<A>(command: string, fn: () => A): Effect.Effect<A, TmuxCommandFailed> {
+	return Effect.try({
+		try: fn,
+		catch: (cause) => new TmuxCommandFailed({ command, cause }),
+	});
+}
+
+function safeName(value: string): string {
+	return value.replace(/[^\w.-]+/g, "_");
+}
+
+function writePromptToTempFile(agentName: string, prompt: string): { dir: string; filePath: string } {
+	const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-subagent-"));
+	const filePath = path.join(tmpDir, `prompt-${safeName(agentName)}.md`);
+	fs.writeFileSync(filePath, prompt, { encoding: "utf-8", mode: 0o600 });
+	return { dir: tmpDir, filePath };
+}
+
+function cleanupAsyncTempFiles(tempFiles: string[]): void {
+	for (const filePath of tempFiles) {
+		try {
+			fs.rmSync(filePath, { recursive: true, force: true });
+		} catch {}
+	}
+}
+
+function finishBatchRun(asyncBatches: Map<string, AsyncBatch>, run: AsyncRun, ops: TmuxOps): void {
+	if (!run.batchId) return;
+	const batch = asyncBatches.get(run.batchId);
+	if (!batch) return;
+
+	batch.pendingRunIds.delete(run.id);
+	if (batch.pendingRunIds.size === 0) {
+		try {
+			ops.closeWindow(batch.windowId);
+		} catch {}
+		asyncBatches.delete(batch.id);
+	}
+}
+
+function buildAsyncPiCommand(
+	agent: Extract<SubagentRequest, { type: "asyncSingle" }>["agent"],
+	task: string,
+	defaultCwd: string,
+	cwd: string | undefined,
+	thinking: string | undefined,
+	model: string | undefined,
+	sessionFile: string,
+	tempFiles: string[],
+	resolveSkillPath: (skillName: string, cwd: string) => string | null,
+	ops: TmuxOps,
+): string {
+	const args: string[] = ["--session", sessionFile];
+	if (model) args.push("--model", model);
+	if (agent.tools && agent.tools.length > 0) args.push("--tools", agent.tools.join(","));
+
+	const effectiveThinking = thinking ?? agent.thinking;
+	if (effectiveThinking) args.push("--thinking", effectiveThinking);
+
+	if (agent.skills && agent.skills.length > 0) {
+		for (const skillName of agent.skills) {
+			const skillPath = resolveSkillPath(skillName, defaultCwd);
+			if (skillPath) args.push("--skill", skillPath);
+		}
+	}
+
+	const autoExitPath = path.join(import.meta.dirname, "auto-exit.ts");
+	if (agent.spawning === false) {
+		args.push("--no-extensions", "-e", autoExitPath);
+	} else {
+		args.push("-e", autoExitPath);
+	}
+
+	if (agent.systemPrompt.trim()) {
+		const temp = writePromptToTempFile(agent.name, agent.systemPrompt);
+		args.push("--append-system-prompt", temp.filePath);
+		tempFiles.push(temp.filePath, temp.dir);
+	}
+
+	args.push(`Task: ${task}`);
+
+	const effectiveCwd = cwd ??
+		(agent.cwd ? (path.isAbsolute(agent.cwd) ? agent.cwd : path.resolve(defaultCwd, agent.cwd)) : defaultCwd);
+	return `cd ${ops.shellEscape(effectiveCwd)} && pi ${args.map(ops.shellEscape).join(" ")}; echo '__SUBAGENT_DONE_'$?'__'`;
+}
+
+export function createAsyncRunWatcher(deps: AsyncWatcherDeps): (run: AsyncRun) => Effect.Effect<void, unknown> {
+	const ops = deps.tmuxOps ?? liveTmuxOps;
+
+	return (run: AsyncRun) => {
+		let cleaned = false;
+		const cleanup = () => {
+			if (cleaned) return;
+			cleaned = true;
+			deps.asyncRuns.delete(run.id);
+			deps.updateWidget(deps.latestCtx(), deps.asyncRuns);
+			if (run.batchId) finishBatchRun(deps.asyncBatches, run, ops);
+			else {
+				try {
+					ops.closePane(run.pane);
+				} catch {}
+			}
+			cleanupAsyncTempFiles(run.tempFiles);
+		};
+
+		return pollForExitEffect(run.pane, {
+			ops,
+			intervalMs: 1000,
+			onTick: () => deps.updateWidget(deps.latestCtx(), deps.asyncRuns),
+		}).pipe(
+			Effect.tap((exitCode) =>
+				Effect.sync(() => {
+					const summary = deps.readLastAssistantMessage(run.sessionFile);
+					cleanup();
+
+					const status = exitCode === 0 ? "completed" : `failed (exit ${exitCode})`;
+					deps.pi.sendMessage(
+						{
+							customType: "subagent_result",
+							content: `Async subagent "${run.agent}" ${status} (run: ${run.id}).\n\n${summary}`,
+							display: true,
+							details: { runId: run.id, agent: run.agent, task: run.task, exitCode },
+						},
+						{ triggerTurn: true, deliverAs: "steer" },
+					);
+					deps.pi.events.emit("notify", {
+						title: `Subagent done: ${run.agent}`,
+						body: exitCode === 0 ? "Completed" : "Failed",
+					});
+				}),
+			),
+			Effect.catchAll(() => Effect.sync(cleanup)),
+			Effect.onInterrupt(() => Effect.sync(cleanup)),
+		);
+	};
+}
+
+export function createAsyncRuntimeDeps(
+	deps: AsyncStartDeps,
+): Pick<RuntimeDeps, "startAsyncSingle" | "startAsyncParallel" | "reportRejectedAsyncTask"> {
+	const ops = deps.tmuxOps ?? liveTmuxOps;
+
+	return {
+		startAsyncSingle: (request) =>
+			Effect.gen(function* () {
+				yield* requireTmux(ops);
+
+				const runId = crypto.randomUUID().slice(0, 8);
+				const sessionFile = path.join(os.tmpdir(), `pi-subagent-${runId}.jsonl`);
+				const tempFiles = [sessionFile];
+				yield* Effect.sync(() => {
+					fs.writeFileSync(sessionFile, "", { encoding: "utf-8", mode: 0o600 });
+				});
+
+				const command = buildAsyncPiCommand(
+					request.agent,
+					request.task,
+					request.options.defaultCwd,
+					request.cwd,
+					request.options.thinking,
+					request.model,
+					sessionFile,
+					tempFiles,
+					deps.resolveSkillPath,
+					ops,
+				);
+				const pane = yield* tmuxTry("split-window", () =>
+					ops.createPaneWithCommand(`${request.agent.name}: ${request.task.slice(0, 30)}`, command)
+				);
+
+				const run: AsyncRun = {
+					id: runId,
+					agent: request.agent.name,
+					task: request.task,
+					startedAt: Date.now(),
+					pane,
+					sessionFile,
+					tempFiles,
+				};
+				deps.asyncRuns.set(runId, run);
+				deps.startWidgetRefresh(deps.latestCtx(), deps.asyncRuns);
+				deps.asyncOwner.start(run);
+				return { runId };
+			}),
+
+		startAsyncParallel: (request) =>
+			Effect.gen(function* () {
+				yield* requireTmux(ops);
+
+				const batchId = crypto.randomUUID().slice(0, 8);
+				const windowName = ops.makeBatchWindowName(batchId);
+				const windowId = yield* tmuxTry("new-window", () => ops.createWindow(windowName));
+				const initialPane = yield* tmuxTry("list-panes", () => ops.getWindowPanes(windowId)[0]);
+				const paneIds: string[] = initialPane ? [initialPane] : [];
+				const runIds: string[] = [];
+
+				for (let i = 0; i < request.tasks.length; i++) {
+					const task = request.tasks[i];
+					const runId = crypto.randomUUID().slice(0, 8);
+					const sessionFile = path.join(os.tmpdir(), `pi-subagent-${runId}.jsonl`);
+					const tempFiles = [sessionFile];
+					yield* Effect.sync(() => {
+						fs.writeFileSync(sessionFile, "", { encoding: "utf-8", mode: 0o600 });
+					});
+
+					const command = buildAsyncPiCommand(
+						task.agent,
+						task.task,
+						request.options.defaultCwd,
+						task.cwd,
+						request.options.thinking,
+						request.options.selectedModel ?? task.agent.model,
+						sessionFile,
+						tempFiles,
+						deps.resolveSkillPath,
+						ops,
+					);
+
+					const name = `${task.agent.name}: ${task.task.slice(0, 30)}`;
+					let pane: string;
+					if (i === 0 && initialPane) {
+						yield* tmuxTry("send-keys", () => ops.runCommandInPane(initialPane, name, command));
+						pane = initialPane;
+					} else {
+						pane = yield* tmuxTry("split-window", () => ops.createPaneInWindow(windowId, name, command));
+						paneIds.push(pane);
+					}
+
+					const run: AsyncRun = {
+						id: runId,
+						agent: task.agent.name,
+						task: task.task,
+						startedAt: Date.now(),
+						pane,
+						sessionFile,
+						tempFiles,
+						batchId,
+						windowId,
+					};
+					deps.asyncRuns.set(runId, run);
+					runIds.push(runId);
+				}
+
+				yield* tmuxTry("select-layout", () => ops.tileWindow(windowId));
+				deps.asyncBatches.set(batchId, {
+					id: batchId,
+					windowId,
+					windowName,
+					paneIds,
+					pendingRunIds: new Set(runIds),
+				});
+
+				for (const runId of runIds) {
+					const run = deps.asyncRuns.get(runId);
+					if (run) deps.asyncOwner.start(run);
+				}
+				deps.startWidgetRefresh(deps.latestCtx(), deps.asyncRuns);
+
+				return { runIds, windowName };
+			}),
+
+		reportRejectedAsyncTask: (task) =>
+			Effect.sync(() => {
+				deps.pi.sendMessage(
+					{
+						customType: "subagent_result",
+						content: `Async subagent "${task.agent}" failed (invalid agent).\n\n${task.reason}`,
+						display: true,
+						details: { runId: null, agent: task.agent, task: task.task, exitCode: 1 },
+					},
+					{ triggerTurn: true, deliverAs: "steer" },
+				);
+			}),
 	};
 }
 

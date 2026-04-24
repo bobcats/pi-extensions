@@ -108,4 +108,61 @@ describe("runSubagentRequest", () => {
 			["A", "B", "C"],
 		);
 	});
+
+	it("starts async single through the async owner dependency", async () => {
+		const request: SubagentRequest = {
+			type: "asyncSingle",
+			agent,
+			task: "Async",
+			options: { defaultCwd: "/repo" },
+		};
+		const output = await Effect.runPromise(
+			runSubagentRequest(request, {
+				runSingle: () => Effect.die("not used"),
+				startAsyncSingle: () => Effect.succeed({ runId: "abc123" }),
+				startAsyncParallel: () => Effect.die("not used"),
+			}),
+		);
+		assert.equal(output.contentText, 'Started async subagent "worker" (run: abc123)');
+	});
+
+	it("starts async parallel through the async owner dependency", async () => {
+		const request: SubagentRequest = {
+			type: "asyncParallel",
+			tasks: [
+				{ agent, task: "A" },
+				{ agent, task: "B" },
+			],
+			rejectedTasks: [],
+			options: { defaultCwd: "/repo" },
+		};
+		const output = await Effect.runPromise(
+			runSubagentRequest(request, {
+				runSingle: () => Effect.die("not used"),
+				startAsyncSingle: () => Effect.die("not used"),
+				startAsyncParallel: () => Effect.succeed({ runIds: ["a", "b"], windowName: "subagents-1" }),
+			}),
+		);
+		assert.equal(output.contentText, 'Started 2 async subagents in tmux window "subagents-1"');
+	});
+
+	it("preserves async parallel rejected task reporting while valid tasks start", async () => {
+		const request: SubagentRequest = {
+			type: "asyncParallel",
+			tasks: [{ agent, task: "A" }],
+			rejectedTasks: [{ agent: "missing", task: "B", reason: 'Unknown agent: "missing"' }],
+			options: { defaultCwd: "/repo" },
+		};
+		const rejected: string[] = [];
+		const output = await Effect.runPromise(
+			runSubagentRequest(request, {
+				runSingle: () => Effect.die("not used"),
+				startAsyncSingle: () => Effect.die("not used"),
+				startAsyncParallel: () => Effect.succeed({ runIds: ["a"], windowName: "subagents-1" }),
+				reportRejectedAsyncTask: (task) => Effect.sync(() => rejected.push(task.agent)),
+			}),
+		);
+		assert.deepEqual(rejected, ["missing"]);
+		assert.equal(output.contentText, 'Started 1 async subagents in tmux window "subagents-1"');
+	});
 });

@@ -28,7 +28,7 @@ import { createAsyncOwner } from "./async-owner.js";
 import { type AgentConfig, type AgentScope, discoverAgents } from "./agents.js";
 import { getSavedScopedModelIds, resolveModelOverride } from "./model-selection.js";
 import { parseSubagentRequest, projectAgentsForConfirmation } from "./request.js";
-import { getFinalOutput, runSubagentRequest } from "./runtime.js";
+import { createAsyncRunWatcher, createAsyncRuntimeDeps, getFinalOutput, runSubagentRequest } from "./runtime.js";
 import {
 	isTmuxAvailable,
 	createPaneInWindow,
@@ -231,243 +231,6 @@ function writePromptToTempFile(agentName: string, prompt: string): { dir: string
 }
 
 type OnUpdateCallback = (partial: AgentToolResult<SubagentDetails>) => void;
-
-function buildAsyncPiCommand(
-	agent: AgentConfig,
-	task: string,
-	defaultCwd: string,
-	cwd: string | undefined,
-	thinking: string | undefined,
-	model: string | undefined,
-	sessionFile: string,
-	tempFiles: string[],
-): string {
-	const args: string[] = ["--session", sessionFile];
-	if (model) args.push("--model", model);
-	if (agent.tools && agent.tools.length > 0) args.push("--tools", agent.tools.join(","));
-
-	const effectiveThinking = thinking ?? agent.thinking;
-	if (effectiveThinking) args.push("--thinking", effectiveThinking);
-
-	if (agent.skills && agent.skills.length > 0) {
-		for (const skillName of agent.skills) {
-			const skillPath = resolveSkillPath(skillName, defaultCwd);
-			if (skillPath) args.push("--skill", skillPath);
-		}
-	}
-
-	const autoExitPath = path.join(import.meta.dirname, "auto-exit.ts");
-	if (agent.spawning === false) {
-		args.push("--no-extensions", "-e", autoExitPath);
-	} else {
-		args.push("-e", autoExitPath);
-	}
-
-	if (agent.systemPrompt.trim()) {
-		const tmp = writePromptToTempFile(agent.name, agent.systemPrompt);
-		args.push("--append-system-prompt", tmp.filePath);
-		tempFiles.push(tmp.filePath);
-		tempFiles.push(tmp.dir);
-	}
-
-	args.push(`Task: ${task}`);
-
-	const effectiveCwd = cwd ??
-		(agent.cwd ? (path.isAbsolute(agent.cwd) ? agent.cwd : path.resolve(defaultCwd, agent.cwd)) : defaultCwd);
-	return `cd ${shellEscape(effectiveCwd)} && pi ${args.map(shellEscape).join(" ")}; echo '__SUBAGENT_DONE_'$?'__'`;
-}
-
-function cleanupAsyncTempFiles(tempFiles: string[]): void {
-	for (const f of tempFiles) {
-		try { fs.unlinkSync(f); } catch {}
-	}
-}
-
-function finishBatchRun(asyncBatches: Map<string, AsyncBatch>, run: AsyncRun): void {
-	if (!run.batchId) return;
-	const batch = asyncBatches.get(run.batchId);
-	if (!batch) return;
-
-	batch.pendingRunIds.delete(run.id);
-	if (batch.pendingRunIds.size === 0) {
-		closeWindow(batch.windowId);
-		asyncBatches.delete(batch.id);
-	}
-}
-
-function watchAsyncRun(
-	pi: ExtensionAPI,
-	asyncRuns: Map<string, AsyncRun>,
-	asyncBatches: Map<string, AsyncBatch>,
-	latestCtx: ExtensionContext | null,
-	run: AsyncRun,
-): Effect.Effect<void> {
-	return Effect.async<void>((resume) => {
-		const watcherAbort = new AbortController();
-		pollForExit(run.pane, watcherAbort.signal, {
-			interval: 1000,
-			onTick: () => updateWidget(latestCtx, asyncRuns),
-		})
-			.then((exitCode) => {
-				const summary = readLastAssistantMessage(run.sessionFile);
-
-				asyncRuns.delete(run.id);
-				updateWidget(latestCtx, asyncRuns);
-
-				if (run.batchId) finishBatchRun(asyncBatches, run);
-				else {
-					try { closePane(run.pane); } catch {}
-				}
-
-				cleanupAsyncTempFiles(run.tempFiles);
-
-				const status = exitCode === 0 ? "completed" : `failed (exit ${exitCode})`;
-				pi.sendMessage(
-					{
-						customType: "subagent_result",
-						content: `Async subagent "${run.agent}" ${status} (run: ${run.id}).\n\n${summary}`,
-						display: true,
-						details: { runId: run.id, agent: run.agent, task: run.task, exitCode },
-					},
-					{ triggerTurn: true, deliverAs: "steer" },
-				);
-
-				pi.events.emit("notify", {
-					title: `Subagent done: ${run.agent}`,
-					body: exitCode === 0 ? "Completed" : "Failed",
-				});
-				resume(Effect.void);
-			})
-			.catch(() => {
-				asyncRuns.delete(run.id);
-				updateWidget(latestCtx, asyncRuns);
-				if (run.batchId) finishBatchRun(asyncBatches, run);
-				else {
-					try { closePane(run.pane); } catch {}
-				}
-				cleanupAsyncTempFiles(run.tempFiles);
-				resume(Effect.void);
-			});
-
-		return Effect.sync(() => {
-			watcherAbort.abort();
-			asyncRuns.delete(run.id);
-			updateWidget(latestCtx, asyncRuns);
-			if (run.batchId) finishBatchRun(asyncBatches, run);
-			else {
-				try { closePane(run.pane); } catch {}
-			}
-			cleanupAsyncTempFiles(run.tempFiles);
-		});
-	});
-}
-
-function runSingleAsyncAgent(
-	asyncRuns: Map<string, AsyncRun>,
-	latestCtx: ExtensionContext | null,
-	asyncOwner: { start(run: AsyncRun): void },
-	defaultCwd: string,
-	agent: AgentConfig,
-	task: string,
-	cwd: string | undefined,
-	thinking: string | undefined,
-	model: string | undefined,
-): { runId: string } {
-	const runId = crypto.randomUUID().slice(0, 8);
-	const sessionFile = path.join(os.tmpdir(), `pi-subagent-${runId}.jsonl`);
-	const tempFiles = [sessionFile];
-	const command = buildAsyncPiCommand(agent, task, defaultCwd, cwd, thinking, model, sessionFile, tempFiles);
-	const pane = createPaneWithCommand(`${agent.name}: ${task.slice(0, 30)}`, command);
-
-	const run: AsyncRun = {
-		id: runId,
-		agent: agent.name,
-		task,
-		startedAt: Date.now(),
-		pane,
-		sessionFile,
-		tempFiles,
-	};
-	asyncRuns.set(runId, run);
-	startWidgetRefresh(latestCtx, asyncRuns);
-	asyncOwner.start(run);
-
-	return { runId };
-}
-
-function runParallelAsyncBatch(
-	asyncRuns: Map<string, AsyncRun>,
-	asyncBatches: Map<string, AsyncBatch>,
-	latestCtx: ExtensionContext | null,
-	asyncOwner: { start(run: AsyncRun): void },
-	defaultCwd: string,
-	tasks: Array<{ agent: AgentConfig; task: string; cwd?: string }>,
-	thinking: string | undefined,
-	modelOverride: string | undefined,
-): { batchId: string; runIds: string[]; windowName: string } {
-	const batchId = crypto.randomUUID().slice(0, 8);
-	const windowName = makeBatchWindowName(batchId);
-	const windowId = createWindow(windowName);
-	const initialPane = getWindowPanes(windowId)[0];
-	const paneIds: string[] = initialPane ? [initialPane] : [];
-	const runIds: string[] = [];
-
-	for (let i = 0; i < tasks.length; i++) {
-		const t = tasks[i];
-		const runId = crypto.randomUUID().slice(0, 8);
-		const sessionFile = path.join(os.tmpdir(), `pi-subagent-${runId}.jsonl`);
-		const tempFiles = [sessionFile];
-		const command = buildAsyncPiCommand(
-			t.agent,
-			t.task,
-			defaultCwd,
-			t.cwd,
-			thinking,
-			modelOverride ?? t.agent.model,
-			sessionFile,
-			tempFiles,
-		);
-		const name = `${t.agent.name}: ${t.task.slice(0, 30)}`;
-		let pane: string;
-		if (i === 0 && initialPane) {
-			runCommandInPane(initialPane, name, command);
-			pane = initialPane;
-		} else {
-			pane = createPaneInWindow(windowId, name, command);
-			paneIds.push(pane);
-		}
-
-		const run: AsyncRun = {
-			id: runId,
-			agent: t.agent.name,
-			task: t.task,
-			startedAt: Date.now(),
-			pane,
-			sessionFile,
-			tempFiles,
-			batchId,
-			windowId,
-		};
-		asyncRuns.set(runId, run);
-		runIds.push(runId);
-	}
-
-	tileWindow(windowId);
-	asyncBatches.set(batchId, {
-		id: batchId,
-		windowId,
-		windowName,
-		paneIds,
-		pendingRunIds: new Set(runIds),
-	});
-
-	for (const runId of runIds) {
-		const run = asyncRuns.get(runId);
-		if (run) asyncOwner.start(run);
-	}
-	startWidgetRefresh(latestCtx, asyncRuns);
-	return { batchId, runIds, windowName };
-}
 
 async function runSingleAgent(
 	defaultCwd: string,
@@ -693,9 +456,15 @@ export default function (pi: ExtensionAPI) {
 	const asyncRuns = new Map<string, AsyncRun>();
 	const asyncBatches = new Map<string, AsyncBatch>();
 	let latestCtx: ExtensionContext | null = null;
-	const asyncOwner = createAsyncOwner({
-		runWatcher: (run) => watchAsyncRun(pi, asyncRuns, asyncBatches, latestCtx, run),
+	const runWatcher = createAsyncRunWatcher({
+		asyncRuns,
+		asyncBatches,
+		latestCtx: () => latestCtx,
+		pi,
+		updateWidget,
+		readLastAssistantMessage,
 	});
+	const asyncOwner = createAsyncOwner({ runWatcher });
 
 	pi.on("session_start", (_event: any, ctx: ExtensionContext) => {
 		latestCtx = ctx;
@@ -839,76 +608,22 @@ Project agents are repo-controlled. Only continue for trusted repositories.`,
 				}
 			}
 
-			if (request.type === "asyncSingle" || request.type === "asyncParallel") {
-				if (!isTmuxAvailable()) {
-					return {
-						content: [{ type: "text", text: "async: true requires tmux. Start pi inside a tmux session." }],
-						details: makeDetails("single")([]),
-					};
-				}
-
-				if (request.type === "asyncSingle") {
-					const { runId } = runSingleAsyncAgent(
-						asyncRuns,
-						latestCtx,
-						asyncOwner,
-						ctx.cwd,
-						request.agent,
-						request.task,
-						request.cwd,
-						request.options.thinking,
-						request.model,
-					);
-
-					return {
-						content: [{ type: "text", text: `Started async subagent "${request.agent.name}" (run: ${runId})` }],
-						details: makeDetails("single")([]),
-					};
-				}
-
-				for (const rejected of request.rejectedTasks) {
-					pi.sendMessage(
-						{
-							customType: "subagent_result",
-							content: `Async subagent "${rejected.agent}" failed (invalid agent).
-
-${rejected.reason}`,
-							display: true,
-							details: { runId: null, agent: rejected.agent, task: rejected.task, exitCode: 1 },
-						},
-						{ triggerTurn: true, deliverAs: "steer" },
-					);
-				}
-
-				if (request.tasks.length === 0) {
-					return {
-						content: [{ type: "text", text: "No async subagents started." }],
-						details: makeDetails("parallel")([]),
-						isError: true,
-					};
-				}
-
-				const { runIds, windowName } = runParallelAsyncBatch(
-					asyncRuns,
-					asyncBatches,
-					latestCtx,
-					asyncOwner,
-					ctx.cwd,
-					[...request.tasks],
-					request.options.thinking,
-					request.options.selectedModel,
-				);
-				return {
-					content: [{ type: "text", text: `Started ${runIds.length} async subagents in tmux window "${windowName}"` }],
-					details: makeDetails("parallel")([]),
-				};
-			}
+			const asyncRuntimeDeps = createAsyncRuntimeDeps({
+				asyncRuns,
+				asyncBatches,
+				asyncOwner,
+				latestCtx: () => latestCtx,
+				pi,
+				updateWidget,
+				startWidgetRefresh,
+				readLastAssistantMessage,
+				resolveSkillPath,
+			});
 
 			try {
 				const output = await Effect.runPromise(
 					runSubagentRequest(request, {
-						startAsyncSingle: () => Effect.die("not used"),
-						startAsyncParallel: () => Effect.die("not used"),
+						...asyncRuntimeDeps,
 						onUpdate,
 						makeDetails,
 						resolveSkillPath,
