@@ -91,6 +91,16 @@ test("hasChanges returns false for non-repo directory", () => {
   assert.strictEqual(hasChanges(dir), false);
 });
 
+test("hasChanges surfaces git status failures inside a repo", () => {
+  const dir = tmpDir();
+  fs.writeFileSync(path.join(dir, "index.md"), "# Memory\n");
+  initGitRepo(dir);
+  fs.rmSync(path.join(dir, ".git", "index"));
+  fs.mkdirSync(path.join(dir, ".git", "index"));
+
+  assert.throws(() => hasChanges(dir), /unable to map index file|index/);
+});
+
 test("getChangedFiles lists modified and new files", () => {
   const dir = tmpDir();
   fs.writeFileSync(path.join(dir, "index.md"), "# Memory\n");
@@ -113,6 +123,16 @@ test("getChangedFiles returns empty array for clean repo", () => {
   initGitRepo(dir);
 
   assert.deepStrictEqual(getChangedFiles(dir), []);
+});
+
+test("getChangedFiles surfaces git status failures inside a repo", () => {
+  const dir = tmpDir();
+  fs.writeFileSync(path.join(dir, "index.md"), "# Memory\n");
+  initGitRepo(dir);
+  fs.rmSync(path.join(dir, ".git", "index"));
+  fs.mkdirSync(path.join(dir, ".git", "index"));
+
+  assert.throws(() => getChangedFiles(dir), /unable to map index file|index/);
 });
 
 test("commitVault commits all changes with message", () => {
