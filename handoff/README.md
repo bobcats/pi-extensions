@@ -22,7 +22,7 @@ Examples:
 2. Confirms before overwriting any unsubmitted editor text
 3. Generates a first-person handoff summary using Amp's `create_handoff_context` extraction prompt
 4. Creates a new session with `parentSession` tracking
-5. Pre-fills the new session's editor with the goal, then a brief framing sentence, then the summary wrapped in `<handoff_note>...</handoff_note>` — goal first so the top line shows what this handoff is about
+5. Pre-fills the new session's editor with the goal, `/skill:session-query`, the visible parent session path, a brief framing sentence, then the summary wrapped in `<handoff_note>...</handoff_note>` — goal first so the top line shows what this handoff is about
 6. User reviews and presses Enter to submit
 
 ## Guardrails and error handling
@@ -57,6 +57,16 @@ ctx.newSession({
 ```
 
 This writes the parent session path into the new session's file header for future navigation by a `/resume` command or session browser.
+
+The generated child prompt also includes the parent session path visibly:
+
+```md
+/skill:session-query
+
+**Parent session:** `/path/to/session.jsonl`
+```
+
+That lets the child model call the `session_query` tool if the handoff note missed a detail.
 
 ## Extension interactions
 

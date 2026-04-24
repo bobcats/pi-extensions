@@ -173,6 +173,15 @@ function conversationMessagesFromBranch(branch: SessionEntry[]): any[] {
     .map((entry) => (entry as any).message);
 }
 
+function buildFinalPrompt(params: { goal: string; summary: string; parentSession: string | undefined }): string {
+  const { goal, summary, parentSession } = params;
+  const parentSection = parentSession
+    ? `/skill:session-query\n\n**Parent session:** \`${parentSession}\`\n\n`
+    : "";
+
+  return `${goal}\n\n${parentSection}In the handoff note below, "I" refers to the previous assistant.\n\n<handoff_note>\n${summary}\n</handoff_note>`;
+}
+
 async function generateSummaryWithLoader(params: {
   ctx: HandoffCommandContext;
   completeFn: typeof complete;
@@ -210,13 +219,14 @@ async function applyHandoffToNewSession(params: {
   summary: string;
 }): Promise<boolean> {
   const { ctx, goal, summary } = params;
-  const finalPrompt = `${goal}\n\nIn the handoff note below, "I" refers to the previous assistant.\n\n<handoff_note>\n${summary}\n</handoff_note>`;
+  const parentSession = ctx.sessionManager.getSessionFile();
+  const finalPrompt = buildFinalPrompt({ goal, summary, parentSession });
   let postSwitchFailed = false;
 
   let newSessionResult: { cancelled: boolean };
   try {
     newSessionResult = await ctx.newSession({
-      parentSession: ctx.sessionManager.getSessionFile(),
+      parentSession,
       withSession: async (replacementCtx) => {
         try {
           replacementCtx.ui.setEditorText(finalPrompt);

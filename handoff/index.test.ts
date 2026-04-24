@@ -297,7 +297,7 @@ test("happy path: preferred summary model available, generates summary, switches
   assert.equal(harness.editorTexts.length, 1);
   assert.equal(
     harness.editorTexts[0],
-    "continue the auth work\n\nIn the handoff note below, \"I\" refers to the previous assistant.\n\n<handoff_note>\n- I already fixed auth.\n- Continue in auth/service.ts\n</handoff_note>",
+    "continue the auth work\n\n/skill:session-query\n\n**Parent session:** `/tmp/project/.pi/sessions/current.jsonl`\n\nIn the handoff note below, \"I\" refers to the previous assistant.\n\n<handoff_note>\n- I already fixed auth.\n- Continue in auth/service.ts\n</handoff_note>",
   );
   assert.deepEqual(
     harness.notifications.find((n) => n.level === "info"),
