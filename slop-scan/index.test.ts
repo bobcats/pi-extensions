@@ -8,16 +8,21 @@ import { createSlopScanExtension } from "./index.ts";
 function createHarness() {
   const tools = new Map<string, any>();
   const commands = new Map<string, any>();
+  const userMessages: Array<{ content: string; options?: Record<string, unknown> }> = [];
 
   return {
     tools,
     commands,
+    userMessages,
     pi: {
       registerTool(tool: any) {
         tools.set(tool.name, tool);
       },
       registerCommand(name: string, command: any) {
         commands.set(name, command);
+      },
+      sendUserMessage(content: string, options?: Record<string, unknown>) {
+        userMessages.push({ content, options });
       },
     } as never,
   };
@@ -158,7 +163,7 @@ test("uses the target directory as the scan and config root", async () => {
   assert.deepEqual(calls, [path.join(cwd, "src")]);
 });
 
-test("command reports successful scan", async () => {
+test("command reports successful scan and posts the result as a visible user message", async () => {
   const cwd = await tempProject();
   const harness = createHarness();
   createSlopScanExtension({
@@ -174,6 +179,10 @@ test("command reports successful scan", async () => {
   assert.equal(notifications[0].level, "info");
   assert.match(notifications[0].message, /Slop scan/);
   assert.match(notifications[0].message, /Full report: \/tmp\/report\.json/);
+  assert.equal(harness.userMessages.length, 1);
+  assert.match(harness.userMessages[0].content, /Slop scan result for `src`/);
+  assert.match(harness.userMessages[0].content, /Full report: \/tmp\/report\.json/);
+  assert.deepEqual(harness.userMessages[0].options, { deliverAs: "followUp" });
 });
 
 test("command reports errors", async () => {
@@ -188,6 +197,7 @@ test("command reports errors", async () => {
   assert.equal(notifications.length, 1);
   assert.equal(notifications[0].level, "error");
   assert.match(notifications[0].message, /scans directories, not files/);
+  assert.equal(harness.userMessages.length, 0);
 });
 
 test("formats compact summary and caps findings", async () => {
