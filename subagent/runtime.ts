@@ -1,6 +1,7 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { fileURLToPath } from "node:url";
 import { Effect } from "effect";
 import type { AgentToolResult } from "@mariozechner/pi-agent-core";
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
@@ -19,6 +20,8 @@ import {
 	type SubagentDetails,
 	type SubagentRequest,
 } from "./types.ts";
+
+const RUNTIME_DIR = path.dirname(fileURLToPath(import.meta.url));
 
 export interface RuntimeDeps {
 	runSingle?: (input: RunSingleAgentEffectInput) => Effect.Effect<SingleResult, unknown>;
@@ -151,6 +154,10 @@ function asyncPaneTitle(agentName: string, task: string): string {
 	return `${agentName}: ${task.slice(0, 30)}`;
 }
 
+function trackTempFile(paths: string[], filePath: string): void {
+	if (!paths.includes(filePath)) paths.push(filePath);
+}
+
 function createAsyncSessionFile(runId: string): Effect.Effect<{ sessionFile: string; tempFiles: string[] }> {
 	return Effect.sync(() => {
 		const sessionFile = path.join(os.tmpdir(), `pi-subagent-${runId}.jsonl`);
@@ -191,6 +198,7 @@ function buildAsyncPiCommand(
 	tempFiles: string[],
 	resolveSkillPath: (skillName: string, cwd: string) => string | null,
 	ops: TmuxOps,
+	trackCreatedTempFile?: (filePath: string) => void,
 ): string {
 	const args: string[] = ["--session", sessionFile];
 	if (model) args.push("--model", model);
@@ -206,7 +214,7 @@ function buildAsyncPiCommand(
 		}
 	}
 
-	const autoExitPath = path.join(import.meta.dirname, "auto-exit.ts");
+	const autoExitPath = path.join(RUNTIME_DIR, "auto-exit.ts");
 	if (agent.spawning === false) {
 		args.push("--no-extensions", "-e", autoExitPath);
 	} else {
@@ -217,6 +225,8 @@ function buildAsyncPiCommand(
 		const temp = createPromptTempFileSync(agent.name, agent.systemPrompt);
 		args.push("--append-system-prompt", temp.filePath);
 		tempFiles.push(temp.filePath, temp.dir);
+		trackCreatedTempFile?.(temp.filePath);
+		trackCreatedTempFile?.(temp.dir);
 	}
 
 	args.push(`Task: ${task}`);
@@ -281,12 +291,18 @@ export function createAsyncRuntimeDeps(
 	const ops = deps.tmuxOps ?? liveTmuxOps;
 
 	return {
-		startAsyncSingle: (request) =>
-			Effect.gen(function* () {
+		startAsyncSingle: (request) => {
+			const tempFiles: string[] = [];
+			let runId = "";
+			let pane: string | undefined;
+			let ownershipTransferred = false;
+
+			return Effect.gen(function* () {
 				yield* requireTmux(ops);
 
-				const runId = makeRunId();
-				const { sessionFile, tempFiles } = yield* createAsyncSessionFile(runId);
+				runId = makeRunId();
+				const session = yield* createAsyncSessionFile(runId);
+				tempFiles.push(...session.tempFiles);
 
 				const command = buildAsyncPiCommand(
 					request.agent,
@@ -295,12 +311,12 @@ export function createAsyncRuntimeDeps(
 					request.cwd,
 					request.options.thinking,
 					request.model,
-					sessionFile,
+					session.sessionFile,
 					tempFiles,
 					deps.resolveSkillPath,
 					ops,
 				);
-				const pane = yield* tmuxTry("split-window", () =>
+				pane = yield* tmuxTry("split-window", () =>
 					ops.createPaneWithCommand(asyncPaneTitle(request.agent.name, request.task), command)
 				);
 
@@ -310,30 +326,49 @@ export function createAsyncRuntimeDeps(
 					task: request.task,
 					startedAt: Date.now(),
 					pane,
-					sessionFile,
+					sessionFile: session.sessionFile,
 					tempFiles,
 				};
 				deps.asyncRuns.set(runId, run);
 				deps.startWidgetRefresh(deps.latestCtx(), deps.asyncRuns);
 				deps.asyncOwner.start(run);
+				ownershipTransferred = true;
 				return { runId };
-			}),
+			}).pipe(
+				Effect.catchAllCause((cause) =>
+					Effect.sync(() => {
+						if (!ownershipTransferred) {
+							if (runId) deps.asyncRuns.delete(runId);
+							if (pane) ignoreCleanupFailure(() => ops.closePane(pane));
+							cleanupAsyncTempFiles(tempFiles);
+						}
+					}).pipe(Effect.andThen(Effect.failCause(cause))),
+				),
+			);
+		},
 
-		startAsyncParallel: (request) =>
-			Effect.gen(function* () {
+		startAsyncParallel: (request) => {
+			const tempFilesForSetup: string[] = [];
+			const runIds: string[] = [];
+			let batchId = "";
+			let windowId: string | undefined;
+			let ownershipTransferred = false;
+
+			return Effect.gen(function* () {
 				yield* requireTmux(ops);
 
-				const batchId = crypto.randomUUID().slice(0, 8);
+				batchId = makeRunId();
 				const windowName = ops.makeBatchWindowName(batchId);
-				const windowId = yield* tmuxTry("new-window", () => ops.createWindow(windowName));
+				windowId = yield* tmuxTry("new-window", () => ops.createWindow(windowName));
 				const initialPane = yield* tmuxTry("list-panes", () => ops.getWindowPanes(windowId)[0]);
 				const paneIds: string[] = initialPane ? [initialPane] : [];
-				const runIds: string[] = [];
 
 				for (let i = 0; i < request.tasks.length; i++) {
 					const task = request.tasks[i];
 					const runId = makeRunId();
-					const { sessionFile, tempFiles } = yield* createAsyncSessionFile(runId);
+					const session = yield* createAsyncSessionFile(runId);
+					const tempFiles = [...session.tempFiles];
+					for (const filePath of tempFiles) trackTempFile(tempFilesForSetup, filePath);
 
 					const command = buildAsyncPiCommand(
 						task.agent,
@@ -342,11 +377,13 @@ export function createAsyncRuntimeDeps(
 						task.cwd,
 						request.options.thinking,
 						request.options.selectedModel ?? task.agent.model,
-						sessionFile,
+						session.sessionFile,
 						tempFiles,
 						deps.resolveSkillPath,
 						ops,
+						(filePath) => trackTempFile(tempFilesForSetup, filePath),
 					);
+					for (const filePath of tempFiles) trackTempFile(tempFilesForSetup, filePath);
 
 					const name = asyncPaneTitle(task.agent.name, task.task);
 					let pane: string;
@@ -364,7 +401,7 @@ export function createAsyncRuntimeDeps(
 						task: task.task,
 						startedAt: Date.now(),
 						pane,
-						sessionFile,
+						sessionFile: session.sessionFile,
 						tempFiles,
 						batchId,
 						windowId,
@@ -386,10 +423,23 @@ export function createAsyncRuntimeDeps(
 					const run = deps.asyncRuns.get(runId);
 					if (run) deps.asyncOwner.start(run);
 				}
+				ownershipTransferred = true;
 				deps.startWidgetRefresh(deps.latestCtx(), deps.asyncRuns);
 
 				return { runIds, windowName };
-			}),
+			}).pipe(
+				Effect.catchAllCause((cause) =>
+					Effect.sync(() => {
+						if (!ownershipTransferred) {
+							for (const runId of runIds) deps.asyncRuns.delete(runId);
+							if (batchId) deps.asyncBatches.delete(batchId);
+							if (windowId) ignoreCleanupFailure(() => ops.closeWindow(windowId));
+							cleanupAsyncTempFiles(tempFilesForSetup);
+						}
+					}).pipe(Effect.andThen(Effect.failCause(cause))),
+				),
+			);
+		},
 
 		reportRejectedAsyncTask: (task) =>
 			Effect.sync(() => {
@@ -502,8 +552,9 @@ export function runSubagentRequest(request: SubagentRequest, deps: RuntimeDeps):
 					request.tasks,
 					(task, index) =>
 						Effect.gen(function* () {
-							if (index > 0) {
-								yield* Effect.sleep(`${index * staggerMs} millis`);
+							const delayMs = index * staggerMs;
+							if (delayMs > 0) {
+								yield* Effect.sleep(`${delayMs} millis`);
 							}
 
 							const result = yield* runSingle(

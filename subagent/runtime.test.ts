@@ -1,10 +1,16 @@
 import assert from "node:assert/strict";
+import * as fs from "node:fs";
+import * as path from "node:path";
 import { describe, it } from "node:test";
 import { Effect } from "effect";
 import type { AgentConfig } from "./agents.ts";
 import { emptyUsageStats, type AsyncBatch, type AsyncRun, type SingleResult, type SubagentRequest } from "./types.ts";
-import { createAsyncRunWatcher, runSubagentRequest } from "./runtime.ts";
+import { createAsyncRunWatcher, createAsyncRuntimeDeps, runSubagentRequest } from "./runtime.ts";
 import type { TmuxOps } from "./tmux-effect.ts";
+
+function extractSubagentTempPaths(command: string): string[] {
+	return Array.from(command.matchAll(/'([^']*pi-subagent[^']*)'/g), (match) => match[1]);
+}
 
 const agent: AgentConfig = {
 	name: "worker",
@@ -145,6 +151,229 @@ describe("runSubagentRequest", () => {
 			}),
 		);
 		assert.equal(output.contentText, 'Started 2 async subagents in tmux window "subagents-1"');
+	});
+
+	it("starts async single with fake tmux runtime dependencies", async () => {
+		const asyncRuns = new Map<string, AsyncRun>();
+		const asyncBatches = new Map<string, AsyncBatch>();
+		let startedRun: AsyncRun | null = null;
+		const tmuxOps: TmuxOps = {
+			isAvailable: () => true,
+			createPaneWithCommand: () => "%1",
+			createWindow: () => "@1",
+			getWindowPanes: () => [],
+			runCommandInPane: () => undefined,
+			createPaneInWindow: () => "%2",
+			tileWindow: () => undefined,
+			closePane: () => undefined,
+			closeWindow: () => undefined,
+			readScreen: async () => "__SUBAGENT_DONE_0__",
+			makeBatchWindowName: () => "subagents-1",
+			shellEscape: (value) => value,
+		};
+		const asyncDeps = createAsyncRuntimeDeps({
+			asyncRuns,
+			asyncBatches,
+			asyncOwner: {
+				start(run) {
+					startedRun = run;
+				},
+			},
+			latestCtx: () => null,
+			pi: { sendMessage: () => undefined, events: { emit: () => undefined } } as Parameters<typeof createAsyncRuntimeDeps>[0]["pi"],
+			updateWidget: () => undefined,
+			startWidgetRefresh: () => undefined,
+			readLastAssistantMessage: () => "(no output)",
+			resolveSkillPath: () => null,
+			tmuxOps,
+		});
+		const request: SubagentRequest = {
+			type: "asyncSingle",
+			agent,
+			task: "Async",
+			options: { defaultCwd: "/repo" },
+		};
+
+		const output = await Effect.runPromise(
+			runSubagentRequest(request, {
+				runSingle: () => Effect.die("not used"),
+				...asyncDeps,
+			}),
+		);
+
+		assert.match(output.contentText, /Started async subagent/);
+		assert.equal(startedRun?.agent, "worker");
+	});
+
+	it("cleans async single temp files when tmux setup fails", async () => {
+		const asyncRuns = new Map<string, AsyncRun>();
+		const asyncBatches = new Map<string, AsyncBatch>();
+		let tempPaths: string[] = [];
+		const tmuxOps: TmuxOps = {
+			isAvailable: () => true,
+			createPaneWithCommand: (_name, command) => {
+				tempPaths = extractSubagentTempPaths(command);
+				throw new Error("split failed");
+			},
+			createWindow: () => "@1",
+			getWindowPanes: () => [],
+			runCommandInPane: () => undefined,
+			createPaneInWindow: () => "%2",
+			tileWindow: () => undefined,
+			closePane: () => undefined,
+			closeWindow: () => undefined,
+			readScreen: async () => "__SUBAGENT_DONE_0__",
+			makeBatchWindowName: () => "subagents-1",
+			shellEscape: (value) => `'${value}'`,
+		};
+		const asyncDeps = createAsyncRuntimeDeps({
+			asyncRuns,
+			asyncBatches,
+			asyncOwner: { start: () => undefined },
+			latestCtx: () => null,
+			pi: { sendMessage: () => undefined, events: { emit: () => undefined } } as Parameters<typeof createAsyncRuntimeDeps>[0]["pi"],
+			updateWidget: () => undefined,
+			startWidgetRefresh: () => undefined,
+			readLastAssistantMessage: () => "(no output)",
+			resolveSkillPath: () => null,
+			tmuxOps,
+		});
+
+		await assert.rejects(() => Effect.runPromise(
+			runSubagentRequest(
+				{ type: "asyncSingle", agent, task: "Async", options: { defaultCwd: "/repo" } },
+				{ runSingle: () => Effect.die("not used"), ...asyncDeps },
+			),
+		));
+
+		assert.ok(tempPaths.length >= 2);
+		for (const tempPath of tempPaths) {
+			assert.equal(fs.existsSync(tempPath), false, tempPath);
+			if (path.basename(tempPath).startsWith("prompt-")) {
+				assert.equal(fs.existsSync(path.dirname(tempPath)), false, path.dirname(tempPath));
+			}
+		}
+		assert.equal(asyncRuns.size, 0);
+	});
+
+	it("cleans async parallel temp files and window when tmux setup fails", async () => {
+		const asyncRuns = new Map<string, AsyncRun>();
+		const asyncBatches = new Map<string, AsyncBatch>();
+		const tempPaths: string[] = [];
+		let closedWindow = false;
+		const tmuxOps: TmuxOps = {
+			isAvailable: () => true,
+			createPaneWithCommand: () => "%1",
+			createWindow: () => "@1",
+			getWindowPanes: () => ["%1"],
+			runCommandInPane: (_pane, _name, command) => {
+				tempPaths.push(...extractSubagentTempPaths(command));
+			},
+			createPaneInWindow: (_windowId, _name, command) => {
+				tempPaths.push(...extractSubagentTempPaths(command));
+				throw new Error("split failed");
+			},
+			tileWindow: () => undefined,
+			closePane: () => undefined,
+			closeWindow: () => {
+				closedWindow = true;
+			},
+			readScreen: async () => "__SUBAGENT_DONE_0__",
+			makeBatchWindowName: () => "subagents-1",
+			shellEscape: (value) => `'${value}'`,
+		};
+		const asyncDeps = createAsyncRuntimeDeps({
+			asyncRuns,
+			asyncBatches,
+			asyncOwner: { start: () => undefined },
+			latestCtx: () => null,
+			pi: { sendMessage: () => undefined, events: { emit: () => undefined } } as Parameters<typeof createAsyncRuntimeDeps>[0]["pi"],
+			updateWidget: () => undefined,
+			startWidgetRefresh: () => undefined,
+			readLastAssistantMessage: () => "(no output)",
+			resolveSkillPath: () => null,
+			tmuxOps,
+		});
+
+		await assert.rejects(() => Effect.runPromise(
+			runSubagentRequest(
+				{
+					type: "asyncParallel",
+					tasks: [
+						{ agent, task: "A" },
+						{ agent, task: "B" },
+					],
+					rejectedTasks: [],
+					options: { defaultCwd: "/repo" },
+				},
+				{ runSingle: () => Effect.die("not used"), ...asyncDeps },
+			),
+		));
+
+		assert.equal(closedWindow, true);
+		assert.equal(asyncRuns.size, 0);
+		assert.ok(tempPaths.length >= 4);
+		for (const tempPath of tempPaths) {
+			assert.equal(fs.existsSync(tempPath), false, tempPath);
+		}
+	});
+
+	it("cleans async parallel prompt temp files when command construction fails", async () => {
+		const asyncRuns = new Map<string, AsyncRun>();
+		const asyncBatches = new Map<string, AsyncBatch>();
+		let promptPath = "";
+		let closedWindow = false;
+		const tmuxOps: TmuxOps = {
+			isAvailable: () => true,
+			createPaneWithCommand: () => "%1",
+			createWindow: () => "@1",
+			getWindowPanes: () => ["%1"],
+			runCommandInPane: () => undefined,
+			createPaneInWindow: () => "%2",
+			tileWindow: () => undefined,
+			closePane: () => undefined,
+			closeWindow: () => {
+				closedWindow = true;
+			},
+			readScreen: async () => "__SUBAGENT_DONE_0__",
+			makeBatchWindowName: () => "subagents-1",
+			shellEscape: (value) => {
+				if (value.includes("prompt-worker")) {
+					promptPath = value;
+					throw new Error("escape failed");
+				}
+				return `'${value}'`;
+			},
+		};
+		const asyncDeps = createAsyncRuntimeDeps({
+			asyncRuns,
+			asyncBatches,
+			asyncOwner: { start: () => undefined },
+			latestCtx: () => null,
+			pi: { sendMessage: () => undefined, events: { emit: () => undefined } } as Parameters<typeof createAsyncRuntimeDeps>[0]["pi"],
+			updateWidget: () => undefined,
+			startWidgetRefresh: () => undefined,
+			readLastAssistantMessage: () => "(no output)",
+			resolveSkillPath: () => null,
+			tmuxOps,
+		});
+
+		await assert.rejects(() => Effect.runPromise(
+			runSubagentRequest(
+				{
+					type: "asyncParallel",
+					tasks: [{ agent, task: "A" }],
+					rejectedTasks: [],
+					options: { defaultCwd: "/repo" },
+				},
+				{ runSingle: () => Effect.die("not used"), ...asyncDeps },
+			),
+		));
+
+		assert.equal(closedWindow, true);
+		assert.notEqual(promptPath, "");
+		assert.equal(fs.existsSync(promptPath), false, promptPath);
+		assert.equal(fs.existsSync(path.dirname(promptPath)), false, path.dirname(promptPath));
 	});
 
 	it("preserves async parallel rejected task reporting while valid tasks start", async () => {
