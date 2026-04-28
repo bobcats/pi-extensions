@@ -18,6 +18,7 @@ Raw ingest is an internal stage, not the final product.
 - Never write outside `~/.pi/memories/raw/` during the ingest stage.
 - Always produce a raw markdown artifact, even if conversion tooling is missing.
 - Preserve useful originals/assets when it helps future recall.
+- For docs-heavy repo/directory ingests, preserve the normalized markdown files that were actually used and record the source URL/SHA; do not clone or preserve full repository history unless history itself is the source.
 - If the runner returns `confirm`, ask the user before replaying with `confirm:true`.
 - On `ok`, read the newly written raw artifact(s) before any synthesis.
 - Inspect existing vault notes relevant to the topic before deciding where curated knowledge should go.
