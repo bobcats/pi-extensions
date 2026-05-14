@@ -45,7 +45,7 @@ Do not create a `forget_memory` tool and do not add runtime deletion logic in th
 - Modify: `memory/prompts.test.ts`
 - Modify later: `memory/prompts.ts`
 
-- [ ] **Step 1: Import the future prompt builder and candidate type**
+- [x] **Step 1: Import the future prompt builder and candidate type**
 
 Update the imports at the top of `memory/prompts.test.ts`:
 
@@ -60,7 +60,7 @@ import {
 } from "./prompts.ts";
 ```
 
-- [ ] **Step 2: Add failing tests for forget prompt essentials**
+- [x] **Step 2: Add failing tests for forget prompt essentials**
 
 Add these tests after the existing dream prompt tests:
 
@@ -101,7 +101,7 @@ test("buildForgetPrompt renders QMD candidates as hints", () => {
 });
 ```
 
-- [ ] **Step 3: Run prompt tests and verify they fail**
+- [x] **Step 3: Run prompt tests and verify they fail**
 
 Run:
 
@@ -119,7 +119,7 @@ Expected: FAIL because `buildForgetPrompt` is not exported yet.
 - Modify: `memory/prompts.ts`
 - Test: `memory/prompts.test.ts`
 
-- [ ] **Step 1: Add candidate interface**
+- [x] **Step 1: Add candidate interface**
 
 In `memory/prompts.ts`, after the exported constants, add:
 
@@ -132,7 +132,7 @@ export interface ForgetPromptCandidate {
 }
 ```
 
-- [ ] **Step 2: Add candidate formatting helper**
+- [x] **Step 2: Add candidate formatting helper**
 
 Below `buildReflectPrompt`, add:
 
@@ -156,7 +156,7 @@ function formatForgetCandidates(candidates: ForgetPromptCandidate[]): string {
 }
 ```
 
-- [ ] **Step 3: Add `buildForgetPrompt`**
+- [x] **Step 3: Add `buildForgetPrompt`**
 
 Below the helper, add:
 
@@ -199,7 +199,7 @@ ${writeConventions(dir)}`;
 }
 ```
 
-- [ ] **Step 4: Run prompt tests and verify they pass**
+- [x] **Step 4: Run prompt tests and verify they pass**
 
 Run:
 
@@ -209,7 +209,7 @@ cd memory && npx tsx --test --test-timeout=5000 prompts.test.ts
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit prompt builder**
+- [x] **Step 5: Commit prompt builder**
 
 Run:
 
@@ -228,7 +228,7 @@ git commit -m "feat(memory): add forget prompt builder"
 - Modify: `memory/prompts.test.ts`
 - Modify: `memory/index.test.ts`
 
-- [ ] **Step 1: Add a failing dashboard/parser test for forget history**
+- [x] **Step 1: Add a failing dashboard/parser test for forget history**
 
 In `memory/prompts.test.ts`, after `parseOperationsJSONL parses ingest operations`, add:
 
@@ -239,7 +239,7 @@ test("parseOperationsJSONL parses forget operations", () => {
 });
 ```
 
-- [ ] **Step 2: Add a failing log operation test**
+- [x] **Step 2: Add a failing log operation test**
 
 In `memory/index.test.ts`, after `log_operation writes history into the mapped brain vault only`, add:
 
@@ -277,7 +277,7 @@ test("log_operation accepts forget operations", async () => {
 });
 ```
 
-- [ ] **Step 3: Run targeted tests and verify failures**
+- [x] **Step 3: Run targeted tests and verify failures**
 
 Run:
 
@@ -287,7 +287,7 @@ cd memory && npx tsx --test --test-timeout=5000 prompts.test.ts index.test.ts
 
 Expected: FAIL because `OperationType` and the TypeBox enum do not accept `forget` yet.
 
-- [ ] **Step 4: Add `forget` to shared operation type**
+- [x] **Step 4: Add `forget` to shared operation type**
 
 Change `memory/types.ts`:
 
@@ -295,7 +295,7 @@ Change `memory/types.ts`:
 export type OperationType = "reflect" | "ruminate" | "dream" | "ingest" | "forget";
 ```
 
-- [ ] **Step 5: Add `forget` to `LogOperationParams`**
+- [x] **Step 5: Add `forget` to `LogOperationParams`**
 
 Change the enum in `memory/index.ts`:
 
@@ -306,7 +306,7 @@ const LogOperationParams = Type.Object({
   }),
 ```
 
-- [ ] **Step 6: Run targeted tests and verify they pass**
+- [x] **Step 6: Run targeted tests and verify they pass**
 
 Run:
 
@@ -316,7 +316,7 @@ cd memory && npx tsx --test --test-timeout=5000 prompts.test.ts index.test.ts
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit operation type support**
+- [x] **Step 7: Commit operation type support**
 
 Run:
 
@@ -333,7 +333,7 @@ git commit -m "feat(memory): track forget operations"
 - Modify: `memory/index.test.ts`
 - Modify later: `memory/index.ts`
 
-- [ ] **Step 1: Add autocomplete test**
+- [x] **Step 1: Add autocomplete test**
 
 In `memory/index.test.ts`, add after the brain command tests:
 
@@ -357,7 +357,7 @@ test("memory autocomplete includes forget", async () => {
 });
 ```
 
-- [ ] **Step 2: Add missing-topic usage test**
+- [x] **Step 2: Add missing-topic usage test**
 
 Add:
 
@@ -384,7 +384,7 @@ test("memory forget requires a topic", async () => {
 });
 ```
 
-- [ ] **Step 3: Add prompt dispatch test**
+- [x] **Step 3: Add prompt dispatch test**
 
 Add:
 
@@ -417,7 +417,7 @@ test("memory forget sends agent prompt for active brain topic", async () => {
 });
 ```
 
-- [ ] **Step 4: Add status/help discoverability test**
+- [x] **Step 4: Add status/help discoverability test**
 
 Add:
 
@@ -443,7 +443,7 @@ test("memory status lists forget command", async () => {
 });
 ```
 
-- [ ] **Step 5: Run command tests and verify they fail**
+- [x] **Step 5: Run command tests and verify they fail**
 
 Run:
 
@@ -461,7 +461,7 @@ Expected: FAIL because the command is not implemented yet.
 - Modify: `memory/index.ts`
 - Test: `memory/index.test.ts`
 
-- [ ] **Step 1: Import forget prompt builder and type**
+- [x] **Step 1: Import forget prompt builder and type**
 
 Change the prompt import in `memory/index.ts`:
 
@@ -470,7 +470,7 @@ import { buildReflectPrompt, buildDreamPrompt, buildForgetPrompt } from "./promp
 import type { ForgetPromptCandidate } from "./prompts.js";
 ```
 
-- [ ] **Step 2: Add autocomplete entry**
+- [x] **Step 2: Add autocomplete entry**
 
 In `MEMORY_SUBCOMMANDS`, add near `search`:
 
@@ -478,7 +478,7 @@ In `MEMORY_SUBCOMMANDS`, add near `search`:
 { value: "forget", label: "forget", description: "Forget a topic from the active brain" },
 ```
 
-- [ ] **Step 3: Add command handler before `init` and after `search`**
+- [x] **Step 3: Add command handler before `init` and after `search`**
 
 In the `/memory` handler, after the search block and before `if (trimmed === "init")`, add:
 
@@ -510,7 +510,7 @@ In the `/memory` handler, after the search block and before `if (trimmed === "in
 
 Do not catch `qmd.search`; the wrapper already degrades to `[]` on errors.
 
-- [ ] **Step 4: Update default status/help command list**
+- [x] **Step 4: Update default status/help command list**
 
 Change the status notification command suffix from:
 
@@ -524,7 +524,7 @@ to:
 `\n\nCommands: reflect, ruminate, dream, cancel dream, search, forget, undo, log, init, on, off`,
 ```
 
-- [ ] **Step 5: Run command tests and verify they pass**
+- [x] **Step 5: Run command tests and verify they pass**
 
 Run:
 
@@ -534,7 +534,7 @@ cd memory && npx tsx --test --test-timeout=5000 index.test.ts
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit command implementation**
+- [x] **Step 6: Commit command implementation**
 
 Run:
 
@@ -550,7 +550,7 @@ git commit -m "feat(memory): add topic forget command"
 **Files:**
 - All touched memory extension files
 
-- [ ] **Step 1: Run full memory extension tests**
+- [x] **Step 1: Run full memory extension tests**
 
 Run:
 
@@ -560,7 +560,7 @@ cd memory && npx tsx --test --test-timeout=5000 *.test.ts
 
 Expected: PASS.
 
-- [ ] **Step 2: Run root test command if available**
+- [x] **Step 2: Run root test command if available**
 
 Run:
 
@@ -570,7 +570,7 @@ npm test -- --test-timeout=5000
 
 Expected: PASS, or document if the root package has no compatible test script.
 
-- [ ] **Step 3: Run slop scan on the memory extension**
+- [x] **Step 3: Run slop scan on the memory extension**
 
 Run:
 
@@ -580,7 +580,7 @@ slop-scan memory
 
 Expected: No high-confidence findings in touched code. Treat findings as leads; fix real issues only.
 
-- [ ] **Step 4: Inspect git diff**
+- [x] **Step 4: Inspect git diff**
 
 Run:
 
@@ -592,7 +592,7 @@ git diff -- memory/types.ts memory/prompts.ts memory/prompts.test.ts memory/inde
 
 Expected: Only intended changes remain uncommitted if any previous commit step was skipped.
 
-- [ ] **Step 5: Commit final cleanup if needed**
+- [x] **Step 5: Commit final cleanup if needed**
 
 If Step 4 shows remaining intended changes, run:
 
