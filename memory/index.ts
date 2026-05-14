@@ -26,7 +26,8 @@ import { initGitRepo, getChangedFiles, commitVault, undoLastCommit, getGitLog } 
 import { OPERATIONS_FILE, readVaultIndex, listVaultFiles, countVaultFiles, initVault } from "./lib.js";
 import { MINER_AGENT_PATH, SCRIPTS_DIR, parseRuminateArgs, extractAndBatch, buildRuminatePrompt } from "./session.js";
 import { formatElapsed, formatRelativeTime, STATUS_ICONS, parseOperationsJSONL, renderDashboardLines } from "./dashboard.js";
-import { buildReflectPrompt, buildDreamPrompt } from "./prompts.js";
+import { buildReflectPrompt, buildDreamPrompt, buildForgetPrompt } from "./prompts.js";
+import type { ForgetPromptCandidate } from "./prompts.js";
 import { MEMORY_CONFIG_FILE, loadMemoryConfig, resolveActiveBrain, saveMemoryConfig } from "./config.js";
 import type { ActiveBrain, OperationType, OperationStatus, OperationResult, MemoryState } from "./types.js";
 
@@ -813,6 +814,7 @@ export default function memoryExtension(pi: ExtensionAPI) {
     { value: "ruminate --from", label: "ruminate --from", description: "Mine sessions modified on or after YYYY-MM-DD" },
     { value: "ruminate --to", label: "ruminate --to", description: "Mine sessions modified on or before YYYY-MM-DD" },
     { value: "search", label: "search", description: "Search the memory vault (requires qmd)" },
+    { value: "forget", label: "forget", description: "Forget a topic from the active brain" },
     { value: "brain list", label: "brain list", description: "List configured brains" },
     { value: "brain add", label: "brain add", description: "Register a named brain" },
     { value: "brain remove", label: "brain remove", description: "Remove a named brain from config" },
@@ -1087,6 +1089,30 @@ export default function memoryExtension(pi: ExtensionAPI) {
         return;
       }
 
+      if (trimmed === "forget" || trimmed.startsWith("forget ")) {
+        const topic = trimmed === "forget" ? "" : trimmed.slice("forget ".length).trim();
+        if (!topic) {
+          ctx.ui.notify("Usage: /memory forget <topic>", "warning");
+          return;
+        }
+
+        let candidates: ForgetPromptCandidate[] = [];
+        if (qmdAvailable) {
+          const collection = qmd.collectionNameForBrain(brain.name);
+          const results = await qmd.search(collection, topic, { limit: 10 });
+          candidates = results.map((result) => ({
+            title: result.title,
+            file: qmd.toVaultPath(brain.vaultDir, result.file, collection),
+            score: result.score,
+            snippet: result.snippet,
+          }));
+        }
+
+        ctx.ui.notify(`Forgetting topic from ${brain.name}: ${topic}`, "info");
+        pi.sendUserMessage(buildForgetPrompt(brain.vaultDir, topic, candidates));
+        return;
+      }
+
       if (trimmed === "init") {
         const hasVaultAlready = fs.existsSync(path.join(brain.vaultDir, "index.md"));
 
@@ -1148,7 +1174,7 @@ export default function memoryExtension(pi: ExtensionAPI) {
         `Dream: ${dreamMode ? `active (cycle ${state.dreamCycle})` : "off"}` +
         (hasJournal ? ` (journal exists)` : "") +
         (qmdAvailable ? `\nQMD: installed (search enabled)` : `\nQMD: not installed (npm i -g @tobilu/qmd)`) +
-        `\n\nCommands: reflect, ruminate, dream, cancel dream, search, undo, log, init, on, off`,
+        `\n\nCommands: reflect, ruminate, dream, cancel dream, search, forget, undo, log, init, on, off`,
         "info",
       );
     },

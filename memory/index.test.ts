@@ -245,6 +245,92 @@ test("log_operation writes history into the mapped brain vault only", async () =
   }
 });
 
+test("memory autocomplete includes forget", async () => {
+  const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "memory-home-"));
+  const { memoryExtension, restore } = await loadExtensionForHome(homeDir);
+
+  try {
+    const harness = createHarness();
+    memoryExtension(harness.pi);
+
+    const memoryCommand = harness.commands.get("memory");
+    assert.ok(memoryCommand);
+
+    const completions = memoryCommand.getArgumentCompletions("");
+    assert.ok(completions.some((item: { value: string }) => item.value === "forget"));
+  } finally {
+    restore();
+  }
+});
+
+test("memory forget requires a topic", async () => {
+  const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "memory-home-"));
+  const { memoryExtension, restore } = await loadExtensionForHome(homeDir);
+
+  try {
+    const harness = createHarness();
+    memoryExtension(harness.pi);
+
+    const memoryCommand = harness.commands.get("memory");
+    assert.ok(memoryCommand);
+
+    await memoryCommand.handler("forget", harness.ctx);
+
+    const last = harness.notifications[harness.notifications.length - 1];
+    assert.match(last.message, /Usage: \/memory forget <topic>/);
+    assert.equal(harness.sendUserMessageCalls.length, 0);
+  } finally {
+    restore();
+  }
+});
+
+test("memory forget sends agent prompt for active brain topic", async () => {
+  const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "memory-home-"));
+  const vaultDir = path.join(homeDir, ".pi", "memories");
+  fs.mkdirSync(vaultDir, { recursive: true });
+  fs.writeFileSync(path.join(vaultDir, "index.md"), "# Memory\n");
+
+  const { memoryExtension, restore } = await loadExtensionForHome(homeDir);
+
+  try {
+    const harness = createHarness();
+    memoryExtension(harness.pi);
+
+    const memoryCommand = harness.commands.get("memory");
+    assert.ok(memoryCommand);
+
+    await memoryCommand.handler("forget acme client", harness.ctx);
+
+    assert.equal(harness.sendUserMessageCalls.length, 1);
+    assert.match(harness.sendUserMessageCalls[0].content, /# Forget Topic/);
+    assert.match(harness.sendUserMessageCalls[0].content, /acme client/);
+    assert.match(harness.sendUserMessageCalls[0].content, new RegExp(vaultDir.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+    assert.match(harness.notifications.map((entry) => entry.message).join("\n"), /Forgetting topic/);
+  } finally {
+    restore();
+  }
+});
+
+test("memory status lists forget command", async () => {
+  const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "memory-home-"));
+  const { memoryExtension, restore } = await loadExtensionForHome(homeDir);
+
+  try {
+    const harness = createHarness();
+    memoryExtension(harness.pi);
+
+    const memoryCommand = harness.commands.get("memory");
+    assert.ok(memoryCommand);
+
+    await memoryCommand.handler("", harness.ctx);
+
+    const last = harness.notifications[harness.notifications.length - 1];
+    assert.match(last.message, /Commands: .*forget/);
+  } finally {
+    restore();
+  }
+});
+
 test("log_operation accepts forget operations", async () => {
   const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "memory-home-"));
   const { memoryExtension, restore } = await loadExtensionForHome(homeDir);
