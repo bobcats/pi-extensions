@@ -4,6 +4,7 @@ import {
   writeConventions,
   buildReflectPrompt,
   buildDreamPrompt,
+  buildForgetPrompt,
   MEMORY_TOPIC_LIMIT,
   MEMORY_INDEX_LIMIT,
 } from "./prompts.ts";
@@ -175,6 +176,41 @@ test("buildDreamPrompt includes write conventions", () => {
   assert.ok(prompt.includes("## Writing Conventions"));
 });
 
+// --- buildForgetPrompt ---
+
+test("buildForgetPrompt includes topic and active vault path", () => {
+  const prompt = buildForgetPrompt("/test/vault", "acme client", []);
+  assert.ok(prompt.includes("# Forget Topic"));
+  assert.ok(prompt.includes("acme client"));
+  assert.ok(prompt.includes("/test/vault/index.md"));
+  assert.ok(prompt.includes("log_operation"));
+  assert.ok(prompt.includes('type="forget"'));
+});
+
+test("buildForgetPrompt makes raw files a hard no-edit rule", () => {
+  const prompt = buildForgetPrompt("/test/vault", "acme", []);
+  assert.ok(prompt.includes("HARD BOUNDARY: `/test/vault/raw/` is read-only source material"));
+  assert.ok(prompt.includes("Do not edit, delete, move, rename, split, summarize, compile, index, or otherwise modify raw files"));
+});
+
+test("buildForgetPrompt warns that forget is not secure erase", () => {
+  const prompt = buildForgetPrompt("/test/vault", "acme", []);
+  assert.ok(prompt.includes("not a secure erase"));
+  assert.ok(prompt.includes("git history may retain"));
+});
+
+test("buildForgetPrompt renders QMD candidates as hints", () => {
+  const prompt = buildForgetPrompt("/test/vault", "acme", [
+    { title: "Acme Notes", file: "/test/vault/projects/acme.md", score: 0.91, snippet: "Acme deployment notes" },
+  ]);
+
+  assert.ok(prompt.includes("Candidate files"));
+  assert.ok(prompt.includes("91% Acme Notes"));
+  assert.ok(prompt.includes("/test/vault/projects/acme.md"));
+  assert.ok(prompt.includes("Acme deployment notes"));
+  assert.ok(prompt.includes("Candidate files are hints, not deletion targets"));
+});
+
 // --- buildRuminatePrompt ---
 
 test("buildRuminatePrompt includes batch paths and counts", () => {
@@ -276,6 +312,11 @@ test("parseOperationsJSONL skips malformed lines", () => {
 test("parseOperationsJSONL parses ingest operations", () => {
   const ops = parseOperationsJSONL(JSON.stringify({ operationType: "ingest", status: "keep", description: "ingested", timestamp: 1 }));
   assert.strictEqual(ops[0].type, "ingest");
+});
+
+test("parseOperationsJSONL parses forget operations", () => {
+  const ops = parseOperationsJSONL(JSON.stringify({ operationType: "forget", status: "keep", description: "forgot acme", timestamp: 1 }));
+  assert.strictEqual(ops[0].type, "forget");
 });
 
 test("parseOperationsJSONL defaults missing fields", () => {

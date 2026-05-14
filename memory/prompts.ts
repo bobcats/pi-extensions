@@ -1,6 +1,13 @@
 export const MEMORY_TOPIC_LIMIT = 500;
 export const MEMORY_INDEX_LIMIT = 200;
 
+export interface ForgetPromptCandidate {
+  title: string;
+  file: string;
+  score: number;
+  snippet?: string;
+}
+
 export function writeConventions(dir: string): string {
   return `## Writing Conventions
 
@@ -77,6 +84,61 @@ When done, call log_operation with type='reflect' and a description of what you 
 - Structural: [rules/scripts/checks added]
 - Todos: [follow-up items filed]
 \`\`\`
+
+${writeConventions(dir)}`;
+}
+
+function formatForgetCandidates(candidates: ForgetPromptCandidate[]): string {
+  if (candidates.length === 0) {
+    return "No QMD candidates were available. Use the vault index and related wikilinks to find relevant files.";
+  }
+
+  return candidates
+    .map((candidate, index) => {
+      const score = Math.round(candidate.score * 100);
+      const snippet = candidate.snippet?.trim();
+      return [
+        `${index + 1}. ${score}% ${candidate.title}`,
+        `   File: ${candidate.file}`,
+        snippet ? `   Snippet: ${snippet}` : undefined,
+      ].filter(Boolean).join("\n");
+    })
+    .join("\n");
+}
+
+export function buildForgetPrompt(dir: string, topic: string, candidates: ForgetPromptCandidate[] = []): string {
+  return `# Forget Topic
+
+Remove memories about this topic from the active memory vault.
+
+**Topic:** ${topic}
+**Vault:** \`${dir}/\`
+
+This is not a secure erase. Remove content from the working vault, but git history may retain previous versions until a separate destructive history purge exists.
+
+## Candidate files
+
+Candidate files are hints, not deletion targets. Inspect them and their related wikilinks before editing.
+
+${formatForgetCandidates(candidates)}
+
+## Process
+
+1. Read \`${dir}/index.md\` to understand the vault structure.
+2. Inspect candidate files and related wikilinks for the topic.
+3. Remove notes whose primary subject is the topic.
+4. Surgically remove topic-specific sections, claims, examples, project/client facts, or private details from broader notes.
+5. Preserve generalized lessons by rewriting them without topic-specific details when possible.
+6. Treat ambiguous broad terms conservatively. If you cannot tell whether content should be forgotten, ask for clarification or log noop instead of guessing.
+7. Update \`${dir}/index.md\` if files were removed or renamed.
+8. Call log_operation(type="forget", status="keep"|"noop", description="...", findings_count=N) when done.
+
+## Raw source boundary
+
+**HARD BOUNDARY: \`${dir}/raw/\` is read-only source material.** Raw files are provenance for ingest workflows, not curated memory notes.
+- You may read raw files for context.
+- Do not edit, delete, move, rename, split, summarize, compile, index, or otherwise modify raw files.
+- Do not create plans to split, summarize, index, delete, move, or rewrite raw files.
 
 ${writeConventions(dir)}`;
 }
