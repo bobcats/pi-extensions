@@ -100,7 +100,7 @@ Switch to high-leverage work NOW:
 - **Restructure** a directory that doesn't match how the content is actually used
 - **Connect** isolated notes by adding cross-references that reveal patterns
 
-If you genuinely cannot find structural improvements, write a substantive idea to \`${journalPath}\` explaining what reorganization you considered and why you rejected it. Then move to a completely different area of the vault.`;
+If you genuinely cannot find structural improvements, add a dated dream-journal entry to \`${journalPath}\` using the journal format below. Record the image, feeling, rejected reorganization, and why it was rejected. Then move to a completely different area of the vault.`;
   }
 
   return `## Dream Mode (ACTIVE)
@@ -116,7 +116,22 @@ NEVER STOP until interrupted.
 4. Call log_operation(type='dream', status='keep'|'noop', description='...', findings_count=N)
 5. Go back to step 1. Keep going.
 
-Write observations, cross-project patterns, and deferred ideas as bullet points to \`${journalPath}\` — don't let good ideas get lost.
+Write observations, cross-project patterns, and deferred ideas to \`${journalPath}\` as dated dream entries — don't let good ideas get lost.
+
+### Dream journal format
+
+Keep \`dream-journal.md\` like a human dream journal, not an operations dashboard. Prefer poetic, sensory, first-person entries that still preserve practical retrieval value. Each substantial entry should use these sections:
+
+- Date / time
+- Title
+- Dream narrative — present tense is encouraged; fragments and strange images are fine
+- Emotions during / after
+- Symbols / strange details
+- Waking-life connection
+- Interpretation / reflection
+- Tags / recurring themes
+
+Prune stale entries by folding old operational lists into newer dated entries instead of keeping duplicate dashboard sections.
 ${escalationBlock}
 
 ### Tools
@@ -149,15 +164,15 @@ Progress through these phases. Don't stay in explore — move to harder work qui
   Also look for existing bare \`[[path]]\` wikilinks in prose that would read better as \`[[path|display text]]\` and upgrade them.
 - **Simplify**: Delete files that don't earn their keep. Collapse a file that says in 40 lines what could be said in 10. Remove sections that restate what's in a linked file.
 - **Disrupt** (diverge → develop → decide):
-  1. **Wild ideas**: Generate 2-3 radical reorganization ideas. Think big — merge entire directories, flip the hierarchy, eliminate a category, organize by concept instead of project. Write them to \`${journalPath}\`.
-  2. **Yes-and**: Pick the most interesting idea. Build on it 2-3 times — "yes, and if we did that, then..." Develop it into something concrete. Write the developed version.
-  3. **Evaluate**: Would this make the vault more useful to an agent reading it mid-task? If yes, execute it. If no, log why in \`${journalPath}\` — the reasoning is valuable for future disrupt cycles.
+  1. **Wild ideas**: Generate 2-3 radical reorganization ideas. Think big — merge entire directories, flip the hierarchy, eliminate a category, organize by concept instead of project. Record them in a dated dream-journal entry.
+  2. **Yes-and**: Pick the most interesting idea. Build on it 2-3 times — "yes, and if we did that, then..." Develop it into something concrete in the same entry.
+  3. **Evaluate**: Would this make the vault more useful to an agent reading it mid-task? If yes, execute it. If no, record why in \`${journalPath}\` — the reasoning is valuable for future disrupt cycles.
 
 If everything looks good in one phase, move to the next. When you've been through all phases, start over — the vault may have changed enough to warrant fresh eyes.
 
 ### Noop discipline
 
-A noop cycle that just says "looked at X, looks fine" is wasted work. If you log noop, you MUST also write a substantive entry to \`${journalPath}\` — either:
+A noop cycle that just says "looked at X, looks fine" is wasted work. If you log noop, you MUST also write a substantive dated entry to \`${journalPath}\` with the dream-journal format above. It should capture at least one of:
 - A concrete restructuring idea you considered but deferred (with reasoning)
 - A cross-project pattern you noticed but haven't acted on yet
 - A question about whether a file/section still earns its place
@@ -173,7 +188,7 @@ Audit EVERYTHING in the vault — principles, project files, cross-cutting notes
 
 ### Rules
 
-- Don't audit \`dream-journal.md\` itself — it's a working file, not vault content
+- Don't treat \`dream-journal.md\` as normal vault content or a topic note; maintain it as a working dream journal by pruning stale entries and preserving useful dated reflections
 - Treat \`${dir}/raw/\` as read-only during dream mode. You may read raw files for context, but do not edit, delete, move, rename, split, summarize, compile, index, or otherwise modify them.
 - One topic per vault file. File name = topic slug.
 - Group in directories with index files using \`[[wikilinks]]\`

@@ -340,7 +340,7 @@ export default function memoryExtension(pi: ExtensionAPI) {
     let resumeMsg =
       `Dream loop ended (likely context limit). Resume the dream — read ${brain.vaultDir}/index.md for vault contents.`;
     if (hasJournal) {
-      resumeMsg += ` Check ${journalPath} for promising paths to explore. Prune stale entries.`;
+      resumeMsg += ` Check ${journalPath} for promising dated entries to continue. Prune stale operational clutter.`;
     }
     if (consecutiveNoops >= 2) {
       resumeMsg += ` NOTE: ${consecutiveNoops} consecutive noop cycles before reset — stop exploring and start restructuring.`;
@@ -383,7 +383,7 @@ export default function memoryExtension(pi: ExtensionAPI) {
       extra += "\n\n" + buildDreamPrompt(brain.vaultDir, consecutiveNoops, SCRIPTS_DIR);
 
       if (hasJournal) {
-        extra += `\n\n💡 Dream journal exists at ${journalPath} — check it for promising paths to explore. Prune stale entries.`;
+        extra += `\n\n💡 Dream journal exists at ${journalPath} — check its dated entries for promising paths. Prune stale operational clutter.`;
       }
     }
 
@@ -1043,7 +1043,8 @@ export default function memoryExtension(pi: ExtensionAPI) {
         ctx.ui.notify("Dream mode started", "info");
         pi.sendUserMessage(
           `Dream mode active. Read ${brain.vaultDir}/index.md and ${brain.vaultDir}/dream-journal.md, ` +
-          `then start your first cycle. Call log_operation after each batch of changes. NEVER STOP until interrupted.`
+          `then start your first cycle. Keep dream-journal.md as dated dream entries, prune stale operational clutter, ` +
+          `and call log_operation after each batch of changes. NEVER STOP until interrupted.`
         );
         return;
       }

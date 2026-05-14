@@ -118,6 +118,17 @@ test("buildDreamPrompt includes dream mode structure", () => {
   assert.ok(prompt.includes("dream-journal.md"));
 });
 
+test("buildDreamPrompt gives human dream-journal format", () => {
+  const prompt = buildDreamPrompt("/test/vault");
+  assert.ok(prompt.includes("### Dream journal format"));
+  assert.ok(prompt.includes("Date / time"));
+  assert.ok(prompt.includes("Dream narrative"));
+  assert.ok(prompt.includes("Emotions during / after"));
+  assert.ok(prompt.includes("Waking-life connection"));
+  assert.ok(prompt.includes("Tags / recurring themes"));
+  assert.ok(prompt.includes("Prune stale entries by folding old operational lists"));
+});
+
 test("buildDreamPrompt makes raw files a hard no-edit rule", () => {
   const prompt = buildDreamPrompt("/test/vault");
   assert.ok(prompt.includes("HARD BOUNDARY: `/test/vault/raw/` is read-only source material"));
