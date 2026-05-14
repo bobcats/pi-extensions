@@ -44,7 +44,7 @@ interface LogDetails {
 // ---------------------------------------------------------------------------
 
 const LogOperationParams = Type.Object({
-  type: StringEnum(["reflect", "ruminate", "dream", "ingest"] as const, {
+  type: StringEnum(["reflect", "ruminate", "dream", "ingest", "forget"] as const, {
     description: "What kind of memory operation was performed",
   }),
   status: StringEnum(["keep", "noop"] as const, {

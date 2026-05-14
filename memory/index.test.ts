@@ -245,6 +245,38 @@ test("log_operation writes history into the mapped brain vault only", async () =
   }
 });
 
+test("log_operation accepts forget operations", async () => {
+  const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "memory-home-"));
+  const { memoryExtension, restore } = await loadExtensionForHome(homeDir);
+
+  try {
+    const harness = createHarness();
+    memoryExtension(harness.pi);
+
+    const memoryCommand = harness.commands.get("memory");
+    const logOperationTool = harness.tools.get("log_operation");
+    assert.ok(memoryCommand);
+    assert.ok(logOperationTool);
+
+    await memoryCommand.handler("init", harness.ctx);
+    fs.writeFileSync(path.join(homeDir, ".pi", "memories", "index.md"), "# Memory\n");
+
+    await logOperationTool.execute(
+      "tool-1",
+      { type: "forget", status: "keep", description: "Forgot acme", findings_count: 1 },
+      new AbortController().signal,
+      () => {},
+      harness.ctx,
+    );
+
+    const operations = fs.readFileSync(path.join(homeDir, ".pi", "memories", "memory-operations.jsonl"), "utf-8");
+    assert.match(operations, /"operationType":"forget"/);
+    assert.match(operations, /Forgot acme/);
+  } finally {
+    restore();
+  }
+});
+
 test("brain commands reject invalid names and duplicate creates with clear messages", async () => {
   const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "memory-home-"));
   const { memoryExtension, restore } = await loadExtensionForHome(homeDir);

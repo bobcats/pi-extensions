@@ -1,4 +1,4 @@
-export type OperationType = "reflect" | "ruminate" | "dream" | "ingest";
+export type OperationType = "reflect" | "ruminate" | "dream" | "ingest" | "forget";
 export type OperationStatus = "keep" | "noop" | "cancelled" | "error";
 
 export interface MemoryBrainDefinition {
