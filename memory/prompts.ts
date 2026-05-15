@@ -95,10 +95,10 @@ function formatForgetCandidates(candidates: ForgetPromptCandidate[]): string {
 
   return candidates
     .map((candidate, index) => {
-      const score = Math.round(candidate.score * 100);
+      const scorePercent = Math.round(candidate.score * 100);
       const snippet = candidate.snippet?.trim();
       return [
-        `${index + 1}. ${score}% ${candidate.title}`,
+        `${index + 1}. ${scorePercent}% ${candidate.title}`,
         `   File: ${candidate.file}`,
         snippet ? `   Snippet: ${snippet}` : undefined,
       ].filter(Boolean).join("\n");

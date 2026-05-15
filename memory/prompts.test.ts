@@ -211,6 +211,16 @@ test("buildForgetPrompt renders QMD candidates as hints", () => {
   assert.ok(prompt.includes("Candidate files are hints, not deletion targets"));
 });
 
+test("buildForgetPrompt omits blank candidate snippets", () => {
+  const prompt = buildForgetPrompt("/test/vault", "acme", [
+    { title: "Acme Notes", file: "/test/vault/projects/acme.md", score: 0.91, snippet: "   " },
+  ]);
+
+  assert.ok(prompt.includes("91% Acme Notes"));
+  assert.ok(prompt.includes("/test/vault/projects/acme.md"));
+  assert.ok(!prompt.includes("Snippet:"));
+});
+
 // --- buildRuminatePrompt ---
 
 test("buildRuminatePrompt includes batch paths and counts", () => {
