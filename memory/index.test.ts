@@ -83,6 +83,24 @@ async function loadExtensionForHome(homeDir: string) {
   };
 }
 
+async function createMemoryCommandFixture(homeDir: string) {
+  const { memoryExtension, restore } = await loadExtensionForHome(homeDir);
+  const harness = createHarness();
+  memoryExtension(harness.pi);
+
+  const memoryCommand = harness.commands.get("memory");
+  assert.ok(memoryCommand);
+
+  return { harness, memoryCommand, restore };
+}
+
+function createDefaultVault(homeDir: string): string {
+  const vaultDir = path.join(homeDir, ".pi", "memories");
+  fs.mkdirSync(vaultDir, { recursive: true });
+  fs.writeFileSync(path.join(vaultDir, "index.md"), "# Memory\n");
+  return vaultDir;
+}
+
 test("dream auto-resume waits for settled window and sends a plain user message", async () => {
   const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "memory-home-"));
   const { memoryExtension, restore } = await loadExtensionForHome(homeDir);
@@ -247,15 +265,9 @@ test("log_operation writes history into the mapped brain vault only", async () =
 
 test("memory autocomplete includes forget", async () => {
   const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "memory-home-"));
-  const { memoryExtension, restore } = await loadExtensionForHome(homeDir);
+  const { memoryCommand, restore } = await createMemoryCommandFixture(homeDir);
 
   try {
-    const harness = createHarness();
-    memoryExtension(harness.pi);
-
-    const memoryCommand = harness.commands.get("memory");
-    assert.ok(memoryCommand);
-
     const completions = memoryCommand.getArgumentCompletions("");
     assert.ok(completions.some((item: { value: string }) => item.value === "forget"));
   } finally {
@@ -265,15 +277,9 @@ test("memory autocomplete includes forget", async () => {
 
 test("memory forget requires a topic", async () => {
   const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "memory-home-"));
-  const { memoryExtension, restore } = await loadExtensionForHome(homeDir);
+  const { harness, memoryCommand, restore } = await createMemoryCommandFixture(homeDir);
 
   try {
-    const harness = createHarness();
-    memoryExtension(harness.pi);
-
-    const memoryCommand = harness.commands.get("memory");
-    assert.ok(memoryCommand);
-
     await memoryCommand.handler("forget", harness.ctx);
 
     const last = harness.notifications[harness.notifications.length - 1];
@@ -286,19 +292,10 @@ test("memory forget requires a topic", async () => {
 
 test("memory forget sends agent prompt for active brain topic", async () => {
   const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "memory-home-"));
-  const vaultDir = path.join(homeDir, ".pi", "memories");
-  fs.mkdirSync(vaultDir, { recursive: true });
-  fs.writeFileSync(path.join(vaultDir, "index.md"), "# Memory\n");
-
-  const { memoryExtension, restore } = await loadExtensionForHome(homeDir);
+  const vaultDir = createDefaultVault(homeDir);
+  const { harness, memoryCommand, restore } = await createMemoryCommandFixture(homeDir);
 
   try {
-    const harness = createHarness();
-    memoryExtension(harness.pi);
-
-    const memoryCommand = harness.commands.get("memory");
-    assert.ok(memoryCommand);
-
     await memoryCommand.handler("forget acme client", harness.ctx);
 
     assert.equal(harness.sendUserMessageCalls.length, 1);
@@ -313,15 +310,9 @@ test("memory forget sends agent prompt for active brain topic", async () => {
 
 test("memory status lists forget command", async () => {
   const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "memory-home-"));
-  const { memoryExtension, restore } = await loadExtensionForHome(homeDir);
+  const { harness, memoryCommand, restore } = await createMemoryCommandFixture(homeDir);
 
   try {
-    const harness = createHarness();
-    memoryExtension(harness.pi);
-
-    const memoryCommand = harness.commands.get("memory");
-    assert.ok(memoryCommand);
-
     await memoryCommand.handler("", harness.ctx);
 
     const last = harness.notifications[harness.notifications.length - 1];
