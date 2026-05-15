@@ -39,7 +39,7 @@ Do not modify unrelated memory commands, operation logging behavior, brain confi
 - Modify: `memory/prompts.ts`
 - Test: `memory/prompts.test.ts`
 
-- [ ] **Step 1: Add a prompt-builder test for blank snippets**
+- [x] **Step 1: Add a prompt-builder test for blank snippets**
 
 In `memory/prompts.test.ts`, after `buildForgetPrompt renders QMD candidates as hints`, add:
 
@@ -55,7 +55,7 @@ test("buildForgetPrompt omits blank candidate snippets", () => {
 });
 ```
 
-- [ ] **Step 2: Run prompt tests to characterize current behavior**
+- [x] **Step 2: Run prompt tests to characterize current behavior**
 
 Run:
 
@@ -65,7 +65,7 @@ cd memory && npx tsx --test --test-timeout=5000 prompts.test.ts
 
 Expected: PASS. This is characterization coverage for the existing blank-snippet behavior.
 
-- [ ] **Step 3: Rename the score local for clarity**
+- [x] **Step 3: Rename the score local for clarity**
 
 In `memory/prompts.ts`, change this block in `formatForgetCandidates`:
 
@@ -87,7 +87,7 @@ to:
 
 Do not change any other prompt text.
 
-- [ ] **Step 4: Run prompt tests again**
+- [x] **Step 4: Run prompt tests again**
 
 Run:
 
@@ -97,7 +97,7 @@ cd memory && npx tsx --test --test-timeout=5000 prompts.test.ts
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit prompt simplification**
+- [x] **Step 5: Commit prompt simplification**
 
 Run:
 
@@ -114,7 +114,7 @@ git commit -m "test(memory): cover forget candidate snippet formatting"
 - Modify: `memory/index.ts`
 - Test: `memory/index.test.ts`
 
-- [ ] **Step 1: Run command tests before refactor**
+- [x] **Step 1: Run command tests before refactor**
 
 Run:
 
@@ -124,7 +124,7 @@ cd memory && npx tsx --test --test-timeout=5000 index.test.ts
 
 Expected: PASS. This establishes the behavior baseline before refactoring.
 
-- [ ] **Step 2: Add a local forget candidate helper**
+- [x] **Step 2: Add a local forget candidate helper**
 
 In `memory/index.ts`, inside `memoryExtension`, near the other local helper constants and after `isValidBrainName`, add:
 
@@ -147,7 +147,7 @@ In `memory/index.ts`, inside `memoryExtension`, near the other local helper cons
 
 Keep it inside `memoryExtension` so it can read the existing `qmdAvailable` state without changing wider module structure.
 
-- [ ] **Step 3: Replace inline candidate mapping in the forget branch**
+- [x] **Step 3: Replace inline candidate mapping in the forget branch**
 
 In the `/memory forget` command branch, replace:
 
@@ -173,7 +173,7 @@ with:
 
 Do not change topic parsing, usage text, notification text, or `pi.sendUserMessage` behavior.
 
-- [ ] **Step 4: Run command tests after refactor**
+- [x] **Step 4: Run command tests after refactor**
 
 Run:
 
@@ -183,7 +183,7 @@ cd memory && npx tsx --test --test-timeout=5000 index.test.ts
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit command simplification**
+- [x] **Step 5: Commit command simplification**
 
 Run:
 
@@ -200,7 +200,7 @@ git commit -m "refactor(memory): simplify forget candidate lookup"
 - Modify: `memory/index.test.ts`
 - Test: `memory/index.test.ts`
 
-- [ ] **Step 1: Add a command fixture helper**
+- [x] **Step 1: Add a command fixture helper**
 
 In `memory/index.test.ts`, after `loadExtensionForHome`, add:
 
@@ -219,7 +219,7 @@ async function createMemoryCommandFixture(homeDir: string) {
 
 This helper prepares common fixture state only. It must not perform forget-specific assertions.
 
-- [ ] **Step 2: Add a vault fixture helper**
+- [x] **Step 2: Add a vault fixture helper**
 
 In `memory/index.test.ts`, after `createMemoryCommandFixture`, add:
 
@@ -232,7 +232,7 @@ function createDefaultVault(homeDir: string): string {
 }
 ```
 
-- [ ] **Step 3: Use the command fixture in forget autocomplete test**
+- [x] **Step 3: Use the command fixture in forget autocomplete test**
 
 Change `memory autocomplete includes forget` so the setup is:
 
@@ -250,7 +250,7 @@ Change `memory autocomplete includes forget` so the setup is:
 
 Keep the assertion unchanged.
 
-- [ ] **Step 4: Use the command fixture in missing-topic test**
+- [x] **Step 4: Use the command fixture in missing-topic test**
 
 Change `memory forget requires a topic` so the setup is:
 
@@ -261,7 +261,7 @@ Change `memory forget requires a topic` so the setup is:
 
 Keep the existing `try/finally`, handler call, usage assertion, and `sendUserMessageCalls` assertion.
 
-- [ ] **Step 5: Use both helpers in prompt dispatch test**
+- [x] **Step 5: Use both helpers in prompt dispatch test**
 
 Change `memory forget sends agent prompt for active brain topic` so the setup is:
 
@@ -273,7 +273,7 @@ Change `memory forget sends agent prompt for active brain topic` so the setup is
 
 Keep all existing prompt, topic, vault-path, notification, and call-count assertions.
 
-- [ ] **Step 6: Use the command fixture in status discoverability test**
+- [x] **Step 6: Use the command fixture in status discoverability test**
 
 Change `memory status lists forget command` so the setup is:
 
@@ -284,7 +284,7 @@ Change `memory status lists forget command` so the setup is:
 
 Keep the status handler call and assertion unchanged.
 
-- [ ] **Step 7: Run command tests**
+- [x] **Step 7: Run command tests**
 
 Run:
 
@@ -294,7 +294,7 @@ cd memory && npx tsx --test --test-timeout=5000 index.test.ts
 
 Expected: PASS.
 
-- [ ] **Step 8: Commit test simplification**
+- [x] **Step 8: Commit test simplification**
 
 Run:
 
@@ -310,7 +310,7 @@ git commit -m "test(memory): simplify forget command fixtures"
 **Files:**
 - All touched files from this plan
 
-- [ ] **Step 1: Run targeted forget-related tests**
+- [x] **Step 1: Run targeted forget-related tests**
 
 Run:
 
@@ -320,7 +320,7 @@ cd memory && npx tsx --test --test-timeout=5000 index.test.ts prompts.test.ts
 
 Expected: PASS.
 
-- [ ] **Step 2: Run full memory extension tests**
+- [x] **Step 2: Run full memory extension tests**
 
 Run:
 
@@ -330,7 +330,7 @@ cd memory && npx tsx --test --test-timeout=5000 *.test.ts
 
 Expected: PASS.
 
-- [ ] **Step 3: Run slop scan on the memory extension**
+- [x] **Step 3: Run slop scan on the memory extension**
 
 Run:
 
@@ -340,7 +340,7 @@ slop-scan memory
 
 Expected: No new high-confidence findings in touched forget code. Existing findings outside touched forget code are out of scope.
 
-- [ ] **Step 4: Inspect git diff and status**
+- [x] **Step 4: Inspect git diff and status**
 
 Run:
 
