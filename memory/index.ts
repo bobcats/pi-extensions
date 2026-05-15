@@ -164,6 +164,21 @@ export default function memoryExtension(pi: ExtensionAPI) {
   const getMemoryConfigPath = (): string => path.join(os.homedir(), MEMORY_CONFIG_FILE);
   const isValidBrainName = (value: string): boolean => /^[a-z0-9-]+$/.test(value);
 
+  const searchForgetCandidates = async (brain: ActiveBrain, topic: string): Promise<ForgetPromptCandidate[]> => {
+    if (!qmdAvailable) {
+      return [];
+    }
+
+    const collection = qmd.collectionNameForBrain(brain.name);
+    const results = await qmd.search(collection, topic, { limit: 10 });
+    return results.map((result) => ({
+      title: result.title,
+      file: qmd.toVaultPath(brain.vaultDir, result.file, collection),
+      score: result.score,
+      snippet: result.snippet,
+    }));
+  };
+
   // -----------------------------------------------------------------------
   // State reconstruction
   // -----------------------------------------------------------------------
@@ -1096,17 +1111,7 @@ export default function memoryExtension(pi: ExtensionAPI) {
           return;
         }
 
-        let candidates: ForgetPromptCandidate[] = [];
-        if (qmdAvailable) {
-          const collection = qmd.collectionNameForBrain(brain.name);
-          const results = await qmd.search(collection, topic, { limit: 10 });
-          candidates = results.map((result) => ({
-            title: result.title,
-            file: qmd.toVaultPath(brain.vaultDir, result.file, collection),
-            score: result.score,
-            snippet: result.snippet,
-          }));
-        }
+        const candidates = await searchForgetCandidates(brain, topic);
 
         ctx.ui.notify(`Forgetting topic from ${brain.name}: ${topic}`, "info");
         pi.sendUserMessage(buildForgetPrompt(brain.vaultDir, topic, candidates));
