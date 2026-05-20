@@ -15,6 +15,21 @@ if [[ ! -f "$PLACEHOLDER_SRC" ]]; then
   exit 1
 fi
 
+find_pi_package_root() {
+  local install_root="$1"
+  local scope
+
+  for scope in @earendil-works @mariozechner; do
+    local candidate="$install_root/lib/node_modules/$scope/pi-coding-agent"
+    if [[ -d "$candidate" && -f "$candidate/package.json" ]]; then
+      echo "$candidate"
+      return 0
+    fi
+  done
+
+  return 1
+}
+
 resolve_pi_root() {
   local arg="${1:-}"
   local base="$HOME/.local/share/mise/installs/npm-mariozechner-pi-coding-agent"
@@ -25,13 +40,26 @@ resolve_pi_root() {
       return
     fi
 
-    local by_version="$base/$arg/lib/node_modules/@mariozechner/pi-coding-agent"
-    if [[ -d "$by_version" ]]; then
+    if [[ -d "$arg" ]]; then
+      local from_path
+      if from_path="$(find_pi_package_root "$arg")"; then
+        echo "$from_path"
+        return
+      fi
+    fi
+
+    local by_version
+    if by_version="$(find_pi_package_root "$base/$arg")"; then
       echo "$by_version"
       return
     fi
 
     echo "Could not resolve pi install from argument: $arg" >&2
+    exit 1
+  fi
+
+  if [[ ! -d "$base" ]]; then
+    echo "No pi installs found under: $base" >&2
     exit 1
   fi
 
@@ -42,20 +70,33 @@ resolve_pi_root() {
     exit 1
   fi
 
-  local root="$latest/lib/node_modules/@mariozechner/pi-coding-agent"
-  if [[ ! -d "$root" ]]; then
-    echo "Install found but pi package path missing: $root" >&2
+  local root
+  if ! root="$(find_pi_package_root "$latest")"; then
+    echo "Install found but pi package path missing under: $latest/lib/node_modules/{@earendil-works,@mariozechner}/pi-coding-agent" >&2
     exit 1
   fi
 
   echo "$root"
 }
 
-PI_ROOT="$(resolve_pi_root "${1:-}")"
-TUI_DIST="$PI_ROOT/node_modules/@mariozechner/pi-tui/dist"
+resolve_tui_dist() {
+  local pi_root="$1"
+  local scope
 
-if [[ ! -d "$TUI_DIST" ]]; then
-  echo "Target pi-tui dist directory not found: $TUI_DIST" >&2
+  for scope in @earendil-works @mariozechner; do
+    local candidate="$pi_root/node_modules/$scope/pi-tui/dist"
+    if [[ -d "$candidate" ]]; then
+      echo "$candidate"
+      return 0
+    fi
+  done
+
+  return 1
+}
+
+PI_ROOT="$(resolve_pi_root "${1:-}")"
+if ! TUI_DIST="$(resolve_tui_dist "$PI_ROOT")"; then
+  echo "Target pi-tui dist directory not found under: $PI_ROOT/node_modules/{@earendil-works,@mariozechner}/pi-tui/dist" >&2
   exit 1
 fi
 

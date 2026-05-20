@@ -28,6 +28,10 @@ Target a specific pi version or install path:
 ./scripts/reapply-pi-patches.sh /path/to/pi-coding-agent
 ```
 
+The script supports both package scopes used by recent Pi installs:
+`@earendil-works/{pi-coding-agent,pi-tui}` and the older
+`@mariozechner/{pi-coding-agent,pi-tui}`.
+
 Timestamped backups are stored in `pi-patches/backups/`.
 
 ## Notes
