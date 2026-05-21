@@ -22,7 +22,7 @@ Examples:
 2. Confirms before overwriting any unsubmitted editor text
 3. Generates a first-person handoff summary using Amp's `create_handoff_context` extraction prompt
 4. Creates a new session with `parentSession` tracking
-5. Pre-fills the new session's editor with the goal, `/skill:session-query`, the visible parent session path, a brief framing sentence, then the summary wrapped in `<handoff_note>...</handoff_note>` — goal first so the top line shows what this handoff is about
+5. Pre-fills the new session's editor with the goal, `/skill:session-query`, the visible session lineage, a brief framing sentence, then the summary wrapped in `<handoff_note>...</handoff_note>` — goal first so the top line shows what this handoff is about
 6. User reviews and presses Enter to submit
 
 ## Agent-callable tool
@@ -72,7 +72,7 @@ ctx.newSession({
 
 This writes the parent session path into the new session's file header for future navigation by a `/resume` command or session browser.
 
-The generated child prompt also includes the parent session path visibly:
+The generated child prompt also includes the session path visibly. If there is only one parent, it stays compact:
 
 ```md
 /skill:session-query
@@ -80,7 +80,18 @@ The generated child prompt also includes the parent session path visibly:
 **Parent session:** `/path/to/session.jsonl`
 ```
 
-That lets the child model call the `session_query` tool if the handoff note missed a detail.
+If the parent itself was created from another session, the prompt includes the full linked list from newest to oldest:
+
+```md
+/skill:session-query
+
+**Session lineage (newest to oldest):**
+1. `/path/to/current-parent.jsonl`
+2. `/path/to/grandparent.jsonl`
+3. `/path/to/root.jsonl`
+```
+
+That lets the child model call the `session_query` tool against any prior session if the handoff note missed a detail.
 
 ## Extension interactions
 

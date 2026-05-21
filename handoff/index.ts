@@ -1,3 +1,5 @@
+import { existsSync, readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
 import { complete, type Message } from "@mariozechner/pi-ai";
 import type { ExtensionAPI, SessionEntry } from "@mariozechner/pi-coding-agent";
 import { BorderedLoader, convertToLlm, serializeConversation } from "@mariozechner/pi-coding-agent";
@@ -69,6 +71,11 @@ type ReplacementSessionContext = {
     notify(message: string, level: string): void;
     setEditorText(text: string): void;
   };
+};
+
+type SessionHeaderLike = {
+  type?: unknown;
+  parentSession?: unknown;
 };
 
 type HandoffCommandContext = {
@@ -182,13 +189,51 @@ function conversationMessagesFromBranch(branch: SessionEntry[]): any[] {
     .map((entry) => (entry as any).message);
 }
 
-function buildFinalPrompt(params: { goal: string; summary: string; parentSession: string | undefined }): string {
-  const { goal, summary, parentSession } = params;
-  const parentSection = parentSession
-    ? `/skill:session-query\n\n**Parent session:** \`${parentSession}\`\n\n`
-    : "";
+function readParentSessionPath(sessionPath: string): string | null {
+  if (!existsSync(sessionPath)) return null;
 
-  return `${goal}\n\n${parentSection}In the handoff note below, "I" refers to the previous assistant.\n\n<handoff_note>\n${summary}\n</handoff_note>`;
+  try {
+    const firstLine = readFileSync(sessionPath, "utf8").split(/\r?\n/, 1)[0];
+    if (!firstLine?.trim()) return null;
+    const header = JSON.parse(firstLine) as SessionHeaderLike;
+    if (header.type !== "session" || typeof header.parentSession !== "string" || !header.parentSession.trim()) {
+      return null;
+    }
+    return resolve(dirname(sessionPath), header.parentSession);
+  } catch {
+    return null;
+  }
+}
+
+function buildSessionLineage(startSessionPath: string | undefined, maxDepth = 50): string[] {
+  if (!startSessionPath) return [];
+
+  const lineage: string[] = [];
+  const seen = new Set<string>();
+  let current: string | null = resolve(startSessionPath);
+
+  while (current && lineage.length < maxDepth && !seen.has(current)) {
+    lineage.push(current);
+    seen.add(current);
+    current = readParentSessionPath(current);
+  }
+
+  return lineage;
+}
+
+function formatSessionReferenceSection(sessionLineage: string[]): string {
+  if (sessionLineage.length === 0) return "";
+  if (sessionLineage.length === 1) return `/skill:session-query\n\n**Parent session:** \`${sessionLineage[0]}\`\n\n`;
+
+  const lineageList = sessionLineage.map((sessionPath, index) => `${index + 1}. \`${sessionPath}\``).join("\n");
+  return `/skill:session-query\n\n**Session lineage (newest to oldest):**\n${lineageList}\n\n`;
+}
+
+function buildFinalPrompt(params: { goal: string; summary: string; sessionLineage: string[] }): string {
+  const { goal, summary, sessionLineage } = params;
+  const sessionReferenceSection = formatSessionReferenceSection(sessionLineage);
+
+  return `${goal}\n\n${sessionReferenceSection}In the handoff note below, "I" refers to the previous assistant.\n\n<handoff_note>\n${summary}\n</handoff_note>`;
 }
 
 function prepareToolHandoff(ctx: HandoffToolContext, params: { goal: string }) {
@@ -261,7 +306,8 @@ async function applyHandoffToNewSession(params: {
 }): Promise<boolean> {
   const { ctx, goal, summary } = params;
   const parentSession = ctx.sessionManager.getSessionFile();
-  const finalPrompt = buildFinalPrompt({ goal, summary, parentSession });
+  const sessionLineage = buildSessionLineage(parentSession);
+  const finalPrompt = buildFinalPrompt({ goal, summary, sessionLineage });
   let postSwitchFailed = false;
 
   let newSessionResult: { cancelled: boolean };

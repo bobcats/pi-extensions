@@ -1,5 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { CREATE_HANDOFF_CONTEXT_SYSTEM_PROMPT, createHandoffExtension, generateHandoffSummary } from "./index.ts";
 
 function createHarness() {
@@ -344,6 +347,40 @@ test("happy path: preferred summary model available, generates summary, switches
   });
   // characterization: session switch ordering — newSession before withSession work in the replacement ctx
   assert.deepEqual(harness.callOrder, ["newSession", "withSession", "setEditorText", "notify:info"]);
+});
+
+test("happy path includes full session lineage when current session has ancestors", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "handoff-lineage-"));
+  try {
+    const root = join(dir, "root.jsonl");
+    const parent = join(dir, "parent.jsonl");
+    const current = join(dir, "current.jsonl");
+    const timestamp = "2026-05-21T00:00:00.000Z";
+    writeFileSync(root, `${JSON.stringify({ type: "session", version: 3, id: "root", timestamp, cwd: "/tmp/project" })}\n`);
+    writeFileSync(
+      parent,
+      `${JSON.stringify({ type: "session", version: 3, id: "parent", timestamp, cwd: "/tmp/project", parentSession: root })}\n`,
+    );
+    writeFileSync(
+      current,
+      `${JSON.stringify({ type: "session", version: 3, id: "current", timestamp, cwd: "/tmp/project", parentSession: parent })}\n`,
+    );
+
+    const harness = createHarness();
+    harness.ctx.sessionManager.getBranch = nonEmptyBranch;
+    harness.ctx.sessionManager.getSessionFile = () => current;
+    harness.setCustomResult("- summary text");
+    createHandoffExtension()(harness.pi);
+    const cmd = harness.commandMap.get("handoff");
+    await cmd.handler("continue the auth work", harness.ctx);
+
+    assert.equal(
+      harness.editorTexts[0],
+      `continue the auth work\n\n/skill:session-query\n\n**Session lineage (newest to oldest):**\n1. \`${current}\`\n2. \`${parent}\`\n3. \`${root}\`\n\nIn the handoff note below, "I" refers to the previous assistant.\n\n<handoff_note>\n- summary text\n</handoff_note>`,
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("notifies Handoff cancelled when generation is aborted", async () => {
