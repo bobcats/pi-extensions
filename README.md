@@ -14,6 +14,7 @@ Extensions and prompt templates for [pi](https://github.com/badlogic/pi-mono).
 | [files](./files/) | Lists git-tracked and session-referenced files with quick actions |
 | [memory](./memory/) | Persists agent learnings across sessions — reflect, ruminate, dream, and named brains |
 | [notify](./notify/) | Sends desktop notifications via OSC 777 when the agent finishes |
+| [openai-fast](./openai-fast/) | Toggles OpenAI priority service tier for configured models |
 | [session-breakdown](./session-breakdown/) | Shows usage stats, cost by model, and a calendar graph |
 | [slop-scan](./slop-scan/) | Adds a `slop_scan` checkpoint tool and `/slop-scan` command for JS/TS slop analysis |
 | [subagent](./subagent/) | Delegates tasks to isolated subagents — single, parallel, or chained |
@@ -60,6 +61,7 @@ cd confirm-rm && npm test
 cd exa && npm test
 cd ext-prof && npm test
 cd memory && npm test
+cd openai-fast && npm test
 cd slop-scan && npm test
 cd tldraw-desktop && npm test
 ```
@@ -90,6 +92,7 @@ Hot-reload in a running session:
 - `context`, `files`, `notify`, and `session-breakdown` are forked from [mitsuhiko/agent-stuff](https://github.com/mitsuhiko/agent-stuff) by Armin Ronacher
 - `confirm-rm` is based on the `permission-gate` example in [pi](https://github.com/badlogic/pi-mono)
 - `memory` is inspired by [brainmaxxing](https://github.com/poteto/brainmaxxing) by Lauren Tan
+- `openai-fast` is vendored from [buildrtech/dotagents](https://github.com/buildrtech/dotagents/tree/main/pi-extensions/openai-fast)
 - `tldraw-desktop` connects to [tldraw desktop](https://github.com/tldraw/tldraw-desktop) by tldraw
 
 ## License

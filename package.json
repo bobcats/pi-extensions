@@ -18,6 +18,7 @@
       "./subagent/index.ts",
       "./tldraw-desktop/index.ts",
       "./exa/index.ts",
+      "./openai-fast/index.ts",
       "./slop-scan/index.ts",
       "./hypura/index.ts",
       "./auto-name-session/index.ts",
