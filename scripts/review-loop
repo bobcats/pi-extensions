@@ -1,0 +1,205 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'USAGE'
+Usage: review-loop [options]
+
+Options:
+  --review-cmd <cmd>          Codex command/prompt for review (default: /review)
+  --fix-prompt <text>         Codex prompt used to fix issues
+  --claude-review-cmd <cmd>   Claude prompt for review
+  --claude-fix-prompt <text>  Claude prompt used to fix issues
+  -n, --iterations <n>        Max iterations per loop (default: 3)
+  --codex-bin <path>          Codex executable (default: codex)
+  --claude-bin <path>         Claude executable (default: claude)
+  --dry-run                   Print commands without executing agents
+  -h, --help                  Show this help
+
+Examples:
+  review-loop --review-cmd "/review diff of this PR" --iterations 3
+  review-loop --iterations 2
+USAGE
+}
+
+review_cmd="/review"
+fix_prompt="Fix all issues from the latest review. Update tests as needed."
+claude_review_cmd="Review the current repository changes for bugs, regressions, and missing tests. Report findings only. If there are no issues, say: No issues found."
+claude_fix_prompt="Fix all issues from the latest review. Update tests as needed."
+iterations=3
+codex_bin="codex"
+claude_bin="claude"
+dry_run=0
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --review-cmd)
+      review_cmd="$2"
+      shift 2
+      ;;
+    --fix-prompt)
+      fix_prompt="$2"
+      shift 2
+      ;;
+    --claude-review-cmd)
+      claude_review_cmd="$2"
+      shift 2
+      ;;
+    --claude-fix-prompt)
+      claude_fix_prompt="$2"
+      shift 2
+      ;;
+    -n|--iterations)
+      iterations="$2"
+      shift 2
+      ;;
+    --codex-bin)
+      codex_bin="$2"
+      shift 2
+      ;;
+    --claude-bin)
+      claude_bin="$2"
+      shift 2
+      ;;
+    --dry-run)
+      dry_run=1
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "Unknown option: $1" >&2
+      usage >&2
+      exit 2
+      ;;
+  esac
+done
+
+if [ "$dry_run" -eq 0 ]; then
+  if ! command -v "$codex_bin" >/dev/null 2>&1; then
+    echo "codex executable not found: $codex_bin" >&2
+    exit 127
+  fi
+  if ! command -v "$claude_bin" >/dev/null 2>&1; then
+    echo "claude executable not found: $claude_bin" >&2
+    exit 127
+  fi
+fi
+
+has_no_issues() {
+  echo "$1" | grep -Eqi 'no (issues|findings|problems)|0 issues|clean review'
+}
+
+run_codex() {
+  local prompt="$1"
+  if [ "$dry_run" -eq 1 ]; then
+    echo "DRY RUN: $codex_bin exec $prompt"
+    return 0
+  fi
+  "$codex_bin" exec "$prompt"
+}
+
+run_claude() {
+  local prompt="$1"
+  if [ "$dry_run" -eq 1 ]; then
+    echo "DRY RUN: $claude_bin -p --permission-mode acceptEdits --strict-mcp-config --mcp-config '{\"mcpServers\":{}}' --output-format stream-json --verbose $prompt"
+    return 0
+  fi
+
+  if ! command -v jq >/dev/null 2>&1; then
+    "$claude_bin" -p --permission-mode acceptEdits --strict-mcp-config --mcp-config '{"mcpServers":{}}' "$prompt"
+    return
+  fi
+
+  local text_output
+  text_output="$(mktemp)"
+  local status
+
+  set +e
+  "$claude_bin" -p \
+    --permission-mode acceptEdits \
+    --strict-mcp-config \
+    --mcp-config '{"mcpServers":{}}' \
+    --output-format stream-json \
+    --verbose \
+    "$prompt" |
+    while IFS= read -r line; do
+      jq -r '
+        if .type == "system" and .subtype == "init" then
+          "claude\nmodel: " + (.model // "unknown")
+        elif .type == "assistant" then
+          .message.content[]? |
+          select(.type == "tool_use") |
+          if .name == "Bash" then
+            "claude: /bin/zsh -lc " + (.input.command // "")
+          elif .name == "Read" then
+            "claude: Read " + (.input.file_path // "")
+          elif .name == "Grep" then
+            "claude: Grep " + (.input.pattern // "") + " in " + (.input.path // ".")
+          elif .name == "Glob" then
+            "claude: Glob " + (.input.pattern // "")
+          else
+            "claude: " + .name + " " + (.input | tojson)
+          end
+        elif .type == "user" and (.toolUseResult.durationMs? != null) then
+          "succeeded in " + (.toolUseResult.durationMs | tostring) + "ms" +
+          ((.toolUseResult.stdout // .toolUseResult.stderr // .toolUseResult.content // ((.toolUseResult.filenames // []) | join("\n")) // "") as $output |
+            if $output == "" then "" else ":\n" + $output end)
+        elif .type == "result" then
+          "tokens used\n" + (([.modelUsage[]? | (.inputTokens // 0) + (.outputTokens // 0) + (.cacheCreationInputTokens // 0) + (.cacheReadInputTokens // 0)] | add // 0) | tostring)
+        else
+          empty
+        end
+      ' <<<"$line" >&2
+
+      jq -r '.message.content[]? | select(.type == "text") | .text' <<<"$line" >>"$text_output"
+    done
+  status=${PIPESTATUS[0]}
+  set -e
+
+  cat "$text_output"
+  rm -f "$text_output"
+  return "$status"
+}
+
+run_review_loop() {
+  local name="$1"
+  local runner="$2"
+  local review_prompt="$3"
+  local fix_prompt="$4"
+  local review_output=""
+
+  for ((i = 1; i <= iterations; i++)); do
+    echo "$name review iteration $i/$iterations"
+    if [ "$dry_run" -eq 1 ]; then
+      "$runner" "$review_prompt"
+    else
+      review_output="$("$runner" "$review_prompt")"
+      printf "%s\n" "$review_output"
+      if has_no_issues "$review_output"; then
+        echo "$name reported no issues. Stopping $name loop."
+        return 0
+      fi
+    fi
+
+    if [ "$i" -lt "$iterations" ]; then
+      if [ "$dry_run" -eq 1 ]; then
+        "$runner" "$fix_prompt"
+      else
+        "$runner" "$fix_prompt
+
+Latest review:
+$review_output"
+      fi
+    fi
+  done
+
+  echo "$name reached max iterations ($iterations)."
+}
+
+run_review_loop "Codex" run_codex "$review_cmd" "$fix_prompt"
+run_review_loop "Claude" run_claude "$claude_review_cmd" "$claude_fix_prompt"
+
+exit 0
