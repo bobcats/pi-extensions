@@ -1,6 +1,27 @@
 # @bobcats/pi-extensions
 
-Extensions and prompt templates for [pi](https://github.com/badlogic/pi-mono).
+Canonical Bobcats repository for Pi extensions, Pi prompt templates, shared agent skills, extension-owned skills, and flattened non-Pi skill installs.
+
+## What lives here
+
+| Source | Purpose |
+|--------|---------|
+| Top-level extension directories | Pi extensions loaded through `package.json` `pi.extensions` |
+| `prompts/*.md` | Pi-native slash-command prompt templates loaded through `pi.prompts` |
+| `skills/<bucket>/<skill>/` | Shared authored skills for Pi and flattened installs |
+| `memory/skills/memory-ingest/` | Extension-owned skill colocated with the memory extension |
+| `scripts/build.py` | Builds and safely installs flattened skills for non-Pi/global skill surfaces |
+
+## Pi resources
+
+Install or update this package with Pi:
+
+```bash
+pi install /path/to/pi-extensions
+pi update
+```
+
+Pi discovers extensions, prompt templates, and authored skill roots from root `package.json`. Prompt templates remain canonical in `prompts/*.md`; generated prompt-skills are only build/install artifacts for other agents.
 
 ## Extensions
 
@@ -12,7 +33,9 @@ Extensions and prompt templates for [pi](https://github.com/badlogic/pi-mono).
 | [exa](./exa/) | Adds Exa-powered web search, answers, and research tools |
 | [ext-prof](./ext-prof/) | Profiles extension handler execution time |
 | [files](./files/) | Lists git-tracked and session-referenced files with quick actions |
-| [memory](./memory/) | Persists agent learnings across sessions — reflect, ruminate, dream, and named brains |
+| [handoff](./handoff/) | Prepares safe `/handoff` commands for review |
+| [hypura](./hypura/) | Hypura integration extension |
+| [memory](./memory/) | Persists agent learnings across sessions — reflect, ruminate, dream, forget, ingest, and named brains |
 | [notify](./notify/) | Sends desktop notifications via OSC 777 when the agent finishes |
 | [openai-fast](./openai-fast/) | Toggles OpenAI priority service tier for configured models |
 | [session-breakdown](./session-breakdown/) | Shows usage stats, cost by model, and a calendar graph |
@@ -22,39 +45,66 @@ Extensions and prompt templates for [pi](https://github.com/badlogic/pi-mono).
 
 ## Skills
 
-| Skill | Purpose |
-|-------|---------|
-| [memory-ingest](./memory/skills/memory-ingest/) | Deterministically ingest URLs, local paths, repos, datasets, and pasted text into `~/.pi/memories/raw/`, then compile them into curated notes under `~/.pi/memories/` |
+Shared skills use the bucketed source layout from `skills/`:
 
-## Prompt Templates
+```text
+skills/
+  engineering/
+  design/
+  review/
+  tools/
+  languages/
+  prototyping/
+  productivity/
+  deprecated/
+memory/skills/
+  memory-ingest/
+```
 
-| Template | Slash command |
-|----------|--------------|
-| [implement.md](./prompts/implement.md) | `/implement` |
-| [implement-and-review.md](./prompts/implement-and-review.md) | `/implement-and-review` |
-| [scout-and-plan.md](./prompts/scout-and-plan.md) | `/scout-and-plan` |
-| [simplify.md](./prompts/simplify.md) | `/simplify` |
-| [test-checklist.md](./prompts/test-checklist.md) | `/test-checklist` |
+`skills/deprecated/` is excluded from normal builds and used only for deprecated install cleanup. Extension-owned deprecated skills are not supported.
 
-## Install
+## Prompt templates and generated prompt-skills
+
+Pi prompt templates live in `prompts/*.md` and become slash commands such as `/zoom-out` and `/grill-me`.
+
+`make build` also generates manual prompt-skills named `prompt-<template-name>` under `build/skills/` for agents that support skills but not Pi prompt templates. These generated skills include `disable-model-invocation: true`, metadata pointing back to the source prompt, and wrapper text explaining `$ARGUMENTS`, `$@`, and `$1` as manual invocation input. Whether manual-only behavior is enforced depends on the consuming agent honoring `disable-model-invocation`.
+
+## Non-Pi/global skill install
+
+Build the flattened install tree:
 
 ```bash
-pi install /path/to/pi-extensions
+make build
 ```
 
-Or in `~/.pi/agent/settings.json`:
+Run installer tests:
 
-```json
-{
-  "packages": ["/path/to/pi-extensions"]
-}
+```bash
+make test
 ```
 
-All extensions and prompt templates load automatically. Use `pi config` to enable or disable individual resources.
+Install flattened skills for skill-only agents only when you intend to mutate global skill directories:
+
+```bash
+make install
+```
+
+Install targets:
+
+- `~/.agents/skills/` for OpenCode, Pi, Codex, and other unified skill consumers
+- `~/.claude/skills/` for Claude Code
+
+The installer tracks managed files in `$XDG_STATE_HOME/bobcats-skills/install-manifest.json` or `~/.local/state/bobcats-skills/install-manifest.json`, preserves unmanaged sibling files, removes stale managed files, and refuses to overwrite local edits unless bootstrapped with `make install FORCE=1`.
 
 ## Development
 
-Run tests:
+Run repository-level installer tests:
+
+```bash
+python3 -m unittest discover -s tests
+```
+
+Run selected extension tests:
 
 ```bash
 cd confirm-rm && npm test
@@ -66,25 +116,27 @@ cd slop-scan && npm test
 cd tldraw-desktop && npm test
 ```
 
-Skills live under `./skills/` and are packaged with the repository. For example, `/skill:memory-ingest <input>` writes markdown artifacts to `~/.pi/memories/raw/` and then updates curated notes in `~/.pi/memories/`.
+Run memory-ingest skill script tests from the repo root:
 
-### Memory brains
+```bash
+npx tsx --test --test-timeout=5000 memory/skills/memory-ingest/scripts/*.test.ts
+```
 
-The memory extension defaults to the `main` brain at `~/.pi/memories`.
+Hot-reload a running Pi session after package changes:
 
-Global brain config lives at `~/.pi/memory-config.json`.
+```text
+/reload
+```
+
+## Memory brains
+
+The memory extension defaults to the `main` brain at `~/.pi/memories`. Global brain config lives at `~/.pi/memory-config.json`.
 
 Example commands:
 
 ```text
 /memory brain create poe
 /memory brain map /Users/brian/code/poe poe
-```
-
-Hot-reload in a running session:
-
-```
-/reload
 ```
 
 ## Acknowledgments
