@@ -199,6 +199,10 @@ class BuildInstallerTest(unittest.TestCase):
         manifest_path = state_dir / "install-manifest.json"
         lock_path = state_dir / "install.lock"
         write_file(prompts_dir / "zoom-out.md", "---\ndescription: Zoom out\n---\n\nZoom $ARGUMENTS\n")
+        write_file(
+            memory_skills_dir / "memory-ingest" / "SKILL.md",
+            "---\nname: memory-ingest\ndescription: Ingest memory.\n---\n\n# Memory ingest\n",
+        )
 
         with self.build_path_patches(skills_dir, memory_skills_dir, prompts_dir, build_dir), mock.patch.object(
             self.build,
@@ -210,10 +214,15 @@ class BuildInstallerTest(unittest.TestCase):
             self.build.build_skills()
             self.build.install_skills()
 
+        manifest = json.loads(manifest_path.read_text())
+        for target_name in ("bobcats-claude-skills", "bobcats-unified-skills"):
+            self.assertIn("prompt-zoom-out/SKILL.md", manifest["targets"][target_name]["files"])
+            self.assertIn("memory-ingest/SKILL.md", manifest["targets"][target_name]["files"])
         for destination in (agents_destination, claude_destination):
             generated = (destination / "prompt-zoom-out" / "SKILL.md").read_text()
             self.assertIn("name: prompt-zoom-out", generated)
             self.assertIn("disable-model-invocation: true", generated)
+            self.assertTrue((destination / "memory-ingest" / "SKILL.md").exists())
 
     def test_install_without_manifest_allows_empty_destination(self):
         source = self.root / "build" / "skills"
@@ -279,6 +288,38 @@ class BuildInstallerTest(unittest.TestCase):
         self.assertTrue((destination / "demo" / "SKILL.md").exists())
         self.assertFalse((destination / "demo" / "script.py").exists())
         self.assertEqual((destination / "custom" / "SKILL.md").read_text(), "manual skill\n")
+
+    def test_safe_install_targets_updates_both_agent_roots_and_manifest(self):
+        source = self.root / "build" / "skills"
+        agents_destination = self.root / "home" / ".agents" / "skills"
+        claude_destination = self.root / "home" / ".claude" / "skills"
+        manifest_path = self.root / "state" / "install-manifest.json"
+        write_file(source / "demo" / "SKILL.md", "repo v1\n")
+        write_file(source / "prompt-zoom-out" / "SKILL.md", "disable-model-invocation: true\n")
+        write_file(source / "stale" / "SKILL.md", "stale v1\n")
+        targets = [
+            self.build.InstallTarget("bobcats-claude-skills", source, claude_destination, "tree"),
+            self.build.InstallTarget("bobcats-unified-skills", source, agents_destination, "tree"),
+        ]
+        self.build.safe_install_targets(targets, manifest_path=manifest_path, force=True)
+
+        (source / "stale" / "SKILL.md").unlink()
+        (source / "stale").rmdir()
+        write_file(agents_destination / "custom" / "SKILL.md", "manual skill\n")
+        write_file(claude_destination / "custom" / "SKILL.md", "manual skill\n")
+
+        result = self.build.safe_install_targets(targets, manifest_path=manifest_path, force=False)
+
+        self.assertEqual(result.files_removed, 2)
+        manifest = json.loads(manifest_path.read_text())
+        self.assertEqual(set(manifest["targets"]), {"bobcats-claude-skills", "bobcats-unified-skills"})
+        for target_name in manifest["targets"]:
+            self.assertIn("prompt-zoom-out/SKILL.md", manifest["targets"][target_name]["files"])
+        for destination in (agents_destination, claude_destination):
+            self.assertTrue((destination / "demo" / "SKILL.md").exists())
+            self.assertTrue((destination / "prompt-zoom-out" / "SKILL.md").exists())
+            self.assertFalse((destination / "stale").exists())
+            self.assertEqual((destination / "custom" / "SKILL.md").read_text(), "manual skill\n")
 
     def test_install_cleanup_removes_deprecated_skill_entries(self):
         source = self.root / "build" / "skills"
