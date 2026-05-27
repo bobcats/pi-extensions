@@ -112,6 +112,9 @@ class BuildInstallerTest(unittest.TestCase):
         built_scripts = build_dir / "skills" / "memory-ingest" / "scripts"
         self.assertTrue((built_scripts / "ingest-core.ts").exists())
         self.assertNotIn("../../../ingest.ts", (built_scripts / "ingest-runner.ts").read_text())
+        built_skill = (build_dir / "skills" / "memory-ingest" / "SKILL.md").read_text()
+        self.assertIn("npx tsx scripts/ingest-runner.ts", built_skill)
+        self.assertNotIn("memory/skills/memory-ingest/scripts", built_skill)
         result = subprocess.run(
             ["npx", "tsx", "--test", "--test-timeout=5000", str(built_scripts / "ingest-runner.test.ts")],
             cwd=ROOT,
@@ -346,6 +349,11 @@ class BuildInstallerTest(unittest.TestCase):
         source = self.root / "build" / "skills"
         destination = self.root / "home" / ".agents" / "skills"
         skills_dir = self.root / "skills"
+        target = self.tree_target(source, destination)
+        previous_manifest = {
+            "version": self.build.MANIFEST_VERSION,
+            "targets": {target.name: {"files": {"old-skill/SKILL.md": "previous-hash"}}},
+        }
         write_file(source / "demo" / "SKILL.md", "repo version\n")
         write_file(destination / "old-skill" / "SKILL.md", "previous install\n")
         write_file(destination / "custom" / "SKILL.md", "manual skill\n")
@@ -353,12 +361,27 @@ class BuildInstallerTest(unittest.TestCase):
 
         with mock.patch.object(self.build, "SKILLS_DIR", skills_dir):
             removed = self.build.remove_deprecated_install_entries(
-                [self.tree_target(source, destination)], self.build.deprecated_skill_names()
+                [target], self.build.deprecated_skill_names(), previous_manifest
             )
 
         self.assertEqual(removed, 1)
         self.assertFalse((destination / "old-skill").exists())
         self.assertEqual((destination / "custom" / "SKILL.md").read_text(), "manual skill\n")
+
+    def test_install_cleanup_preserves_unmanaged_deprecated_name(self):
+        source = self.root / "build" / "skills"
+        destination = self.root / "home" / ".agents" / "skills"
+        skills_dir = self.root / "skills"
+        write_file(destination / "old-skill" / "SKILL.md", "manual skill\n")
+        write_file(skills_dir / "deprecated" / "old-skill" / "SKILL.md", "deprecated\n")
+
+        with mock.patch.object(self.build, "SKILLS_DIR", skills_dir):
+            removed = self.build.remove_deprecated_install_entries(
+                [self.tree_target(source, destination)], self.build.deprecated_skill_names(), self.build.empty_manifest()
+            )
+
+        self.assertEqual(removed, 0)
+        self.assertEqual((destination / "old-skill" / "SKILL.md").read_text(), "manual skill\n")
 
     def test_force_replaces_symlink_leaf_without_following_it(self):
         source = self.root / "build" / "skills"

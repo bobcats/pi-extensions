@@ -662,16 +662,19 @@ def deprecated_skill_names() -> set[str]:
 
 
 def remove_deprecated_install_entries(
-    targets: Iterable[InstallTarget], deprecated_names: set[str]
+    targets: Iterable[InstallTarget], deprecated_names: set[str], previous_manifest: dict | None
 ) -> int:
-    if not deprecated_names:
+    if not deprecated_names or previous_manifest is None:
         return 0
 
     removed = 0
     for target in targets:
         if target.kind != "tree":
             continue
+        previous_files = target_files_from_manifest(previous_manifest, target)
         for name in deprecated_names:
+            if not any(path == f"{name}/SKILL.md" or path.startswith(f"{name}/") for path in previous_files):
+                continue
             entry = target.destination / name
             if entry.exists() or entry.is_symlink():
                 remove_path(entry)
@@ -688,8 +691,15 @@ def install_skills(force: bool = False) -> None:
         return
 
     targets = skill_install_targets()
+    try:
+        previous_manifest = load_install_manifest(MANIFEST_PATH)
+    except InstallConflict:
+        if not force:
+            raise
+        previous_manifest = None
+
     result = safe_install_targets(targets, force=force)
-    deprecated_removed = remove_deprecated_install_entries(targets, deprecated_skill_names())
+    deprecated_removed = remove_deprecated_install_entries(targets, deprecated_skill_names(), previous_manifest)
 
     count = len([path for path in source.iterdir() if path.is_dir()])
     for name, dest in INSTALL_PATHS.items():

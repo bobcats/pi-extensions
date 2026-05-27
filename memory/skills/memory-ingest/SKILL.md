@@ -35,16 +35,16 @@ Raw ingest is an internal stage, not the final product.
 
 ## Execution
 
-Run the canonical JSON payload through the ingest runner:
+Run the canonical JSON payload through `scripts/ingest-runner.ts`, resolving that path relative to this skill directory:
 
 ```bash
-npx tsx memory/skills/memory-ingest/scripts/ingest-runner.ts '{"inputs":["<user input>"],"confirm":false}'
+npx tsx scripts/ingest-runner.ts '{"inputs":["<user input>"],"confirm":false}'
 ```
 
 If the runner asks for confirmation because of caps, replay the same payload with `confirm:true`:
 
 ```bash
-npx tsx memory/skills/memory-ingest/scripts/ingest-runner.ts '{"inputs":["<user input>"],"confirm":true}'
+npx tsx scripts/ingest-runner.ts '{"inputs":["<user input>"],"confirm":true}'
 ```
 
 ## Compile flow after runner success
