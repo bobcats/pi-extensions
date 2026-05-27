@@ -32,7 +32,11 @@ if sys.version_info < (3, 11):
     sys.exit("Error: Python 3.11+ required")
 
 ROOT = Path(__file__).parent.parent
-SKILLS_DIR = ROOT / "skills"
+SHARED_SKILLS_DIR = ROOT / "skills"
+SKILLS_DIR = SHARED_SKILLS_DIR
+EXTENSION_SKILLS_DIR = ROOT / "memory" / "skills"
+AUTHORED_SKILL_ROOTS = (SHARED_SKILLS_DIR, EXTENSION_SKILLS_DIR)
+PROMPTS_DIR = ROOT / "prompts"
 BUILD_DIR = ROOT / "build"
 
 HOME = Path.home()
@@ -425,9 +429,12 @@ def commit_staged_install(
 def safe_install_targets(
     targets: Iterable[InstallTarget],
     *,
-    manifest_path: Path = MANIFEST_PATH,
+    manifest_path: Path | None = None,
     force: bool = False,
 ) -> InstallResult:
+    if manifest_path is None:
+        manifest_path = MANIFEST_PATH
+
     targets = list(targets)
     ensure_non_empty_sources(targets)
     manifest = manifest_for_install(targets, manifest_path, force)
@@ -470,26 +477,103 @@ def fix_skill_frontmatter_name(content: str, expected_name: str) -> str:
     return content[: match.start(1)] + new_frontmatter + content[match.end(1) :]
 
 
-def discover_skill_sources() -> list[tuple[str, Path]]:
-    if not SKILLS_DIR.exists():
-        return []
+def duplicate_skill_error(name: str, first: Path, second: Path) -> RuntimeError:
+    return RuntimeError(
+        f"Duplicate skill name {name!r}: {first} and {second}. "
+        "Flattened installs require unique skill directory names."
+    )
 
+
+def discover_skill_sources() -> list[tuple[str, Path]]:
     skills: list[tuple[str, Path]] = []
     names: dict[str, Path] = {}
-    for skill_md in sorted(SKILLS_DIR.rglob("SKILL.md")):
-        skill_dir = skill_md.parent
-        relative_parts = skill_dir.relative_to(SKILLS_DIR).parts
-        if "deprecated" in relative_parts:
+
+    for root in AUTHORED_SKILL_ROOTS:
+        if not root.exists():
             continue
-        name = skill_dir.name
-        if name in names:
-            raise RuntimeError(
-                f"Duplicate skill name {name!r}: {names[name]} and {skill_dir}. "
-                "Flattened installs require unique skill directory names."
-            )
-        names[name] = skill_dir
-        skills.append((name, skill_dir))
+        for skill_md in sorted(root.rglob("SKILL.md")):
+            skill_dir = skill_md.parent
+            relative_parts = skill_dir.relative_to(root).parts
+            if root == SHARED_SKILLS_DIR and "deprecated" in relative_parts:
+                continue
+            name = skill_dir.name
+            if name in names:
+                raise duplicate_skill_error(name, names[name], skill_dir)
+            names[name] = skill_dir
+            skills.append((name, skill_dir))
     return skills
+
+
+def parse_frontmatter_document(content: str) -> tuple[dict[str, str], str]:
+    if not content.startswith("---\n"):
+        return {}, content
+
+    marker = "\n---"
+    end = content.find(marker, 4)
+    if end == -1:
+        return {}, content
+
+    frontmatter: dict[str, str] = {}
+    for raw_line in content[4:end].splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or ":" not in line:
+            continue
+        key, value = line.split(":", 1)
+        frontmatter[key.strip()] = value.strip().strip('"\'')
+
+    body_start = end + len(marker)
+    if content[body_start:].startswith("\n"):
+        body_start += 1
+    return frontmatter, content[body_start:]
+
+
+def yaml_string(value: str) -> str:
+    return json.dumps(value)
+
+
+def discover_prompt_templates() -> list[tuple[str, Path]]:
+    if not PROMPTS_DIR.exists():
+        return []
+    return [
+        (prompt_path.stem, prompt_path)
+        for prompt_path in sorted(PROMPTS_DIR.glob("*.md"))
+        if prompt_path.name != "README.md"
+    ]
+
+
+def generated_prompt_skill_content(prompt_name: str, prompt_path: Path) -> str:
+    frontmatter, body = parse_frontmatter_document(prompt_path.read_text())
+    description = frontmatter.get(
+        "description", f"Generated manual skill from the {prompt_name} prompt template."
+    )
+    metadata = {
+        "generated-from": "prompt-template",
+        "source-prompt": prompt_name,
+    }
+    metadata.update(
+        (key, value) for key, value in frontmatter.items() if key not in {"description", "name"}
+    )
+
+    frontmatter_lines = [
+        "---",
+        f"name: prompt-{prompt_name}",
+        f"description: {yaml_string(description)}",
+        "disable-model-invocation: true",
+        "metadata:",
+    ]
+    frontmatter_lines.extend(f"  {key}: {yaml_string(value)}" for key, value in metadata.items())
+    frontmatter_lines.append("---")
+
+    wrapper = f"""# Prompt template: {prompt_name}
+
+This skill was generated from `prompts/{prompt_path.name}` for agents that support skills but do not support Pi prompt templates. It is intended for manual invocation only. `disable-model-invocation: true` is included for agents that honor that field.
+
+When invoking this skill manually, template variables such as `$ARGUMENTS`, `$@`, or `$1` refer to the user input supplied with the manual skill invocation.
+
+## Prompt body
+
+"""
+    return "\n".join(frontmatter_lines) + "\n" + wrapper + body
 
 
 def build_skill(name: str, source: Path) -> bool:
@@ -517,6 +601,13 @@ def build_skill(name: str, source: Path) -> bool:
     return True
 
 
+def build_prompt_skill(prompt_name: str, prompt_path: Path) -> bool:
+    dest = BUILD_DIR / "skills" / f"prompt-{prompt_name}"
+    dest.mkdir(parents=True, exist_ok=True)
+    (dest / "SKILL.md").write_text(generated_prompt_skill_content(prompt_name, prompt_path))
+    return True
+
+
 def build_skills() -> None:
     print("Building skills...")
 
@@ -526,9 +617,22 @@ def build_skills() -> None:
     skills_build.mkdir(parents=True)
 
     built = 0
+    names: dict[str, Path] = {}
     for name, source in discover_skill_sources():
+        if name in names:
+            raise duplicate_skill_error(name, names[name], source)
+        names[name] = source
         if build_skill(name, source):
             print(f"  {name}")
+            built += 1
+
+    for prompt_name, prompt_path in discover_prompt_templates():
+        generated_name = f"prompt-{prompt_name}"
+        if generated_name in names:
+            raise duplicate_skill_error(generated_name, names[generated_name], prompt_path)
+        names[generated_name] = prompt_path
+        if build_prompt_skill(prompt_name, prompt_path):
+            print(f"  {generated_name}")
             built += 1
 
     print(f"  Built {built} skills")
@@ -551,6 +655,7 @@ def skill_install_targets() -> list[InstallTarget]:
 
 
 def deprecated_skill_names() -> set[str]:
+    """Return deprecated shared skills; extension-owned deprecated cleanup is unsupported."""
     deprecated_dir = SKILLS_DIR / "deprecated"
     if not deprecated_dir.exists():
         return set()
