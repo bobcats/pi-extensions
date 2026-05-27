@@ -2,3 +2,9 @@
 .pi/
 node_modules/
 pi-patches/backups/
+build/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.coverage
