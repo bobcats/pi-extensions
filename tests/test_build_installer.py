@@ -49,6 +49,13 @@ class BuildInstallerTest(unittest.TestCase):
         ):
             yield
 
+    def test_package_manifest_uses_pi_filterable_resource_patterns(self):
+        package = json.loads((ROOT / "package.json").read_text())
+
+        self.assertEqual(package["pi"]["prompts"], ["prompts/*.md", "!prompts/README.md"])
+        self.assertEqual(package["pi"]["skills"], ["skills", "!skills/deprecated/**", "memory/skills"])
+        self.assertFalse(any(pattern.startswith("!./") for pattern in package["pi"]["prompts"] + package["pi"]["skills"]))
+
     def test_build_flattens_nested_skill_directories(self):
         skills_dir = self.root / "skills"
         build_dir = self.root / "build"

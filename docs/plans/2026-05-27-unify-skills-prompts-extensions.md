@@ -105,9 +105,9 @@ Migrate the current sibling `../skills` repo into this repo without preserving g
 
 ### 6. Update Pi package manifest and package docs
 
-- [x] Update root `package.json` `pi.skills` to include authored skill roots required by Pi, at minimum `./skills` and `./memory/skills`; expected signal: package manifest points Pi at shared and extension-owned skills while leaving `pi.prompts` as `./prompts`.
+- [x] Update root `package.json` `pi.skills` to include authored skill roots required by Pi, with active shared skills under `skills`, deprecated exclusions, and extension-owned skills under `memory/skills`; expected signal: package manifest points Pi at shared and extension-owned skills while excluding `skills/deprecated`.
 - [x] Validate this manifest shape before migrating all skills by running the package JSON parse command and checking the `pi.skills` array manually; expected signal: final Pi-native discovery roots are correct early, before full migration verification.
-- [x] Keep `package.json` `pi.prompts` pointing at `./prompts`; expected signal: Pi-native slash-command templates remain source-native and are not replaced by generated skills.
+- [x] Keep `package.json` `pi.prompts` pointing at prompt templates while excluding `prompts/README.md`; expected signal: Pi-native slash-command templates remain source-native and are not replaced by generated skills.
 - [x] Confirm `package-lock.json` remains unchanged because the builder uses only the Python standard library; expected signal: `git diff -- package-lock.json` is empty.
 - [x] Run `node -e 'JSON.parse(require("fs").readFileSync("package.json", "utf8")); JSON.parse(require("fs").readFileSync("package-lock.json", "utf8"))'`; expected signal: package JSON files parse successfully.
 - [x] Run `python3 scripts/build.py build`; expected signal: build still succeeds after manifest/doc changes.
