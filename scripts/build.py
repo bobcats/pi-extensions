@@ -2,9 +2,8 @@
 """
 Build and install Bobcats skills for AI coding agents.
 
-Skill sources live in nested buckets under ./skills/<bucket>/<skill>/SKILL.md.
-This builder flattens them into ./build/skills/<skill>/, then installs the
-flattened tree for:
+Shared skill sources live under ./skills/<bucket>/<skill>/SKILL.md, extension-owned skills live under explicit extension skill roots such as ./memory/skills/<skill>/, and Pi prompt templates live under ./prompts/*.md.
+This builder flattens authored skills and generated prompt-skills into ./build/skills/<skill>/, then installs the flattened tree for:
 - Claude Code (~/.claude/skills)
 - OpenCode, Pi, Codex (~/.agents/skills)
 

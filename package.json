@@ -25,10 +25,12 @@
       "./handoff/index.ts"
     ],
     "prompts": [
-      "./prompts"
+      "./prompts/*.md",
+      "!./prompts/README.md"
     ],
     "skills": [
       "./skills",
+      "!./skills/deprecated/**",
       "./memory/skills"
     ]
   },

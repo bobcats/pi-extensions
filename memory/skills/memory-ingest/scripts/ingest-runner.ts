@@ -8,7 +8,7 @@ import {
   classifyIngestInput,
   listExistingRawNames,
   slugifySource,
-} from "../../../ingest.ts";
+} from "./ingest-core.ts";
 
 export type RunnerStatus = "ok" | "clarify" | "confirm" | "error";
 

@@ -1,5 +1,6 @@
 import importlib.util
 import json
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -99,6 +100,26 @@ class BuildInstallerTest(unittest.TestCase):
         self.assertTrue((build_dir / "skills" / "demo" / "SKILL.md").exists())
         self.assertTrue((build_dir / "skills" / "memory-ingest" / "SKILL.md").exists())
         self.assertFalse((build_dir / "skills" / "stale").exists())
+
+    def test_built_memory_ingest_runner_is_self_contained(self):
+        skills_dir = self.root / "skills"
+        prompts_dir = self.root / "prompts"
+        build_dir = self.root / "build"
+
+        with self.build_path_patches(skills_dir, ROOT / "memory" / "skills", prompts_dir, build_dir):
+            self.build.build_skills()
+
+        built_scripts = build_dir / "skills" / "memory-ingest" / "scripts"
+        self.assertTrue((built_scripts / "ingest-core.ts").exists())
+        self.assertNotIn("../../../ingest.ts", (built_scripts / "ingest-runner.ts").read_text())
+        result = subprocess.run(
+            ["npx", "tsx", "--test", "--test-timeout=5000", str(built_scripts / "ingest-runner.test.ts")],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            timeout=10,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
     def test_duplicate_authored_skill_names_fail_across_roots(self):
         skills_dir = self.root / "skills"
