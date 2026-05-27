@@ -24,7 +24,7 @@ Extensions and prompt templates for [pi](https://github.com/badlogic/pi-mono).
 
 | Skill | Purpose |
 |-------|---------|
-| [memory-ingest](./skills/memory-ingest/) | Deterministically ingest URLs, local paths, repos, datasets, and pasted text into `~/.pi/memories/raw/`, then compile them into curated notes under `~/.pi/memories/` |
+| [memory-ingest](./memory/skills/memory-ingest/) | Deterministically ingest URLs, local paths, repos, datasets, and pasted text into `~/.pi/memories/raw/`, then compile them into curated notes under `~/.pi/memories/` |
 
 ## Prompt Templates
 

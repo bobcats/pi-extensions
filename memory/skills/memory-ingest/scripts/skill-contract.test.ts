@@ -4,7 +4,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 
 test("skill contract requires compile before ingest success logging", () => {
-  const skillPath = path.resolve("skills/memory-ingest/SKILL.md");
+  const skillPath = path.resolve("memory/skills/memory-ingest/SKILL.md");
 
   // Act
   const skill = fs.readFileSync(skillPath, "utf8");

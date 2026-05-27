@@ -9,7 +9,7 @@ Date: 2026-04-08
 Command run:
 
 ```bash
-npx tsx skills/memory-ingest/scripts/ingest-runner.ts '{"inputs":["Acceptance fixture\nMemory ingest compile workflow"],"confirm":false,"rawRoot":"<tmp>","nowIso":"2026-04-08T00:00:00.000Z"}'
+npx tsx memory/skills/memory-ingest/scripts/ingest-runner.ts '{"inputs":["Acceptance fixture\nMemory ingest compile workflow"],"confirm":false,"rawRoot":"<tmp>","nowIso":"2026-04-08T00:00:00.000Z"}'
 ```
 
 Observed:
@@ -23,7 +23,7 @@ Observed:
 Automated contract test:
 
 ```bash
-npx tsx --test skills/memory-ingest/scripts/skill-contract.test.ts
+npx tsx --test memory/skills/memory-ingest/scripts/skill-contract.test.ts
 ```
 
 This verifies the skill instructions require all of:
