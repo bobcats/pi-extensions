@@ -673,12 +673,15 @@ def remove_deprecated_install_entries(
             continue
         previous_files = target_files_from_manifest(previous_manifest, target)
         for name in deprecated_names:
-            if not any(path == f"{name}/SKILL.md" or path.startswith(f"{name}/") for path in previous_files):
-                continue
-            entry = target.destination / name
-            if entry.exists() or entry.is_symlink():
-                remove_path(entry)
-                removed += 1
+            managed_deprecated_files = [
+                path for path in previous_files if path == f"{name}/SKILL.md" or path.startswith(f"{name}/")
+            ]
+            for relative_path in managed_deprecated_files:
+                entry = destination_file(target, relative_path)
+                if entry.exists() or entry.is_symlink():
+                    remove_path(entry)
+                    prune_empty_parents(entry, target.destination)
+                    removed += 1
     return removed
 
 
