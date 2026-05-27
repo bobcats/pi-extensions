@@ -28,7 +28,8 @@
       "./prompts"
     ],
     "skills": [
-      "./skills"
+      "./skills",
+      "./memory/skills"
     ]
   },
   "dependencies": {
