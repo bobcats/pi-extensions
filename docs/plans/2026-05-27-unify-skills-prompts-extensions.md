@@ -130,12 +130,12 @@ Migrate the current sibling `../skills` repo into this repo without preserving g
 
 ### 8. Final review and cleanup
 
-- [ ] Run `git status --short`; expected signal: only intentional source changes remain, with no `build/`, caches, or backup files staged.
-- [ ] Run `rg "../skills|dotagents|skills/memory-ingest|grill-with-docs" README.md AGENTS.md package.json scripts tests skills prompts memory/skills`; expected signal: matches are either intentionally historical/deprecated or updated to the merged repo terminology.
-- [ ] Run `npx tsx --test --test-timeout=5000 memory/*.test.ts`; expected signal: memory extension tests pass after the skill move.
-- [ ] Run `slop_scan .` because this is a JavaScript/TypeScript repository and paths/docs changed around extension code; expected signal: no actionable high-confidence findings introduced by the merge.
-- [ ] Request a focused code review of the final diff; expected signal: reviewer finds no blocking issues, or feedback is triaged with `respond-to-review`.
-- [ ] Produce a final verification summary listing commands run, generated artifacts inspected, and any real install command intentionally skipped.
+- [x] Run `git status --short`; expected signal: only intentional source changes remain, with no `build/`, caches, or backup files staged.
+- [x] Run `rg "../skills|dotagents|skills/memory-ingest|grill-with-docs" README.md AGENTS.md package.json scripts tests skills prompts memory/skills`; expected signal: matches are either intentionally historical/deprecated or updated to the merged repo terminology.
+- [x] Run `npx tsx --test --test-timeout=5000 memory/*.test.ts`; expected signal: memory extension tests pass after the skill move.
+- [x] Run `slop_scan .` because this is a JavaScript/TypeScript repository and paths/docs changed around extension code; expected signal: no actionable high-confidence findings introduced by the merge.
+- [x] Request a focused code review of the final diff; expected signal: reviewer finds no blocking issues, or feedback is triaged with `respond-to-review`.
+- [x] Produce a final verification summary listing commands run, generated artifacts inspected, and any real install command intentionally skipped.
 
 **Required skills for execution:** `code-review`, `respond-to-review`, and `verify`.
 
