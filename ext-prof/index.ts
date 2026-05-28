@@ -62,8 +62,9 @@ function resolveRunnerModuleUrl(): string {
     const pkgEntry = require.resolve("@mariozechner/pi-coding-agent");
     const found = addCandidate(path.join(path.dirname(pkgEntry), "core", "extensions", "runner.js"));
     if (found) return pathToFileURL(found).href;
-  } catch {
-    // continue
+  } catch (error) {
+    void error;
+    // Fall through to the next resolver: Pi is installed in different layouts in dev vs packaged runs.
   }
 
   try {
@@ -73,8 +74,9 @@ function resolveRunnerModuleUrl(): string {
       const found = addCandidate(path.join(path.dirname(pkgPath), "core", "extensions", "runner.js"));
       if (found) return pathToFileURL(found).href;
     }
-  } catch {
-    // continue
+  } catch (error) {
+    void error;
+    // Fall through to filesystem probes when ESM resolution is unavailable or points at package metadata.
   }
 
   const seedDirs = [
@@ -168,6 +170,14 @@ function shutdownReason(event: unknown): string | undefined {
   return undefined;
 }
 
+function contextCwd(ctx: unknown): string | undefined {
+  if (ctx && typeof ctx === "object" && "cwd" in ctx) {
+    const cwd = (ctx as { cwd?: unknown }).cwd;
+    if (typeof cwd === "string" && cwd.trim()) return cwd;
+  }
+  return undefined;
+}
+
 export default async function extProfiler(pi: ExtensionAPI) {
   const runtime = getGlobalRecorderRuntime();
   let patchState: PatchStatus = defaultPatchState();
@@ -251,11 +261,11 @@ export default async function extProfiler(pi: ExtensionAPI) {
     patch: ensurePatched,
     initialPatchState: patchState,
     runtime,
-    renderReport: async () => {
+    renderReport: async ({ currentCwd }) => {
       const report = await readProfileReport({ profileDir: profileDirectory(homedir()) });
       return formatProfileReport({
         report,
-        currentCwd: runtime.status().lastCwd ?? process.cwd(),
+        currentCwd: currentCwd ?? runtime.status().lastCwd ?? process.cwd(),
       });
     },
   });
@@ -286,7 +296,7 @@ export default async function extProfiler(pi: ExtensionAPI) {
       return filtered.length > 0 ? filtered : null;
     },
     handler: async (args, ctx) => {
-      const response = await controller.handle(args);
+      const response = await controller.handle(args, { cwd: contextCwd(ctx) });
       patchState = controller.patchState();
       updateStatusBar(ctx);
 
@@ -302,7 +312,7 @@ export default async function extProfiler(pi: ExtensionAPI) {
   pi.registerShortcut(ENABLE_SHORTCUT, {
     description: "Toggle extension profiler recording",
     handler: async (ctx) => {
-      const response = await controller.handle(runtime.status().active ? "off" : "on");
+      const response = await controller.handle(runtime.status().active ? "off" : "on", { cwd: contextCwd(ctx) });
       patchState = controller.patchState();
       updateStatusBar(ctx);
 

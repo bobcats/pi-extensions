@@ -5,7 +5,7 @@ import path from "node:path";
 import { mkdtemp } from "node:fs/promises";
 import profilerExtension from "./index.ts";
 import { getGlobalRecorderRuntime, resetGlobalRecorderRuntimeForTests } from "./runtime.ts";
-import type { ProfileRow } from "./persistence.ts";
+import { appendProfileRows, profileDirectory, type ProfileRow } from "./persistence.ts";
 
 const GLOBAL_PATCHED_KEY = Symbol.for("ext-prof.v2.runner-patched");
 const GLOBAL_PATCH_STATE_KEY = Symbol.for("ext-prof.v2.patch-state");
@@ -189,6 +189,79 @@ test("registers shortcut to toggle recording and updates status bar", async () =
     assert.equal(statuses.at(-1)?.key, "ext-prof");
     assert.match(statuses.at(-1)?.text ?? "", /prof:off/);
   } finally {
+    clearGlobals();
+  }
+});
+
+test("default report uses command invocation cwd before last recorded cwd", async () => {
+  clearGlobals();
+  setPatched();
+  const { runtime, dir } = await installTestRuntime();
+  await appendProfileRows(path.join(profileDirectory(dir), "report.jsonl"), [
+    {
+      schemaVersion: 2,
+      type: "aggregate_delta",
+      runId: "run-1",
+      seq: 1,
+      windowStart: "2026-02-17T00:00:00.000Z",
+      windowEnd: "2026-02-17T00:00:10.000Z",
+      cwd: "/old-repo",
+      extensionPath: "old.ts",
+      surface: "command",
+      name: "old",
+      calls: 1,
+      totalMs: 30,
+      maxMs: 30,
+      errorCount: 0,
+    },
+    {
+      schemaVersion: 2,
+      type: "aggregate_delta",
+      runId: "run-1",
+      seq: 1,
+      windowStart: "2026-02-17T00:00:00.000Z",
+      windowEnd: "2026-02-17T00:00:10.000Z",
+      cwd: "/new-repo",
+      extensionPath: "new.ts",
+      surface: "command",
+      name: "new",
+      calls: 1,
+      totalMs: 10,
+      maxMs: 10,
+      errorCount: 0,
+    },
+  ]);
+  await runtime.start();
+  runtime.record({ cwd: "/old-repo", extensionPath: "old.ts", surface: "command", name: "old", ms: 1, ok: true });
+
+  const commands = new Map<string, any>();
+  let stdout = "";
+  const pi = {
+    registerCommand(name: string, opts: any) { commands.set(name, opts); },
+    registerShortcut() { return undefined; },
+    on() { return undefined; },
+  } as never;
+  const originalWrite = process.stdout.write.bind(process.stdout);
+  const originalHome = process.env.HOME;
+  (process.stdout.write as unknown as (chunk: string) => boolean) = ((chunk: string) => {
+    stdout += chunk;
+    return true;
+  }) as never;
+  process.env.HOME = dir;
+
+  try {
+    await profilerExtension(pi);
+    await commands.get("ext-prof").handler("", { hasUI: false, cwd: "/new-repo", ui: { notify() {} } });
+
+    assert.match(stdout, /Top handlers \(\/new-repo\)/);
+    assert.doesNotMatch(stdout, /Top handlers \(\/old-repo\)/);
+  } finally {
+    process.stdout.write = originalWrite;
+    if (originalHome === undefined) {
+      delete process.env.HOME;
+    } else {
+      process.env.HOME = originalHome;
+    }
     clearGlobals();
   }
 });

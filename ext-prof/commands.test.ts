@@ -71,8 +71,9 @@ test("on fails without enabling when patching fails", async () => {
   assert.deepEqual(calls, []);
 });
 
-test("empty args force-flush active recording before rendering the report", async () => {
+test("empty args force-flush active recording before rendering the report for the invocation cwd", async () => {
   const { runtime, calls } = runtimeMock({ active: true, runId: "run-1", outputPath: "/profiles/run.jsonl", seq: 0, consecutiveWriteFailures: 0 });
+  const reportCwds: Array<string | undefined> = [];
   const controller = createController({
     patch: async () => ({
       patched: true,
@@ -80,11 +81,15 @@ test("empty args force-flush active recording before rendering the report", asyn
       coverage: { events: "instrumented", commands: "instrumented", tools: "instrumented" },
     }),
     runtime,
-    renderReport: async () => "global report",
+    renderReport: async ({ currentCwd }) => {
+      reportCwds.push(currentCwd);
+      return "global report";
+    },
   });
 
-  assert.equal(await controller.handle(""), "global report");
+  assert.equal(await controller.handle("", { cwd: "/invocation-repo" }), "global report");
   assert.deepEqual(calls, ["flush"]);
+  assert.deepEqual(reportCwds, ["/invocation-repo"]);
 });
 
 test("save and reset are no longer public subcommands", async () => {

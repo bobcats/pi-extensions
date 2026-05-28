@@ -81,6 +81,22 @@ test("silently ignores legacy rows, unknown rows, and malformed partial lines", 
     JSON.stringify({ schemaVersion: 1, type: "aggregate", extensionPath: "legacy.ts", totalMs: 999 }) + "\n" +
       JSON.stringify({ schemaVersion: 2, type: "recording_start", runId: "run-1" }) + "\n" +
       JSON.stringify({ schemaVersion: 2, type: "unknown", runId: "run-1" }) + "\n" +
+      JSON.stringify({
+        schemaVersion: 2,
+        type: "aggregate_delta",
+        runId: "run-1",
+        seq: 1,
+        windowStart: "2026-02-17T00:00:00.000Z",
+        windowEnd: "2026-02-17T00:00:10.000Z",
+        cwd: "/repo",
+        extensionPath: "invalid.ts",
+        surface: "tool",
+        name: "run",
+        calls: -1,
+        totalMs: -7,
+        maxMs: -7,
+        errorCount: -1,
+      }) + "\n" +
       "{\"schemaVersion\":2,\"type\":\"aggregate_delta\"",
     "utf8",
   );

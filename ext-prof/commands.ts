@@ -4,6 +4,10 @@ import type { RecorderRuntime } from "./runtime.ts";
 
 type RuntimeController = Pick<RecorderRuntime, "start" | "stop" | "flush" | "status">;
 
+type HandleOptions = {
+  cwd?: string;
+};
+
 function defaultPatchState(): PatchStatus {
   return {
     patched: false,
@@ -23,10 +27,10 @@ function patchUsable(patch: PatchStatus): boolean {
 export function createController(args: {
   patch: () => Promise<PatchStatus>;
   runtime: RuntimeController;
-  renderReport: () => Promise<string>;
+  renderReport: (args: { currentCwd?: string }) => Promise<string>;
   initialPatchState?: PatchStatus;
 }): {
-  handle: (rawArgs: string) => Promise<string>;
+  handle: (rawArgs: string, options?: HandleOptions) => Promise<string>;
   isEnabled: () => boolean;
   patchState: () => PatchStatus;
 } {
@@ -39,7 +43,7 @@ export function createController(args: {
     });
 
   return {
-    async handle(rawArgs: string): Promise<string> {
+    async handle(rawArgs: string, options: HandleOptions = {}): Promise<string> {
       const trimmed = rawArgs.trim();
       const [subcommand] = trimmed.split(/\s+/, 1);
 
@@ -47,7 +51,7 @@ export function createController(args: {
         if (args.runtime.status().active) {
           await args.runtime.flush();
         }
-        return args.renderReport();
+        return args.renderReport({ currentCwd: options.cwd });
       }
 
       if (subcommand === "status") {

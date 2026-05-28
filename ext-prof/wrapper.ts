@@ -68,7 +68,8 @@ async function callTimed(args: {
             ok,
           });
         }
-      } catch {
+      } catch (error) {
+        void error;
         // Profiling must not alter handler return values or thrown errors.
       }
     }

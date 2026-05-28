@@ -15,8 +15,20 @@ export type ProfileReport = {
 const keyOf = (cwd: string, extensionPath: string, surface: string, name: string) =>
   `${cwd}\u001f${extensionPath}\u001f${surface}\u001f${name}`;
 
-function isFiniteNumber(value: unknown): value is number {
-  return typeof value === "number" && Number.isFinite(value);
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === "string" && value.trim().length > 0;
+}
+
+function isPositiveInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value > 0;
+}
+
+function isNonNegativeInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0;
+}
+
+function isNonNegativeFiniteNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0;
 }
 
 function isSurface(value: unknown): value is Surface {
@@ -29,18 +41,20 @@ function isAggregateDeltaRow(value: unknown): value is AggregateDeltaRow {
   return (
     row.schemaVersion === 2 &&
     row.type === "aggregate_delta" &&
-    typeof row.runId === "string" &&
-    isFiniteNumber(row.seq) &&
-    typeof row.windowStart === "string" &&
-    typeof row.windowEnd === "string" &&
-    typeof row.cwd === "string" &&
-    typeof row.extensionPath === "string" &&
+    isNonEmptyString(row.runId) &&
+    isPositiveInteger(row.seq) &&
+    isNonEmptyString(row.windowStart) &&
+    isNonEmptyString(row.windowEnd) &&
+    isNonEmptyString(row.cwd) &&
+    isNonEmptyString(row.extensionPath) &&
     isSurface(row.surface) &&
-    typeof row.name === "string" &&
-    isFiniteNumber(row.calls) &&
-    isFiniteNumber(row.totalMs) &&
-    isFiniteNumber(row.maxMs) &&
-    isFiniteNumber(row.errorCount)
+    isNonEmptyString(row.name) &&
+    isPositiveInteger(row.calls) &&
+    isNonNegativeFiniteNumber(row.totalMs) &&
+    isNonNegativeFiniteNumber(row.maxMs) &&
+    isNonNegativeInteger(row.errorCount) &&
+    row.errorCount <= row.calls &&
+    row.maxMs <= row.totalMs
   );
 }
 
@@ -98,7 +112,8 @@ async function readJsonlDeltas(filePath: string): Promise<AggregateDeltaRow[]> {
       if (isAggregateDeltaRow(parsed)) {
         rows.push(parsed);
       }
-    } catch {
+    } catch (error) {
+      void error;
       // Ignore malformed/partial lines so reports can read actively appended files.
     }
   }

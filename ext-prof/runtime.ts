@@ -61,10 +61,6 @@ type GlobalRecorder = typeof globalThis & {
   [GLOBAL_RUNTIME_KEY]?: RecorderRuntime;
 };
 
-function defaultNow(): string {
-  return new Date().toISOString();
-}
-
 function defaultRandomId(): string {
   return Math.random().toString(36).slice(2, 10);
 }
@@ -79,7 +75,7 @@ function createEmptyCollector(maxHandlers: number): Collector {
 
 export function createRecorderRuntime(deps: RecorderRuntimeDeps = {}): RecorderRuntime {
   const homeDir = deps.homeDir ?? homedir();
-  const now = deps.now ?? defaultNow;
+  const now = deps.now ?? (() => new Date().toISOString());
   const randomId = deps.randomId ?? defaultRandomId;
   const appendRows = deps.appendRows ?? appendProfileRows;
   const startTimer = deps.setInterval ?? ((callback, ms) => setInterval(callback, ms));
@@ -117,7 +113,8 @@ export function createRecorderRuntime(deps: RecorderRuntimeDeps = {}): RecorderR
       await appendRows(run.outputPath, [
         { schemaVersion: 2, type: "recording_end", runId: run.runId, endedAt: now(), reason },
       ]);
-    } catch {
+    } catch (error) {
+      void error;
       // Ignore: write-failure auto-disable must never throw back into handler or flush paths.
     }
   };
