@@ -76,7 +76,7 @@ Implement this as a TDD refactor in small slices:
   - Commit checkpoint: `feat(ext-prof): add v2 profile persistence and reporting`.
   - Required skill: `tdd`.
 
-- [ ] Add the process-global recorder runtime.
+- [x] Add the process-global recorder runtime.
   - Create tests first: `ext-prof/runtime.test.ts`.
   - Create implementation: `ext-prof/runtime.ts`.
   - Required behavior: process-global singleton owns active run state, total/delta collectors, output path, timer, write queue, seq, last write error, and consecutive failure count; `start()` is idempotent; `stop()` is no-op when inactive; `record()` updates memory only; `flush()` drains by swapping delta collectors before queued writes; empty flushes write nothing and do not increment seq; timer calls `.unref()`; successful writes reset failure count; three consecutive write failures auto-disable with reason `write_failures` when possible.
