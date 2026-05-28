@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { formatProfileReport, formatStatus, formatVerboseReport } from "./formatter.ts";
+import { formatProfileReport, formatStatus } from "./formatter.ts";
 
 test("status prints runtime state and write failures", () => {
   const text = formatStatus({
@@ -45,27 +45,4 @@ test("profile report shows global extension and handler leaders plus current cwd
   assert.match(text, /\/repo-b command:foo a\.ts total=30\.0ms/);
   assert.match(text, /Top handlers \(\/repo-a\)/);
   assert.match(text, /\/repo-a command:foo a\.ts total=20\.0ms/);
-});
-
-test("verbose report includes overhead warning", () => {
-  const text = formatVerboseReport({
-    rows: [
-      {
-        extensionPath: "a.ts",
-        calls: 2,
-        totalMs: 20,
-        maxMs: 12,
-        errorCount: 1,
-        handlers: [
-          { surface: "event", name: "turn_start", calls: 2, totalMs: 20, maxMs: 12, errorCount: 1 },
-        ],
-      },
-    ],
-    patchReason: "patched",
-    overhead: { goalPct: 1, observedPct: 1.8 },
-  });
-
-  assert.match(text, /OVERHEAD WARNING/);
-  assert.match(text, /a.ts/);
-  assert.match(text, /event:turn_start/);
 });

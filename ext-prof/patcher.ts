@@ -1,9 +1,10 @@
 import type { Collector } from "./collector.ts";
 import { wrapCommandHandler, wrapEventHandler, wrapToolExecute } from "./wrapper.ts";
-import type { Coverage } from "./formatter.ts";
 import type { RecorderRuntime } from "./runtime.ts";
 
 const PATCHED = Symbol.for("ext-prof.v2.patched");
+
+export type Coverage = "instrumented" | "missing";
 
 export type CoverageState = {
   events: Coverage;
