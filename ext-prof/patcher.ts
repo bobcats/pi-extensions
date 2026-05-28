@@ -1,6 +1,7 @@
 import type { Collector } from "./collector.ts";
 import { wrapCommandHandler, wrapEventHandler, wrapToolExecute } from "./wrapper.ts";
 import type { Coverage } from "./formatter.ts";
+import type { RecorderRuntime } from "./runtime.ts";
 
 const PATCHED = Symbol.for("ext-prof.v1.patched");
 
@@ -27,9 +28,12 @@ type ExtensionLike = {
   tools?: Map<string, { definition: { execute: (...args: unknown[]) => unknown } }>;
 };
 
+type RuntimeLike = Pick<RecorderRuntime, "record" | "status">;
+
 export function patchRunnerPrototype(args: {
   RunnerCtor: { prototype: { bindCore: (...input: unknown[]) => unknown } };
-  collector: Collector;
+  collector?: Collector;
+  getRuntime?: () => RuntimeLike;
   shouldRecord?: () => boolean;
 }): PatchStatus {
   const proto = args.RunnerCtor.prototype as Record<string | symbol, unknown>;
@@ -74,6 +78,7 @@ export function patchRunnerPrototype(args: {
                 extensionPath,
                 eventType,
                 collector: args.collector,
+                getRuntime: args.getRuntime,
                 handler,
                 shouldRecord: args.shouldRecord,
               }),
@@ -89,6 +94,7 @@ export function patchRunnerPrototype(args: {
             extensionPath,
             commandName,
             collector: args.collector,
+            getRuntime: args.getRuntime,
             handler: command.handler,
             shouldRecord: args.shouldRecord,
           });
@@ -102,6 +108,7 @@ export function patchRunnerPrototype(args: {
             extensionPath,
             toolName,
             collector: args.collector,
+            getRuntime: args.getRuntime,
             handler: tool.definition.execute,
             shouldRecord: args.shouldRecord,
           });

@@ -86,7 +86,7 @@ Implement this as a TDD refactor in small slices:
   - Commit checkpoint: `feat(ext-prof): add global recorder runtime`.
   - Required skill: `tdd`.
 
-- [ ] Wire wrappers to capture cwd at invocation start and record through the runtime.
+- [x] Wire wrappers to capture cwd at invocation start and record through the runtime.
   - Modify tests first: `ext-prof/wrapper.test.ts`, `ext-prof/patcher.test.ts`.
   - Modify implementation: `ext-prof/wrapper.ts`, `ext-prof/patcher.ts`.
   - Required behavior: event/command/tool wrappers extract cwd from call arguments at invocation start, fall back to runtime last cwd or `process.cwd()`, preserve return values and thrown errors, and call runtime recording without awaiting filesystem work.
