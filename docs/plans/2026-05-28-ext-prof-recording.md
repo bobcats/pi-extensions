@@ -67,7 +67,7 @@ Implement this as a TDD refactor in small slices:
   - Commit checkpoint: `test(ext-prof): add cwd-aware collector coverage` with implementation if green.
   - Required skill: `tdd`.
 
-- [ ] Replace snapshot persistence with v2 JSONL append/read primitives.
+- [x] Replace snapshot persistence with v2 JSONL append/read primitives.
   - Modify tests first: `ext-prof/persistence.test.ts`.
   - Modify implementation: `ext-prof/persistence.ts`; create `ext-prof/report.ts` and `ext-prof/report.test.ts` if keeping read/report parsing separate is clearer.
   - Required behavior: append JSONL lines safely, create parent directories, write `recording_start`, `aggregate_delta`, and `recording_end` shapes, read all `*.jsonl` files under a supplied v2 profile directory, silently ignore unknown row types and malformed partial lines, aggregate by extension and handler sorted by `totalMs` descending.

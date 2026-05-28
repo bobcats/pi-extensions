@@ -3,40 +3,54 @@ import assert from "node:assert/strict";
 import os from "node:os";
 import path from "node:path";
 import { mkdtemp, readFile } from "node:fs/promises";
-import { saveSnapshot } from "./persistence.ts";
+import {
+  appendProfileRows,
+  createProfilePath,
+  profileDirectory,
+  type AggregateDeltaRow,
+} from "./persistence.ts";
 
-test("writes JSONL with session_meta schemaVersion=1 and aggregate rows", async () => {
+test("appends v2 recording rows as JSONL and creates parent directories", async () => {
   const dir = await mkdtemp(path.join(os.tmpdir(), "ext-prof-"));
-  const output = path.join(dir, "snapshot.jsonl");
+  const output = path.join(dir, "nested", "run.jsonl");
+  const delta: AggregateDeltaRow = {
+    schemaVersion: 2,
+    type: "aggregate_delta",
+    runId: "run-1",
+    seq: 1,
+    windowStart: "2026-02-17T00:00:00.000Z",
+    windowEnd: "2026-02-17T00:00:10.000Z",
+    cwd: "/repo",
+    extensionPath: "a.ts",
+    surface: "event",
+    name: "turn_start",
+    calls: 2,
+    totalMs: 20,
+    maxMs: 11,
+    errorCount: 0,
+  };
 
-  await saveSnapshot({
-    outputPath: output,
-    sessionMeta: {
-      schemaVersion: 1,
-      project: "dotagents",
-      patch: "patched",
-      savedAt: "2026-02-17T00:00:00.000Z",
-      overheadGoalPct: 1,
-    },
-    aggregates: [
-      {
-        extensionPath: "a.ts",
-        surface: "event",
-        name: "turn_start",
-        calls: 2,
-        totalMs: 20,
-        maxMs: 11,
-        errorCount: 0,
-      },
-    ],
-  });
+  await appendProfileRows(output, [
+    { schemaVersion: 2, type: "recording_start", runId: "run-1", startedAt: "2026-02-17T00:00:00.000Z" },
+    delta,
+  ]);
+  await appendProfileRows(output, [
+    { schemaVersion: 2, type: "recording_end", runId: "run-1", endedAt: "2026-02-17T00:00:12.000Z", reason: "off" },
+  ]);
 
   const lines = (await readFile(output, "utf8"))
     .trim()
     .split("\n")
     .map((line) => JSON.parse(line));
 
-  assert.equal(lines[0].type, "session_meta");
-  assert.equal(lines[0].schemaVersion, 1);
-  assert.equal(lines[1].type, "aggregate");
+  assert.deepEqual(lines, [
+    { schemaVersion: 2, type: "recording_start", runId: "run-1", startedAt: "2026-02-17T00:00:00.000Z" },
+    delta,
+    { schemaVersion: 2, type: "recording_end", runId: "run-1", endedAt: "2026-02-17T00:00:12.000Z", reason: "off" },
+  ]);
+});
+
+test("builds global v2 profile paths under ~/.pi/profiles/ext-prof/v2", () => {
+  assert.equal(profileDirectory("/home/tester"), path.join("/home/tester", ".pi", "profiles", "ext-prof", "v2"));
+  assert.match(createProfilePath({ homeDir: "/home/tester", startedAt: "2026-02-17T00:00:00.000Z", runId: "abc123" }), /\/home\/tester\/\.pi\/profiles\/ext-prof\/v2\/2026-02-17T00-00-00-000Z-abc123\.jsonl$/);
 });
