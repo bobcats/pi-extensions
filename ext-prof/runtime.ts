@@ -48,7 +48,6 @@ type ActiveRun = {
   outputPath: string;
   startedAt: string;
   windowStart: string;
-  totalCollector: Collector;
   deltaCollector: Collector;
   timer?: TimerLike;
   seq: number;
@@ -216,7 +215,6 @@ export function createRecorderRuntime(deps: RecorderRuntimeDeps = {}): RecorderR
         outputPath,
         startedAt,
         windowStart: startedAt,
-        totalCollector: createEmptyCollector(maxHandlers),
         deltaCollector: createEmptyCollector(maxHandlers),
         seq: 0,
       };
@@ -252,7 +250,6 @@ export function createRecorderRuntime(deps: RecorderRuntimeDeps = {}): RecorderR
     record(sample: RecordSample): void {
       if (!active) return;
       lastCwd = sample.cwd;
-      recordInvocation(active.totalCollector, sample);
       recordInvocation(active.deltaCollector, sample);
     },
 

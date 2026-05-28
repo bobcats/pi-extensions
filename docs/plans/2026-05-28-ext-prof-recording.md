@@ -79,7 +79,7 @@ Implement this as a TDD refactor in small slices:
 - [x] Add the process-global recorder runtime.
   - Create tests first: `ext-prof/runtime.test.ts`.
   - Create implementation: `ext-prof/runtime.ts`.
-  - Required behavior: process-global singleton owns active run state, total/delta collectors, output path, timer, write queue, seq, last write error, and consecutive failure count; `start()` is idempotent; `stop()` is no-op when inactive; `record()` updates memory only; `flush()` drains by swapping delta collectors before queued writes; empty flushes write nothing and do not increment seq; timer calls `.unref()`; successful writes reset failure count; three consecutive write failures auto-disable with reason `write_failures` when possible.
+  - Required behavior: process-global singleton owns active run state, delta collector, output path, timer, write queue, seq, last write error, and consecutive failure count; `start()` is idempotent; `stop()` is no-op when inactive; `record()` updates memory only; `flush()` drains by swapping delta collectors before queued writes; empty flushes write nothing and do not increment seq; timer calls `.unref()`; successful writes reset failure count; three consecutive write failures auto-disable with reason `write_failures` when possible.
   - Use dependency injection for home directory, clock, random/run id, write functions, and timer hooks so tests do not touch real global state or home directories.
   - Run: `cd ext-prof && npx tsx --test --test-timeout=5000 runtime.test.ts collector.test.ts persistence.test.ts`.
   - Expected signal: runtime tests cover idempotency, no hot-path IO, flushing, write failures, final stop, and reload-safe singleton behavior.

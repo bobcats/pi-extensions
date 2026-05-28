@@ -43,7 +43,7 @@ The storage directory is global. The current working directory is recorded as ro
 ## Recording model
 
 - `/ext-prof on` starts a process-global recorder runtime and writes `recording_start` before enabling recording.
-- Wrapped handlers do no filesystem IO. They only measure duration and update in-memory total/delta collectors.
+- Wrapped handlers do no filesystem IO. They only measure duration and update the in-memory delta collector.
 - A background 10s timer flushes non-empty aggregate deltas and is unref'd so it does not keep the process alive.
 - `/ext-prof` force-flushes an active run before reading all global v2 JSONL files.
 - `/ext-prof off` drains pending deltas, waits for queued writes, writes `recording_end`, and clears active collectors.
