@@ -96,7 +96,7 @@ Implement this as a TDD refactor in small slices:
   - Commit checkpoint: `feat(ext-prof): route wrapped handler timings through recorder runtime`.
   - Required skill: `tdd`.
 
-- [ ] Simplify controller commands to `on`, `off`, `status`, and default report.
+- [x] Simplify controller commands to `on`, `off`, `status`, and default report.
   - Modify tests first: `ext-prof/commands.test.ts`, `ext-prof/formatter.test.ts`.
   - Modify implementation: `ext-prof/commands.ts`, `ext-prof/formatter.ts`.
   - Required behavior: remove public `save`/`reset`; `on` ensures patch success before `recording_start`; `off` waits for final flush/end; `status` shows runtime state only; empty args force-flush if active and render global/current-cwd report; unknown subcommands return a clear error.
