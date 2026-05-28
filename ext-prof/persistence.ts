@@ -1,5 +1,5 @@
 import path from "node:path";
-import { appendFile, mkdir, rename, writeFile } from "node:fs/promises";
+import { appendFile, mkdir } from "node:fs/promises";
 import type { Surface } from "./collector.ts";
 
 export type RecordingStartRow = {
@@ -51,19 +51,3 @@ export async function appendProfileRows(outputPath: string, rows: ProfileRow[]):
   await appendFile(outputPath, `${rows.map((row) => JSON.stringify(row)).join("\n")}\n`, "utf8");
 }
 
-export async function saveSnapshot(args: {
-  outputPath: string;
-  sessionMeta: Record<string, unknown> & { schemaVersion: 1 };
-  aggregates: Array<Record<string, unknown>>;
-}): Promise<void> {
-  await mkdir(path.dirname(args.outputPath), { recursive: true });
-
-  const tmp = `${args.outputPath}.tmp-${process.pid}`;
-  const lines = [
-    JSON.stringify({ type: "session_meta", ...args.sessionMeta }),
-    ...args.aggregates.map((row) => JSON.stringify({ type: "aggregate", ...row })),
-  ];
-
-  await writeFile(tmp, `${lines.join("\n")}\n`, "utf8");
-  await rename(tmp, args.outputPath);
-}

@@ -114,7 +114,7 @@ Implement this as a TDD refactor in small slices:
   - Commit checkpoint: `feat(ext-prof): integrate durable recording lifecycle`.
   - Required skill: `tdd`.
 
-- [ ] Update user-facing documentation and remove obsolete snapshot language.
+- [x] Update user-facing documentation and remove obsolete snapshot language.
   - Modify: `ext-prof/README.md`.
   - Required behavior: document only `/ext-prof on`, `/ext-prof off`, `/ext-prof status`, and `/ext-prof`; describe global path `~/.pi/profiles/ext-prof/v2/`, background aggregate deltas, status bar meanings, and the no-hot-path-IO design.
   - Run: `rg -n "save|reset|snapshot|session_meta|~/.pi/profiles/<project>" ext-prof README.md`.
