@@ -87,6 +87,55 @@ test("registers ext-prof command and handles status", async () => {
   }
 });
 
+test("explicit on retries a cached patch failure", async () => {
+  clearGlobals();
+  const { writes } = await installTestRuntime();
+  const commands = new Map<string, (args: string, ctx: { hasUI: boolean; ui: { notify: (...args: unknown[]) => void } }) => Promise<void>>();
+  let stdout = "";
+
+  (globalThis as Record<symbol, unknown>)[GLOBAL_PATCH_STATE_KEY] = {
+    patched: false,
+    reason: "runner import failed: test",
+    coverage: { events: "missing", commands: "missing", tools: "missing" },
+  };
+  (globalThis as Record<symbol, unknown>)[GLOBAL_PATCHED_KEY] = true;
+
+  const pi = {
+    registerCommand(
+      name: string,
+      options: {
+        handler: (args: string, ctx: { hasUI: boolean; ui: { notify: (...args: unknown[]) => void } }) => Promise<void>;
+      },
+    ) {
+      commands.set(name, options.handler);
+    },
+    registerShortcut() {
+      return undefined;
+    },
+    on() {
+      return undefined;
+    },
+  } as never;
+
+  const originalWrite = process.stdout.write.bind(process.stdout);
+  (process.stdout.write as unknown as (chunk: string) => boolean) = ((chunk: string) => {
+    stdout += chunk;
+    return true;
+  }) as never;
+
+  try {
+    await profilerExtension(pi);
+    await commands.get("ext-prof")!("on", { hasUI: false, ui: { notify() {} } });
+
+    assert.match(stdout, /recording: on/);
+    assert.match(stdout, /patch: already patched/);
+    assert.deepEqual(writes.map((rows) => rows[0]?.type), ["recording_start"]);
+  } finally {
+    process.stdout.write = originalWrite;
+    clearGlobals();
+  }
+});
+
 test("warning message uses ext-prof not ext-prof-spike", async () => {
   clearGlobals();
   await installTestRuntime();

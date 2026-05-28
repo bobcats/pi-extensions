@@ -183,14 +183,15 @@ export default async function extProfiler(pi: ExtensionAPI) {
   let patchState: PatchStatus = defaultPatchState();
   let patchAttempted = false;
 
-  const ensurePatched = async (): Promise<PatchStatus> => {
+  const ensurePatched = async (options: { retry?: boolean } = {}): Promise<PatchStatus> => {
     const g = globals();
-    if (g[GLOBAL_PATCH_STATE_KEY]) {
-      patchState = g[GLOBAL_PATCH_STATE_KEY] as PatchStatus;
+    const cachedPatchState = g[GLOBAL_PATCH_STATE_KEY];
+    if (cachedPatchState && (!options.retry || patchUsable(cachedPatchState))) {
+      patchState = cachedPatchState;
       return patchState;
     }
 
-    if (patchAttempted) {
+    if (patchAttempted && (!options.retry || patchUsable(patchState))) {
       return patchState;
     }
 
@@ -258,7 +259,7 @@ export default async function extProfiler(pi: ExtensionAPI) {
   await ensurePatched();
 
   const controller = createController({
-    patch: ensurePatched,
+    patch: () => ensurePatched({ retry: true }),
     initialPatchState: patchState,
     runtime,
     renderReport: async ({ currentCwd }) => {
