@@ -98,6 +98,37 @@ test("stop drains deltas, waits for writes, records end, clears active collector
   assert.equal(writes.length, 3);
 });
 
+test("stop disables recording before awaiting the final flush write", async () => {
+  let releaseFlush: () => void = () => {};
+  const flushBlocked = new Promise<void>((resolve) => {
+    releaseFlush = resolve;
+  });
+  const writes: ProfileRow[][] = [];
+  const { runtime } = makeRuntime({
+    appendRows: async (_outputPath, rows) => {
+      writes.push(rows);
+      if (rows[0]?.type === "aggregate_delta") {
+        await flushBlocked;
+      }
+    },
+  });
+  await runtime.start();
+  runtime.record({ cwd: "/repo-before", extensionPath: "a.ts", surface: "event", name: "before-stop", ms: 5, ok: true });
+
+  const stopping = runtime.stop("off");
+  await Promise.resolve();
+  runtime.record({ cwd: "/repo-during-stop", extensionPath: "a.ts", surface: "event", name: "during-stop", ms: 99, ok: true });
+  releaseFlush();
+  await stopping;
+
+  assert.deepEqual(
+    writes.flatMap((rows) => rows.filter((row) => row.type === "aggregate_delta").map((row) => row.name)),
+    ["before-stop"],
+  );
+  assert.equal(runtime.status().active, false);
+  assert.equal(runtime.status().lastCwd, "/repo-before");
+});
+
 test("initial write failure leaves recording inactive", async () => {
   const { runtime } = makeRuntime({ appendRows: async () => { throw new Error("disk full"); } });
 

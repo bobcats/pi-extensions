@@ -3,7 +3,7 @@ import { wrapCommandHandler, wrapEventHandler, wrapToolExecute } from "./wrapper
 import type { Coverage } from "./formatter.ts";
 import type { RecorderRuntime } from "./runtime.ts";
 
-const PATCHED = Symbol.for("ext-prof.v1.patched");
+const PATCHED = Symbol.for("ext-prof.v2.patched");
 
 export type CoverageState = {
   events: Coverage;

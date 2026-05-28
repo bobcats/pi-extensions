@@ -122,14 +122,14 @@ Implement this as a TDD refactor in small slices:
   - Commit checkpoint: `docs(ext-prof): document durable recording workflow`.
   - Required skill: `write-docs`.
 
-- [ ] Run full ext-prof verification and repository hotspot scan.
+- [x] Run full ext-prof verification and repository hotspot scan.
   - Run: `cd ext-prof && npx tsx --test --test-timeout=5000 *.test.ts`.
   - Run: `slop_scan` on `ext-prof`.
   - Run: `git diff --check`.
   - Expected signal: all ext-prof tests pass, no whitespace errors, slop-scan findings are either addressed or explicitly judged unrelated.
   - Required skill: `verify`.
 
-- [ ] Request a focused code review before final handoff.
+- [x] Request a focused code review before final handoff.
   - Scope: ext-prof durable recording workflow implementation and tests.
   - Include in review prompt: no hot-path IO, reload/session lifecycle correctness, write-failure behavior, v2 row parsing/reporting, and removal of `save`/`reset` public API.
   - Expected signal: no blocking findings, or blocking findings are fixed and re-verified.

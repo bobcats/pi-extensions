@@ -149,17 +149,11 @@ export function createRecorderRuntime(deps: RecorderRuntimeDeps = {}): RecorderR
     return queued;
   };
 
-  const flush = async (): Promise<RecorderStatus> => {
-    const run = active;
-    if (!run) {
-      await writeQueue;
-      return status();
-    }
-
+  const flushRun = async (run: ActiveRun): Promise<void> => {
     const handlers = summarizeByHandler(run.deltaCollector);
     if (handlers.length === 0) {
       await writeQueue;
-      return status();
+      return;
     }
 
     run.deltaCollector = createEmptyCollector(maxHandlers);
@@ -187,6 +181,16 @@ export function createRecorderRuntime(deps: RecorderRuntimeDeps = {}): RecorderR
     }));
 
     await enqueueWrite(run.outputPath, rows);
+  };
+
+  const flush = async (): Promise<RecorderStatus> => {
+    const run = active;
+    if (!run) {
+      await writeQueue;
+      return status();
+    }
+
+    await flushRun(run);
     return status();
   };
 
@@ -234,12 +238,11 @@ export function createRecorderRuntime(deps: RecorderRuntimeDeps = {}): RecorderR
         return status();
       }
 
-      clearActiveTimer();
-      await runtime.flush();
       const run = active;
-      if (!run) return status();
+      clearActiveTimer();
       active = undefined;
       disabledReason = reason;
+      await flushRun(run);
       await enqueueWrite(run.outputPath, [
         { schemaVersion: 2, type: "recording_end", runId: run.runId, endedAt: now(), reason },
       ]);

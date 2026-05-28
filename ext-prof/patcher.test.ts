@@ -67,6 +67,20 @@ test("patches all three surfaces and reports coverage", async () => {
   ]);
 });
 
+test("v2 patching still instruments a runner marked with the old v1 sentinel", async () => {
+  const FakeRunner = createFakeRunnerCtor();
+  (FakeRunner.prototype as Record<symbol, unknown>)[Symbol.for("ext-prof.v1.patched")] = true;
+  const records: RecordSample[] = [];
+
+  const status = patchRunnerPrototype({ RunnerCtor: FakeRunner as never, getRuntime: () => recorder(records) });
+  const runner = new FakeRunner();
+  runner.bindCore();
+  await runner.extensions[0].commands.get("hello")?.handler("", { cwd: "/repo" } as never);
+
+  assert.equal(status.patched, true);
+  assert.equal(records.length, 1);
+});
+
 test("wrapped handlers look up runtime at invocation time to avoid stale collectors", async () => {
   const FakeRunner = createFakeRunnerCtor();
   const firstRecords: RecordSample[] = [];
