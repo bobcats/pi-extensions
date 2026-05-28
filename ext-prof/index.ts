@@ -5,22 +5,17 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import type { AutocompleteItem } from "@mariozechner/pi-tui";
-import {
-  createCollector,
-  resetCollector,
-  summarizeByExtension,
-  summarizeByHandler,
-  type Collector,
-} from "./collector.ts";
 import { createController } from "./commands.ts";
-import { formatStatus, formatVerboseReport, type VerboseExtensionRow } from "./formatter.ts";
+import { formatProfileReport } from "./formatter.ts";
 import { patchRunnerPrototype, type PatchStatus } from "./patcher.ts";
-import { saveSnapshot } from "./persistence.ts";
+import { profileDirectory } from "./persistence.ts";
+import { readProfileReport } from "./report.ts";
+import { getGlobalRecorderRuntime } from "./runtime.ts";
 
 const require = createRequire(import.meta.url);
 
-const GLOBAL_PATCHED_KEY = Symbol.for("ext-prof.v1.runner-patched");
-const GLOBAL_PATCH_STATE_KEY = Symbol.for("ext-prof.v1.patch-state");
+const GLOBAL_PATCHED_KEY = Symbol.for("ext-prof.v2.runner-patched");
+const GLOBAL_PATCH_STATE_KEY = Symbol.for("ext-prof.v2.patch-state");
 const ENABLE_SHORTCUT = "ctrl+alt+p";
 
 type GlobalProfiler = typeof globalThis & {
@@ -128,56 +123,8 @@ function resolveRunnerModuleUrl(): string {
   throw new Error(`unable to locate core/extensions/runner.js.${scanned}`);
 }
 
-function buildVerboseRows(collector: Collector): VerboseExtensionRow[] {
-  const byExtension = summarizeByExtension(collector);
-  const handlers = summarizeByHandler(collector);
-
-  const byPath = new Map<string, typeof handlers>();
-  for (const handler of handlers) {
-    const rows = byPath.get(handler.extensionPath) ?? [];
-    rows.push(handler);
-    byPath.set(handler.extensionPath, rows);
-  }
-
-  return byExtension.map((row) => ({
-    extensionPath: row.extensionPath,
-    calls: row.calls,
-    totalMs: row.totalMs,
-    maxMs: row.maxMs,
-    errorCount: row.errorCount,
-    handlers:
-      byPath.get(row.extensionPath)?.map((h) => ({
-        surface: h.surface,
-        name: h.name,
-        calls: h.calls,
-        totalMs: h.totalMs,
-        maxMs: h.maxMs,
-        errorCount: h.errorCount,
-      })) ?? [],
-  }));
-}
-
-function currentProjectName(): string {
-  const base = path.basename(process.cwd());
-  return base || "project";
-}
-
-function renderStatusIndicator(args: { enabled: boolean; patchState: PatchStatus; theme: { fg: (color: string, text: string) => string } }): string {
-  if (args.enabled) {
-    if (args.patchState.patched) {
-      return args.theme.fg("accent", "prof:on");
-    }
-    return args.theme.fg("warning", "prof:on!patch");
-  }
-
-  return args.theme.fg("dim", "prof:off");
-}
-
-export default async function extProfiler(pi: ExtensionAPI) {
-  const collector = createCollector({ maxHandlers: 10_000 });
-  let enabled = false;
-
-  let patchState: PatchStatus = {
+function defaultPatchState(): PatchStatus {
+  return {
     patched: false,
     reason: "not patched",
     coverage: {
@@ -186,7 +133,44 @@ export default async function extProfiler(pi: ExtensionAPI) {
       tools: "missing",
     },
   };
+}
 
+function patchUsable(patch: PatchStatus): boolean {
+  return patch.patched || patch.reason === "already patched";
+}
+
+function renderStatusIndicator(args: {
+  runtime: ReturnType<typeof getGlobalRecorderRuntime>;
+  patchState: PatchStatus;
+  theme: { fg: (color: string, text: string) => string };
+}): string {
+  const status = args.runtime.status();
+  if (!status.active) {
+    return args.theme.fg("dim", "prof:off");
+  }
+
+  if (!patchUsable(args.patchState)) {
+    return args.theme.fg("warning", "prof:on!patch");
+  }
+
+  if (status.lastWriteError || status.consecutiveWriteFailures > 0) {
+    return args.theme.fg("warning", "prof:on!write");
+  }
+
+  return args.theme.fg("accent", "prof:on");
+}
+
+function shutdownReason(event: unknown): string | undefined {
+  if (event && typeof event === "object" && "reason" in event) {
+    const reason = (event as { reason?: unknown }).reason;
+    if (typeof reason === "string") return reason;
+  }
+  return undefined;
+}
+
+export default async function extProfiler(pi: ExtensionAPI) {
+  const runtime = getGlobalRecorderRuntime();
+  let patchState: PatchStatus = defaultPatchState();
   let patchAttempted = false;
 
   const ensurePatched = async (): Promise<PatchStatus> => {
@@ -253,8 +237,7 @@ export default async function extProfiler(pi: ExtensionAPI) {
 
     patchState = patchRunnerPrototype({
       RunnerCtor: ExtensionRunner,
-      collector,
-      shouldRecord: () => enabled,
+      getRuntime: () => getGlobalRecorderRuntime(),
     });
 
     g[GLOBAL_PATCHED_KEY] = true;
@@ -267,63 +250,15 @@ export default async function extProfiler(pi: ExtensionAPI) {
   const controller = createController({
     patch: ensurePatched,
     initialPatchState: patchState,
-    save: async (outputPath: string) => {
-      const aggregates = summarizeByHandler(collector).map((row) => ({
-        extensionPath: row.extensionPath,
-        surface: row.surface,
-        name: row.name,
-        calls: row.calls,
-        totalMs: row.totalMs,
-        maxMs: row.maxMs,
-        errorCount: row.errorCount,
-      }));
-
-      const status = patchState;
-
-      await saveSnapshot({
-        outputPath,
-        sessionMeta: {
-          schemaVersion: 1,
-          project: currentProjectName(),
-          patch: status.reason,
-          patched: status.patched,
-          coverage: status.coverage,
-          savedAt: new Date().toISOString(),
-          overheadGoalPct: 1,
-          enabled,
-        },
-        aggregates,
-      });
-
-      return outputPath;
-    },
-    projectName: currentProjectName(),
-    homeDir: homedir(),
-    reset: () => resetCollector(collector),
-    renderDefault: () => {
-      if (!enabled) {
-        return formatStatus({
-          enabled,
-          patch: patchState,
-          coverage: patchState.coverage,
-        });
-      }
-
-      return formatVerboseReport({
-        rows: buildVerboseRows(collector),
-        patchReason: patchState.reason,
-        overhead: {
-          goalPct: 1,
-          observedPct: null,
-        },
+    runtime,
+    renderReport: async () => {
+      const report = await readProfileReport({ profileDir: profileDirectory(homedir()) });
+      return formatProfileReport({
+        report,
+        currentCwd: runtime.status().lastCwd ?? process.cwd(),
       });
     },
   });
-
-  const syncRuntimeState = () => {
-    enabled = controller.isEnabled();
-    patchState = controller.patchState();
-  };
 
   const updateStatusBar = (ctx: { hasUI: boolean; ui: { setStatus: (key: string, text?: string) => void; theme: { fg: (color: string, text: string) => string } } }) => {
     if (!ctx.hasUI) return;
@@ -331,7 +266,7 @@ export default async function extProfiler(pi: ExtensionAPI) {
     ctx.ui.setStatus(
       "ext-prof",
       renderStatusIndicator({
-        enabled,
+        runtime,
         patchState,
         theme: ctx.ui.theme,
       }),
@@ -339,11 +274,9 @@ export default async function extProfiler(pi: ExtensionAPI) {
   };
 
   const EXT_PROF_SUBCOMMANDS: AutocompleteItem[] = [
-    { value: "on",     label: "on",     description: "Enable profiling" },
-    { value: "off",    label: "off",    description: "Disable profiling" },
-    { value: "reset",  label: "reset",  description: "Clear collected data" },
-    { value: "save",   label: "save",   description: "Save profile to disk" },
-    { value: "status", label: "status", description: "Show profiler status" },
+    { value: "on",     label: "on",     description: "Start recording" },
+    { value: "off",    label: "off",    description: "Stop recording" },
+    { value: "status", label: "status", description: "Show recording status" },
   ];
 
   pi.registerCommand("ext-prof", {
@@ -354,7 +287,7 @@ export default async function extProfiler(pi: ExtensionAPI) {
     },
     handler: async (args, ctx) => {
       const response = await controller.handle(args);
-      syncRuntimeState();
+      patchState = controller.patchState();
       updateStatusBar(ctx);
 
       if (ctx.hasUI) {
@@ -367,10 +300,10 @@ export default async function extProfiler(pi: ExtensionAPI) {
   });
 
   pi.registerShortcut(ENABLE_SHORTCUT, {
-    description: "Toggle extension profiler",
+    description: "Toggle extension profiler recording",
     handler: async (ctx) => {
-      const response = await controller.handle(enabled ? "off" : "on");
-      syncRuntimeState();
+      const response = await controller.handle(runtime.status().active ? "off" : "on");
+      patchState = controller.patchState();
       updateStatusBar(ctx);
 
       if (ctx.hasUI) {
@@ -384,7 +317,7 @@ export default async function extProfiler(pi: ExtensionAPI) {
 
   pi.on("session_start", async (_event, ctx) => {
     updateStatusBar(ctx);
-    if (!patchState.patched && patchState.reason !== "already patched") {
+    if (!patchUsable(patchState)) {
       const warning = `ext-prof inactive: ${patchState.reason}`;
       if (ctx.hasUI) {
         ctx.ui.notify(warning, "warning");
@@ -392,5 +325,15 @@ export default async function extProfiler(pi: ExtensionAPI) {
         process.stdout.write(`${warning}\n`);
       }
     }
+  });
+
+  pi.on("session_shutdown", async (event, ctx) => {
+    const reason = shutdownReason(event);
+    if (reason === "quit") {
+      await runtime.stop("quit");
+    } else if (runtime.status().active) {
+      await runtime.flush();
+    }
+    updateStatusBar(ctx);
   });
 }

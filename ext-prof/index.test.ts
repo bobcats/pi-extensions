@@ -1,11 +1,50 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import os from "node:os";
+import path from "node:path";
+import { mkdtemp } from "node:fs/promises";
 import profilerExtension from "./index.ts";
+import { getGlobalRecorderRuntime, resetGlobalRecorderRuntimeForTests } from "./runtime.ts";
+import type { ProfileRow } from "./persistence.ts";
 
-const GLOBAL_PATCHED_KEY = Symbol.for("ext-prof.v1.runner-patched");
-const GLOBAL_PATCH_STATE_KEY = Symbol.for("ext-prof.v1.patch-state");
+const GLOBAL_PATCHED_KEY = Symbol.for("ext-prof.v2.runner-patched");
+const GLOBAL_PATCH_STATE_KEY = Symbol.for("ext-prof.v2.patch-state");
+
+function clearGlobals() {
+  delete (globalThis as Record<symbol, unknown>)[GLOBAL_PATCHED_KEY];
+  delete (globalThis as Record<symbol, unknown>)[GLOBAL_PATCH_STATE_KEY];
+  resetGlobalRecorderRuntimeForTests();
+}
+
+function setPatched() {
+  (globalThis as Record<symbol, unknown>)[GLOBAL_PATCH_STATE_KEY] = {
+    patched: true,
+    reason: "patched",
+    coverage: { events: "instrumented", commands: "instrumented", tools: "instrumented" },
+  };
+}
+
+async function installTestRuntime() {
+  const writes: ProfileRow[][] = [];
+  const dir = await mkdtemp(path.join(os.tmpdir(), "ext-prof-index-"));
+  let tick = 0;
+  const runtime = getGlobalRecorderRuntime({
+    homeDir: dir,
+    now: () => new Date(Date.UTC(2026, 1, 17, 0, 0, 0, tick++ * 10_000)).toISOString(),
+    randomId: () => "run-1",
+    appendRows: async (_outputPath, rows) => {
+      writes.push(rows);
+    },
+    setInterval: () => ({ unref() {} }),
+    clearInterval: () => {},
+  });
+  return { runtime, writes, dir };
+}
 
 test("registers ext-prof command and handles status", async () => {
+  clearGlobals();
+  setPatched();
+  await installTestRuntime();
   const commands = new Map<
     string,
     (args: string, ctx: { hasUI: boolean; ui: { notify: (...args: unknown[]) => void } }) => Promise<void>
@@ -35,24 +74,22 @@ test("registers ext-prof command and handles status", async () => {
     return true;
   }) as never;
 
-  delete (globalThis as Record<symbol, unknown>)[GLOBAL_PATCHED_KEY];
-  delete (globalThis as Record<symbol, unknown>)[GLOBAL_PATCH_STATE_KEY];
-
   try {
     await profilerExtension(pi);
     const handler = commands.get("ext-prof");
     assert.ok(handler);
     await handler!("status", { hasUI: false, ui: { notify() {} } });
-    assert.match(stdout, /enabled: off/);
-    assert.doesNotMatch(stdout, /patch: not patched/);
+    assert.match(stdout, /recording: off/);
+    assert.doesNotMatch(stdout, /save|reset/);
   } finally {
     process.stdout.write = originalWrite;
-    delete (globalThis as Record<symbol, unknown>)[GLOBAL_PATCHED_KEY];
-    delete (globalThis as Record<symbol, unknown>)[GLOBAL_PATCH_STATE_KEY];
+    clearGlobals();
   }
 });
 
 test("warning message uses ext-prof not ext-prof-spike", async () => {
+  clearGlobals();
+  await installTestRuntime();
   let stdout = "";
   const events = new Map<string, (event: unknown, ctx: { hasUI: boolean; ui: { notify: (msg: string, level: string) => void; setStatus: (key: string, text?: string) => void; theme: { fg: (_color: string, text: string) => string } } }) => Promise<void>>();
 
@@ -64,14 +101,11 @@ test("warning message uses ext-prof not ext-prof-spike", async () => {
     },
   } as never;
 
-  // Pre-set a failed patch state so ensurePatched() picks it up
-  // and session_start emits the warning
   (globalThis as Record<symbol, unknown>)[GLOBAL_PATCH_STATE_KEY] = {
     patched: false,
     reason: "runner import failed: test",
     coverage: { events: "missing", commands: "missing", tools: "missing" },
   };
-  delete (globalThis as Record<symbol, unknown>)[GLOBAL_PATCHED_KEY];
 
   const originalWrite = process.stdout.write.bind(process.stdout);
   (process.stdout.write as unknown as (chunk: string) => boolean) = ((chunk: string) => {
@@ -95,12 +129,14 @@ test("warning message uses ext-prof not ext-prof-spike", async () => {
     assert.match(stdout, /ext-prof inactive/, "warning should say 'ext-prof inactive'");
   } finally {
     process.stdout.write = originalWrite;
-    delete (globalThis as Record<symbol, unknown>)[GLOBAL_PATCHED_KEY];
-    delete (globalThis as Record<symbol, unknown>)[GLOBAL_PATCH_STATE_KEY];
+    clearGlobals();
   }
 });
 
-test("registers shortcut to enable profiler and updates status bar", async () => {
+test("registers shortcut to toggle recording and updates status bar", async () => {
+  clearGlobals();
+  setPatched();
+  await installTestRuntime();
   const shortcuts = new Map<string, (ctx: { hasUI: boolean; ui: { setStatus: (key: string, text?: string) => void } }) => Promise<void>>();
   const events = new Map<string, (event: unknown, ctx: { hasUI: boolean; ui: { setStatus: (key: string, text?: string) => void; theme: { fg: (_color: string, text: string) => string }; notify: (message: string) => void } }) => Promise<void>>();
   const statuses: Array<{ key: string; text: string | undefined }> = [];
@@ -131,9 +167,6 @@ test("registers shortcut to enable profiler and updates status bar", async () =>
     },
   } as never;
 
-  delete (globalThis as Record<symbol, unknown>)[GLOBAL_PATCHED_KEY];
-  delete (globalThis as Record<symbol, unknown>)[GLOBAL_PATCH_STATE_KEY];
-
   try {
     await profilerExtension(pi);
 
@@ -156,12 +189,14 @@ test("registers shortcut to enable profiler and updates status bar", async () =>
     assert.equal(statuses.at(-1)?.key, "ext-prof");
     assert.match(statuses.at(-1)?.text ?? "", /prof:off/);
   } finally {
-    delete (globalThis as Record<symbol, unknown>)[GLOBAL_PATCHED_KEY];
-    delete (globalThis as Record<symbol, unknown>)[GLOBAL_PATCH_STATE_KEY];
+    clearGlobals();
   }
 });
 
-test("ext-prof getArgumentCompletions returns all subcommands for empty prefix", async () => {
+test("ext-prof getArgumentCompletions returns only recording subcommands", async () => {
+  clearGlobals();
+  setPatched();
+  await installTestRuntime();
   const commands = new Map<string, any>();
 
   const pi = {
@@ -169,28 +204,22 @@ test("ext-prof getArgumentCompletions returns all subcommands for empty prefix",
     registerShortcut() { return undefined; },
     on() { return undefined; },
   } as never;
-
-  delete (globalThis as Record<symbol, unknown>)[GLOBAL_PATCHED_KEY];
-  delete (globalThis as Record<symbol, unknown>)[GLOBAL_PATCH_STATE_KEY];
 
   try {
     await profilerExtension(pi);
     const completions = commands.get("ext-prof").getArgumentCompletions("");
     assert.ok(Array.isArray(completions));
-    assert.equal(completions.length, 5);
-    const values = completions.map((c: any) => c.value);
-    assert.ok(values.includes("on"));
-    assert.ok(values.includes("off"));
-    assert.ok(values.includes("reset"));
-    assert.ok(values.includes("save"));
-    assert.ok(values.includes("status"));
+    assert.equal(completions.length, 3);
+    assert.deepEqual(completions.map((c: any) => c.value).sort(), ["off", "on", "status"]);
   } finally {
-    delete (globalThis as Record<symbol, unknown>)[GLOBAL_PATCHED_KEY];
-    delete (globalThis as Record<symbol, unknown>)[GLOBAL_PATCH_STATE_KEY];
+    clearGlobals();
   }
 });
 
 test("ext-prof getArgumentCompletions filters by prefix and returns null for no match", async () => {
+  clearGlobals();
+  setPatched();
+  await installTestRuntime();
   const commands = new Map<string, any>();
 
   const pi = {
@@ -198,9 +227,6 @@ test("ext-prof getArgumentCompletions filters by prefix and returns null for no 
     registerShortcut() { return undefined; },
     on() { return undefined; },
   } as never;
-
-  delete (globalThis as Record<symbol, unknown>)[GLOBAL_PATCHED_KEY];
-  delete (globalThis as Record<symbol, unknown>)[GLOBAL_PATCH_STATE_KEY];
 
   try {
     await profilerExtension(pi);
@@ -208,7 +234,7 @@ test("ext-prof getArgumentCompletions filters by prefix and returns null for no 
 
     const sMatches = fn("s");
     assert.ok(Array.isArray(sMatches));
-    assert.equal(sMatches.map((c: any) => c.value).sort().join(","), "save,status");
+    assert.equal(sMatches.map((c: any) => c.value).sort().join(","), "status");
 
     const oMatches = fn("o");
     assert.ok(Array.isArray(oMatches));
@@ -216,7 +242,40 @@ test("ext-prof getArgumentCompletions filters by prefix and returns null for no 
 
     assert.equal(fn("xyz"), null);
   } finally {
-    delete (globalThis as Record<symbol, unknown>)[GLOBAL_PATCHED_KEY];
-    delete (globalThis as Record<symbol, unknown>)[GLOBAL_PATCH_STATE_KEY];
+    clearGlobals();
+  }
+});
+
+test("session shutdown flushes reload-like reasons and only quit ends the run", async () => {
+  clearGlobals();
+  setPatched();
+  const { runtime, writes } = await installTestRuntime();
+  const events = new Map<string, (event: { reason?: string }, ctx: { hasUI: boolean; ui: { setStatus: (key: string, text?: string) => void; theme: { fg: (_color: string, text: string) => string }; notify: (message: string) => void } }) => Promise<void>>();
+  const shortcuts = new Map<string, (ctx: { hasUI: boolean; ui: any }) => Promise<void>>();
+  const ui = {
+    setStatus() {},
+    theme: { fg(_color: string, text: string) { return text; } },
+    notify() {},
+  };
+  const pi = {
+    registerCommand() { return undefined; },
+    registerShortcut(name: string, options: { handler: (ctx: { hasUI: boolean; ui: typeof ui }) => Promise<void> }) { shortcuts.set(name, options.handler); },
+    on(name: string, handler: any) { events.set(name, handler); },
+  } as never;
+
+  try {
+    await profilerExtension(pi);
+    await shortcuts.get("ctrl+alt+p")!({ hasUI: true, ui });
+    runtime.record({ cwd: "/repo", extensionPath: "a.ts", surface: "event", name: "turn_start", ms: 5, ok: true });
+
+    await events.get("session_shutdown")!({ reason: "reload" }, { hasUI: true, ui });
+    assert.deepEqual(writes.map((rows) => rows[0]?.type), ["recording_start", "aggregate_delta"]);
+    assert.equal(runtime.status().active, true);
+
+    await events.get("session_shutdown")!({ reason: "quit" }, { hasUI: true, ui });
+    assert.deepEqual(writes.map((rows) => rows[0]?.type), ["recording_start", "aggregate_delta", "recording_end"]);
+    assert.equal(runtime.status().active, false);
+  } finally {
+    clearGlobals();
   }
 });

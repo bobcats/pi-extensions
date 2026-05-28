@@ -105,7 +105,7 @@ Implement this as a TDD refactor in small slices:
   - Commit checkpoint: `feat(ext-prof): simplify command API around recording`.
   - Required skill: `tdd`.
 
-- [ ] Integrate the runtime into the extension entrypoint and lifecycle.
+- [x] Integrate the runtime into the extension entrypoint and lifecycle.
   - Modify tests first: `ext-prof/index.test.ts`.
   - Modify implementation: `ext-prof/index.ts`.
   - Required behavior: autocomplete returns only `on`, `off`, `status`; status bar shows `prof:off`, `prof:on`, `prof:on!write`, or `prof:on!patch`; `Ctrl+Alt+P` toggles `on`/`off`; `session_shutdown` reason `quit` closes the run; `reload`, `new`, `resume`, and `fork` flush but keep recording open; `session_start` refreshes status and keeps global runtime state.
