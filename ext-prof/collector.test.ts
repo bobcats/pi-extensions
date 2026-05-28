@@ -11,6 +11,7 @@ test("records totals by extension/surface/name", () => {
   const collector = createCollector({ maxHandlers: 10_000 });
 
   recordInvocation(collector, {
+    cwd: "/repo",
     extensionPath: "a.ts",
     surface: "event",
     name: "turn_start",
@@ -18,6 +19,7 @@ test("records totals by extension/surface/name", () => {
     ok: true,
   });
   recordInvocation(collector, {
+    cwd: "/repo",
     extensionPath: "a.ts",
     surface: "command",
     name: "foo",
@@ -32,10 +34,59 @@ test("records totals by extension/surface/name", () => {
   assert.equal(summarizeByHandler(collector).length, 2);
 });
 
+test("keeps handler totals separate by cwd while extension totals stay global", () => {
+  const collector = createCollector({ maxHandlers: 10_000 });
+
+  recordInvocation(collector, {
+    cwd: "/repo-a",
+    extensionPath: "a.ts",
+    surface: "command",
+    name: "foo",
+    ms: 10,
+    ok: true,
+  });
+  recordInvocation(collector, {
+    cwd: "/repo-b",
+    extensionPath: "a.ts",
+    surface: "command",
+    name: "foo",
+    ms: 20,
+    ok: false,
+  });
+
+  assert.deepEqual(summarizeByExtension(collector), [
+    { extensionPath: "a.ts", calls: 2, totalMs: 30, maxMs: 20, errorCount: 1 },
+  ]);
+
+  assert.deepEqual(summarizeByHandler(collector), [
+    {
+      cwd: "/repo-b",
+      extensionPath: "a.ts",
+      surface: "command",
+      name: "foo",
+      calls: 1,
+      totalMs: 20,
+      maxMs: 20,
+      errorCount: 1,
+    },
+    {
+      cwd: "/repo-a",
+      extensionPath: "a.ts",
+      surface: "command",
+      name: "foo",
+      calls: 1,
+      totalMs: 10,
+      maxMs: 10,
+      errorCount: 0,
+    },
+  ]);
+});
+
 test("uses <unknown-extension> fallback and enforces cardinality cap", () => {
   const collector = createCollector({ maxHandlers: 1 });
 
   recordInvocation(collector, {
+    cwd: "/repo",
     extensionPath: "",
     surface: "event",
     name: "turn_start",
@@ -44,6 +95,7 @@ test("uses <unknown-extension> fallback and enforces cardinality cap", () => {
   });
 
   recordInvocation(collector, {
+    cwd: "/repo",
     extensionPath: "a.ts",
     surface: "event",
     name: "turn_end",

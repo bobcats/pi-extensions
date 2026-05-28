@@ -11,6 +11,7 @@ test("compat exports provide extension aggregation", () => {
   const collector = createCollector({ maxHandlers: 10_000 });
 
   recordInvocation(collector, {
+    cwd: "/repo",
     extensionPath: "a.ts",
     surface: "event",
     name: "turn_start",
@@ -18,6 +19,7 @@ test("compat exports provide extension aggregation", () => {
     ok: true,
   });
   recordInvocation(collector, {
+    cwd: "/repo",
     extensionPath: "a.ts",
     surface: "event",
     name: "turn_end",

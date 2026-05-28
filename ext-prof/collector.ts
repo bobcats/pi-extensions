@@ -8,6 +8,7 @@ export type Aggregate = {
 };
 
 export type HandlerAggregate = Aggregate & {
+  cwd: string;
   extensionPath: string;
   surface: Surface;
   name: string;
@@ -33,8 +34,8 @@ export function createCollector(args: { maxHandlers: number; unknownExtensionKey
   };
 }
 
-const keyOf = (extensionPath: string, surface: Surface, name: string) =>
-  `${extensionPath}\u001f${surface}\u001f${name}`;
+const keyOf = (cwd: string, extensionPath: string, surface: Surface, name: string) =>
+  `${cwd}\u001f${extensionPath}\u001f${surface}\u001f${name}`;
 
 function upsertAggregate(target: Map<string, Aggregate>, key: string, ms: number, ok: boolean): Aggregate {
   const row = target.get(key) ?? { calls: 0, totalMs: 0, maxMs: 0, errorCount: 0 };
@@ -48,10 +49,11 @@ function upsertAggregate(target: Map<string, Aggregate>, key: string, ms: number
 
 export function recordInvocation(
   collector: Collector,
-  sample: { extensionPath: string | undefined; surface: Surface; name: string; ms: number; ok: boolean },
+  sample: { cwd?: string | undefined; extensionPath: string | undefined; surface: Surface; name: string; ms: number; ok: boolean },
 ): void {
+  const cwd = sample.cwd?.trim() ? sample.cwd : process.cwd();
   const extensionPath = sample.extensionPath?.trim() ? sample.extensionPath : collector.unknownExtensionKey;
-  const handlerKey = keyOf(extensionPath, sample.surface, sample.name);
+  const handlerKey = keyOf(cwd, extensionPath, sample.surface, sample.name);
 
   if (!collector.handlerTotals.has(handlerKey) && collector.handlerTotals.size >= collector.maxHandlers) {
     collector.droppedNewKeys += 1;
@@ -61,6 +63,7 @@ export function recordInvocation(
   upsertAggregate(collector.extensionTotals, extensionPath, sample.ms, sample.ok);
 
   const row = collector.handlerTotals.get(handlerKey) ?? {
+    cwd,
     extensionPath,
     surface: sample.surface,
     name: sample.name,
