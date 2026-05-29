@@ -16,7 +16,12 @@ function runtimeMock(status: RecorderStatus = { active: false, seq: 0, consecuti
       },
       stop: async (reason = "off") => {
         calls.push(`stop:${reason}`);
-        current = { active: false, seq: current.seq, consecutiveWriteFailures: 0, disabledReason: reason };
+        current = {
+          active: false,
+          seq: current.seq,
+          consecutiveWriteFailures: 0,
+          disabledReason: reason === "off" || reason === "quit" ? undefined : reason,
+        };
         return current;
       },
       flush: async () => {
@@ -48,7 +53,9 @@ test("on patches before starting runtime and off stops the active run", async ()
   assert.match(await controller.handle("on"), /recording: on/);
   assert.equal(patchCalls, 1);
   assert.deepEqual(calls, ["start"]);
-  assert.match(await controller.handle("off"), /recording: off/);
+  const offResponse = await controller.handle("off");
+  assert.match(offResponse, /recording: off/);
+  assert.doesNotMatch(offResponse, /disabled:/);
   assert.deepEqual(calls, ["start", "stop:off"]);
 });
 

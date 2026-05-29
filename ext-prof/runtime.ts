@@ -236,7 +236,7 @@ export function createRecorderRuntime(deps: RecorderRuntimeDeps = {}): RecorderR
       const run = active;
       clearActiveTimer();
       active = undefined;
-      disabledReason = reason;
+      disabledReason = reason === "off" || reason === "quit" ? undefined : reason;
       await flushRun(run);
       await enqueueWrite(run.outputPath, [
         { schemaVersion: 2, type: "recording_end", runId: run.runId, endedAt: now(), reason },

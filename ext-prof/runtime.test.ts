@@ -85,7 +85,9 @@ test("stop drains deltas, waits for writes, records end, clears active collector
   const stoppedAgain = await runtime.stop("off");
 
   assert.equal(stopped.active, false);
+  assert.equal(stopped.disabledReason, undefined);
   assert.equal(stoppedAgain.active, false);
+  assert.equal(stoppedAgain.disabledReason, undefined);
   assert.deepEqual(writes.map((write) => write.rows.map((row) => row.type)), [
     ["recording_start"],
     ["aggregate_delta"],
@@ -96,6 +98,18 @@ test("stop drains deltas, waits for writes, records end, clears active collector
   runtime.record({ cwd: "/repo", extensionPath: "a.ts", surface: "command", name: "foo", ms: 5, ok: true });
   await runtime.flush();
   assert.equal(writes.length, 3);
+});
+
+test("quit closes the run without reporting an abnormal disabled reason", async () => {
+  const { runtime, writes } = makeRuntime();
+  await runtime.start();
+
+  const stopped = await runtime.stop("quit");
+
+  assert.equal(stopped.active, false);
+  assert.equal(stopped.disabledReason, undefined);
+  assert.equal(writes[1]?.rows[0]?.type, "recording_end");
+  assert.equal(writes[1]?.rows[0]?.reason, "quit");
 });
 
 test("stop disables recording before awaiting the final flush write", async () => {

@@ -12,6 +12,7 @@ test("status prints runtime state and write failures", () => {
       lastCwd: "/repo",
       lastWriteError: "disk full",
       consecutiveWriteFailures: 2,
+      disabledReason: "write_failures",
     },
     patch: { patched: true, reason: "patched" },
   });
@@ -22,6 +23,20 @@ test("status prints runtime state and write failures", () => {
   assert.match(text, /last cwd: \/repo/);
   assert.match(text, /write failures: 2/);
   assert.match(text, /last write error: disk full/);
+  assert.match(text, /disabled: write_failures/);
+});
+
+test("status omits disabled line for normal inactive state", () => {
+  const text = formatStatus({
+    runtime: {
+      active: false,
+      seq: 3,
+      consecutiveWriteFailures: 0,
+    },
+    patch: { patched: true, reason: "patched" },
+  });
+
+  assert.doesNotMatch(text, /disabled:/);
 });
 
 test("profile report shows global extension and handler leaders plus current cwd handlers", () => {
