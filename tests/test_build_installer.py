@@ -217,6 +217,7 @@ class BuildInstallerTest(unittest.TestCase):
         prompts_dir = self.root / "prompts"
         build_dir = self.root / "build"
         agents_destination = self.root / "home" / ".agents" / "skills"
+        codex_destination = self.root / "home" / ".codex" / "skills"
         claude_destination = self.root / "home" / ".claude" / "skills"
         state_dir = self.root / "state"
         manifest_path = state_dir / "install-manifest.json"
@@ -230,7 +231,11 @@ class BuildInstallerTest(unittest.TestCase):
         with self.build_path_patches(skills_dir, memory_skills_dir, prompts_dir, build_dir), mock.patch.object(
             self.build,
             "INSTALL_PATHS",
-            {"claude": claude_destination, "unified": agents_destination},
+            {
+                "claude": claude_destination,
+                "unified": agents_destination,
+                "codex": codex_destination,
+            },
         ), mock.patch.object(self.build, "STATE_DIR", state_dir), mock.patch.object(
             self.build, "MANIFEST_PATH", manifest_path
         ), mock.patch.object(self.build, "LOCK_PATH", lock_path):
@@ -238,14 +243,44 @@ class BuildInstallerTest(unittest.TestCase):
             self.build.install_skills()
 
         manifest = json.loads(manifest_path.read_text())
-        for target_name in ("bobcats-claude-skills", "bobcats-unified-skills"):
+        for target_name in (
+            "bobcats-claude-skills",
+            "bobcats-unified-skills",
+            "bobcats-codex-skills",
+        ):
             self.assertIn("prompt-zoom-out/SKILL.md", manifest["targets"][target_name]["files"])
             self.assertIn("memory-ingest/SKILL.md", manifest["targets"][target_name]["files"])
-        for destination in (agents_destination, claude_destination):
+        for destination in (agents_destination, claude_destination, codex_destination):
             generated = (destination / "prompt-zoom-out" / "SKILL.md").read_text()
             self.assertIn("name: prompt-zoom-out", generated)
             self.assertIn("disable-model-invocation: true", generated)
             self.assertTrue((destination / "memory-ingest" / "SKILL.md").exists())
+
+    def test_skill_install_targets_include_codex_skill_directory(self):
+        source = self.root / "build" / "skills"
+        agents_destination = self.root / "home" / ".agents" / "skills"
+        codex_destination = self.root / "home" / ".codex" / "skills"
+        claude_destination = self.root / "home" / ".claude" / "skills"
+
+        with mock.patch.object(
+            self.build,
+            "INSTALL_PATHS",
+            {
+                "claude": claude_destination,
+                "unified": agents_destination,
+                "codex": codex_destination,
+            },
+        ), mock.patch.object(self.build, "BUILD_DIR", self.root / "build"):
+            targets = self.build.skill_install_targets()
+
+        self.assertEqual(
+            [(target.name, target.source, target.destination, target.kind) for target in targets],
+            [
+                ("bobcats-claude-skills", source, claude_destination, "tree"),
+                ("bobcats-unified-skills", source, agents_destination, "tree"),
+                ("bobcats-codex-skills", source, codex_destination, "tree"),
+            ],
+        )
 
     def test_install_without_manifest_allows_empty_destination(self):
         source = self.root / "build" / "skills"
@@ -312,9 +347,10 @@ class BuildInstallerTest(unittest.TestCase):
         self.assertFalse((destination / "demo" / "script.py").exists())
         self.assertEqual((destination / "custom" / "SKILL.md").read_text(), "manual skill\n")
 
-    def test_safe_install_targets_updates_both_agent_roots_and_manifest(self):
+    def test_safe_install_targets_updates_all_agent_roots_and_manifest(self):
         source = self.root / "build" / "skills"
         agents_destination = self.root / "home" / ".agents" / "skills"
+        codex_destination = self.root / "home" / ".codex" / "skills"
         claude_destination = self.root / "home" / ".claude" / "skills"
         manifest_path = self.root / "state" / "install-manifest.json"
         write_file(source / "demo" / "SKILL.md", "repo v1\n")
@@ -323,6 +359,7 @@ class BuildInstallerTest(unittest.TestCase):
         targets = [
             self.build.InstallTarget("bobcats-claude-skills", source, claude_destination, "tree"),
             self.build.InstallTarget("bobcats-unified-skills", source, agents_destination, "tree"),
+            self.build.InstallTarget("bobcats-codex-skills", source, codex_destination, "tree"),
         ]
         self.build.safe_install_targets(targets, manifest_path=manifest_path, force=True)
 
@@ -330,15 +367,19 @@ class BuildInstallerTest(unittest.TestCase):
         (source / "stale").rmdir()
         write_file(agents_destination / "custom" / "SKILL.md", "manual skill\n")
         write_file(claude_destination / "custom" / "SKILL.md", "manual skill\n")
+        write_file(codex_destination / "custom" / "SKILL.md", "manual skill\n")
 
         result = self.build.safe_install_targets(targets, manifest_path=manifest_path, force=False)
 
-        self.assertEqual(result.files_removed, 2)
+        self.assertEqual(result.files_removed, 3)
         manifest = json.loads(manifest_path.read_text())
-        self.assertEqual(set(manifest["targets"]), {"bobcats-claude-skills", "bobcats-unified-skills"})
+        self.assertEqual(
+            set(manifest["targets"]),
+            {"bobcats-claude-skills", "bobcats-unified-skills", "bobcats-codex-skills"},
+        )
         for target_name in manifest["targets"]:
             self.assertIn("prompt-zoom-out/SKILL.md", manifest["targets"][target_name]["files"])
-        for destination in (agents_destination, claude_destination):
+        for destination in (agents_destination, claude_destination, codex_destination):
             self.assertTrue((destination / "demo" / "SKILL.md").exists())
             self.assertTrue((destination / "prompt-zoom-out" / "SKILL.md").exists())
             self.assertFalse((destination / "stale").exists())

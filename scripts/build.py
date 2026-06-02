@@ -5,7 +5,8 @@ Build and install Bobcats skills for AI coding agents.
 Shared skill sources live under ./skills/<bucket>/<skill>/SKILL.md, extension-owned skills live under explicit extension skill roots such as ./memory/skills/<skill>/, and Pi prompt templates live under ./prompts/*.md.
 This builder flattens authored skills and generated prompt-skills into ./build/skills/<skill>/, then installs the flattened tree for:
 - Claude Code (~/.claude/skills)
-- OpenCode, Pi, Codex (~/.agents/skills)
+- OpenCode, Pi, and unified consumers (~/.agents/skills)
+- Codex (~/.codex/skills)
 
 The installer uses a manifest and staged swaps so updates preserve unmanaged
 files and refuse to overwrite local edits unless --force is provided.
@@ -41,7 +42,8 @@ BUILD_DIR = ROOT / "build"
 HOME = Path.home()
 INSTALL_PATHS = {
     "claude": HOME / ".claude" / "skills",
-    "unified": HOME / ".agents" / "skills",  # OpenCode, Pi, Codex
+    "unified": HOME / ".agents" / "skills",  # OpenCode, Pi, unified consumers
+    "codex": HOME / ".codex" / "skills",
 }
 STATE_DIR = Path(os.environ.get("XDG_STATE_HOME", HOME / ".local" / "state")) / "bobcats-skills"
 MANIFEST_PATH = STATE_DIR / "install-manifest.json"
@@ -650,6 +652,7 @@ def skill_install_targets() -> list[InstallTarget]:
     return [
         InstallTarget("bobcats-claude-skills", source, INSTALL_PATHS["claude"], "tree"),
         InstallTarget("bobcats-unified-skills", source, INSTALL_PATHS["unified"], "tree"),
+        InstallTarget("bobcats-codex-skills", source, INSTALL_PATHS["codex"], "tree"),
     ]
 
 

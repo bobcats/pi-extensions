@@ -91,7 +91,8 @@ make install
 
 Install targets:
 
-- `~/.agents/skills/` for OpenCode, Pi, Codex, and other unified skill consumers
+- `~/.agents/skills/` for OpenCode, Pi, and other unified skill consumers
+- `~/.codex/skills/` for Codex
 - `~/.claude/skills/` for Claude Code
 
 The installer tracks managed files in `$XDG_STATE_HOME/bobcats-skills/install-manifest.json` or `~/.local/state/bobcats-skills/install-manifest.json`, preserves unmanaged sibling files, removes stale managed files, and refuses to overwrite local edits unless bootstrapped with `make install FORCE=1`.
