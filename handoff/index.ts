@@ -58,6 +58,10 @@ type SummaryModelResolution = {
   auth: AuthOk;
 };
 
+type SummaryModelResolutionResult =
+  | { ok: true; resolved: SummaryModelResolution }
+  | { ok: false; error: string };
+
 type HandoffToolContext = {
   hasUI: boolean;
   ui: {
@@ -104,7 +108,14 @@ type HandoffCommandContext = {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-function textOfMessage(message: { content?: Array<{ type: string; text?: string }> }): string {
+function toTimestampMs(timestamp: unknown): number {
+  if (typeof timestamp !== "string") return Date.now();
+  const parsed = Date.parse(timestamp);
+  return Number.isNaN(parsed) ? Date.now() : parsed;
+}
+
+function textOfMessage(message: { content?: string | Array<{ type: string; text?: string }> }): string {
+  if (typeof message?.content === "string") return message.content.trim();
   if (!Array.isArray(message?.content)) return "";
   return message.content
     .filter((part) => part.type === "text")
@@ -113,12 +124,50 @@ function textOfMessage(message: { content?: Array<{ type: string; text?: string 
     .trim();
 }
 
-function hasConversationText(entry: SessionEntry): boolean {
-  if (entry?.type !== "message") return false;
-  const msg = (entry as any).message;
-  const role = msg?.role;
-  if (role !== "user" && role !== "assistant") return false;
-  return textOfMessage(msg).length > 0;
+function entryToHandoffMessage(entry: SessionEntry): any | undefined {
+  switch (entry?.type) {
+    case "message":
+      return (entry as any).message;
+    case "compaction":
+      return {
+        role: "compactionSummary",
+        summary: (entry as any).summary ?? "",
+        tokensBefore: (entry as any).tokensBefore ?? 0,
+        timestamp: toTimestampMs((entry as any).timestamp),
+      };
+    case "branch_summary":
+      return {
+        role: "branchSummary",
+        summary: (entry as any).summary ?? "",
+        fromId: (entry as any).fromId ?? "",
+        timestamp: toTimestampMs((entry as any).timestamp),
+      };
+    case "custom_message":
+      return {
+        role: "custom",
+        customType: (entry as any).customType ?? "",
+        content: (entry as any).content ?? "",
+        display: Boolean((entry as any).display),
+        details: (entry as any).details,
+        timestamp: toTimestampMs((entry as any).timestamp),
+      };
+    default:
+      return undefined;
+  }
+}
+
+function hasHandoffContextText(message: any): boolean {
+  switch (message?.role) {
+    case "user":
+    case "assistant":
+    case "custom":
+      return textOfMessage(message).length > 0;
+    case "compactionSummary":
+    case "branchSummary":
+      return typeof message.summary === "string" && message.summary.trim().length > 0;
+    default:
+      return false;
+  }
 }
 
 function ensureInteractiveMode(ctx: HandoffCommandContext): boolean {
@@ -146,8 +195,8 @@ function ensureGoal(args: string, ctx: HandoffCommandContext): string | null {
   return goal;
 }
 
-function ensureConversation(branch: SessionEntry[], ctx: HandoffCommandContext): boolean {
-  if (!branch.some(hasConversationText)) {
+function ensureConversation(messages: any[], ctx: HandoffCommandContext): boolean {
+  if (!messages.some(hasHandoffContextText)) {
     ctx.ui.notify("No conversation to hand off.", "error");
     return false;
   }
@@ -167,26 +216,35 @@ async function resolveSummaryModel(
   ctx: HandoffCommandContext,
   provider: string,
   modelId: string,
-): Promise<SummaryModelResolution | null> {
-  const preferred = ctx.modelRegistry.find(provider, modelId);
-  if (preferred) {
-    const auth = await ctx.modelRegistry.getApiKeyAndHeaders(preferred);
-    if (auth.ok) {
-      return { model: preferred, auth };
-    }
+): Promise<SummaryModelResolutionResult> {
+  const model = ctx.modelRegistry.find(provider, modelId);
+  if (!model) {
+    return { ok: false, error: `${provider}/${modelId} is not registered` };
   }
 
-  const fallback = ctx.model;
-  if (!fallback) return null;
-  const fallbackAuth = await ctx.modelRegistry.getApiKeyAndHeaders(fallback);
-  if (!fallbackAuth.ok) return null;
-  return { model: fallback, auth: fallbackAuth };
+  const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
+  if (!auth.ok) {
+    return { ok: false, error: `${provider}/${modelId} credentials unavailable: ${auth.error}` };
+  }
+
+  return { ok: true, resolved: { model, auth } };
 }
 
-function conversationMessagesFromBranch(branch: SessionEntry[]): any[] {
-  return branch
-    .filter((entry) => entry.type === "message")
-    .map((entry) => (entry as any).message);
+export function handoffMessagesFromBranch(branch: SessionEntry[]): any[] {
+  const lastCompactionIndex = branch.map((entry) => entry.type).lastIndexOf("compaction");
+  if (lastCompactionIndex < 0) {
+    return branch.map(entryToHandoffMessage).filter((message) => message !== undefined);
+  }
+
+  const compaction = branch[lastCompactionIndex] as any;
+  const firstKeptIndex = branch.findIndex((entry) => entry.id === compaction.firstKeptEntryId);
+  const branchToSummarize = [
+    branch[lastCompactionIndex],
+    ...(firstKeptIndex >= 0 ? branch.slice(firstKeptIndex, lastCompactionIndex) : []),
+    ...branch.slice(lastCompactionIndex + 1),
+  ];
+
+  return branchToSummarize.map(entryToHandoffMessage).filter((message) => message !== undefined);
 }
 
 function readParentSessionPath(sessionPath: string): string | null {
@@ -352,13 +410,15 @@ export async function generateHandoffSummary(params: {
   goal: string;
   signal?: AbortSignal;
 }): Promise<string | null> {
-  const conversationText = serializeConversation(convertToLlm(params.messages));
+  const llmMessages = convertToLlm(params.messages);
+  const conversationText = serializeConversation(llmMessages);
+  const promptText = `## Conversation History\n\n${conversationText}\n\n## User's Goal for New Thread\n\n${params.goal}`;
   const userMessage: Message = {
     role: "user",
     content: [
       {
         type: "text",
-        text: `## Conversation History\n\n${conversationText}\n\n## User's Goal for New Thread\n\n${params.goal}`,
+        text: promptText,
       },
     ],
     timestamp: Date.now(),
@@ -370,13 +430,28 @@ export async function generateHandoffSummary(params: {
     { apiKey: params.apiKey, headers: params.headers, signal: params.signal },
   );
 
-  if ((response as any).stopReason === "aborted") return null;
+  const stopReason = (response as any).stopReason;
+  if (stopReason === "aborted") return null;
 
-  return response.content
-    .filter((part: any) => part.type === "text")
-    .map((part: any) => (part as any).text)
+  const contentParts = Array.isArray(response.content) ? response.content : [];
+  const textParts = contentParts.filter((part: any) => part.type === "text");
+  const summary = textParts
+    .map((part: any) => (part as any).text ?? "")
     .join("\n")
     .trim();
+
+  if (!summary) {
+    const partTypes = contentParts.map((part: any) => part?.type ?? "unknown").join(", ") || "none";
+    const textLengths = textParts.map((part: any) => String(part?.text ?? "").length).join(", ") || "none";
+    throw new Error(
+      `empty summary from ${params.model.provider}/${params.model.id}; stopReason=${stopReason ?? "unknown"}; ` +
+        `inputMessages=${params.messages.length}; llmMessages=${llmMessages.length}; ` +
+        `conversationChars=${conversationText.length}; promptChars=${promptText.length}; ` +
+        `contentParts=${contentParts.length}; partTypes=${partTypes}; textLengths=${textLengths}`,
+    );
+  }
+
+  return summary;
 }
 
 export function createHandoffExtension(deps: HandoffDeps = {}) {
@@ -415,17 +490,17 @@ export function createHandoffExtension(deps: HandoffDeps = {}) {
         if (!goal) return;
 
         const branch = hctx.sessionManager.getBranch();
-        if (!ensureConversation(branch, hctx)) return;
+        const messages = handoffMessagesFromBranch(branch);
+        if (!ensureConversation(messages, hctx)) return;
         if (!(await confirmOverwriteIfNeeded(hctx))) return;
 
         const resolved = await resolveSummaryModel(hctx, SUMMARY_PROVIDER, SUMMARY_MODEL);
-        if (!resolved) {
-          hctx.ui.notify("Handoff: no usable model credentials", "error");
+        if (!resolved.ok) {
+          hctx.ui.notify(`Handoff summary model unavailable: ${resolved.error}`, "error");
           return;
         }
 
-        const messages = conversationMessagesFromBranch(branch);
-        const summary = await generateSummaryWithLoader({ ctx: hctx, completeFn, resolved, messages, goal });
+        const summary = await generateSummaryWithLoader({ ctx: hctx, completeFn, resolved: resolved.resolved, messages, goal });
         if (summary === null) {
           hctx.ui.notify("Handoff cancelled.", "info");
           return;
@@ -436,7 +511,12 @@ export function createHandoffExtension(deps: HandoffDeps = {}) {
           return;
         }
 
-        await applyHandoffToNewSession({ ctx: hctx, goal, summary });
+        if (!summary.trim()) {
+          hctx.ui.notify("Failed to generate handoff summary: empty summary returned by generator", "error");
+          return;
+        }
+
+        await applyHandoffToNewSession({ ctx: hctx, goal, summary: summary.trim() });
       },
     });
   };

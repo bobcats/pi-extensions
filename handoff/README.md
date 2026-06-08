@@ -18,7 +18,7 @@ Examples:
 
 ## What the command does
 
-1. Validates that the current conversation has meaningful user/assistant text (system messages and tool-only entries do not count)
+1. Validates that the current conversation has meaningful handoff context (user/assistant text, compaction summaries, branch summaries, or custom context; system messages and tool-only entries do not count)
 2. Confirms before overwriting any unsubmitted editor text
 3. Generates a first-person handoff summary using Amp's `create_handoff_context` extraction prompt
 4. Creates a new session with `parentSession` tracking
@@ -46,16 +46,16 @@ In non-interactive mode, the tool returns a clear error explaining that an inter
 - empty goal → `Usage: /handoff <goal for new session>`
 - no meaningful conversation text → `No conversation to hand off.`
 - generation aborted (Esc) → `Handoff cancelled.`
-- summary generation failure → `Failed to generate handoff summary: <error>`
+- summary generation failure or blank model output → `Failed to generate handoff summary: <error>` with model/input/output diagnostics; the command does not create a new session
 - `newSession` cancelled → `New session cancelled.`
 - `newSession` throws → `Failed to create new session.`
-- both preferred+fallback model auth fail → `Handoff: no usable model credentials`
+- preferred summary model missing or unauthenticated → `Handoff summary model unavailable: <reason>`
 
 ## Model selection
 
-Prefers `openai-codex/gpt-5.3-codex` for summary generation. Falls back silently to `ctx.model` (the current session's model) if that model is not in the registry or lacks credentials. If neither model has usable credentials, the command emits an error and returns.
+Uses `openai-codex/gpt-5.3-codex` for summary generation. If that model is not in the registry or lacks credentials, the command emits a hard error and returns; it does not fall back to the current session model.
 
-`gpt-5.3-codex` is preferred because summary generation is an ancillary task and this model provides a good quality/cost tradeoff for extracting concise handoff context.
+`gpt-5.3-codex` is used because summary generation is an ancillary task and this model provides a good quality/cost tradeoff for extracting concise handoff context.
 
 ## Parent session tracking
 

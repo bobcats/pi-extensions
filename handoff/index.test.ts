@@ -3,7 +3,12 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { CREATE_HANDOFF_CONTEXT_SYSTEM_PROMPT, createHandoffExtension, generateHandoffSummary } from "./index.ts";
+import {
+  CREATE_HANDOFF_CONTEXT_SYSTEM_PROMPT,
+  createHandoffExtension,
+  generateHandoffSummary,
+  handoffMessagesFromBranch,
+} from "./index.ts";
 
 function createHarness() {
   const commandMap = new Map<string, any>();
@@ -162,6 +167,68 @@ function nonEmptyBranch() {
   ];
 }
 
+test("handoff messages include compaction summaries and only kept compacted entries", () => {
+  const messages = handoffMessagesFromBranch([
+    {
+      type: "message",
+      id: "old-user",
+      timestamp: "2026-05-21T00:00:00.000Z",
+      message: { role: "user", content: [{ type: "text", text: "Old context summarized later" }] },
+    },
+    {
+      type: "message",
+      id: "kept-assistant",
+      timestamp: "2026-05-21T00:00:01.000Z",
+      message: { role: "assistant", content: [{ type: "text", text: "Kept detail" }] },
+    },
+    {
+      type: "compaction",
+      id: "compact-1",
+      timestamp: "2026-05-21T00:00:02.000Z",
+      summary: "Earlier work was summarized here.",
+      firstKeptEntryId: "kept-assistant",
+      tokensBefore: 1234,
+    },
+    {
+      type: "message",
+      id: "new-user",
+      timestamp: "2026-05-21T00:00:03.000Z",
+      message: { role: "user", content: "Continue after compaction" },
+    },
+  ] as any);
+
+  assert.deepEqual(
+    messages.map((message) => message.role),
+    ["compactionSummary", "assistant", "user"],
+  );
+  assert.equal(messages[0].summary, "Earlier work was summarized here.");
+  assert.equal(messages[1].content[0].text, "Kept detail");
+  assert.equal(messages[2].content, "Continue after compaction");
+});
+
+test("compaction-only branch is enough conversation for handoff", async () => {
+  const harness = createHarness();
+  harness.ctx.sessionManager.getBranch = () => [
+    {
+      type: "compaction",
+      id: "compact-1",
+      timestamp: "2026-05-21T00:00:02.000Z",
+      summary: "The previous branch summary has everything needed.",
+      firstKeptEntryId: "missing",
+      tokensBefore: 1234,
+    },
+  ] as any;
+  harness.setCustomResult("- summary text");
+  createHandoffExtension()(harness.pi);
+
+  const cmd = harness.commandMap.get("handoff");
+  await cmd.handler("continue the work", harness.ctx);
+
+  assert.equal(harness.customCallCount, 1);
+  assert.equal(harness.newSessionCalls, 1);
+  assert.equal(harness.notifications.find((n) => n.message === "No conversation to hand off."), undefined);
+});
+
 test("exports Amp's handoff context prompt verbatim", () => {
   assert.equal(
     CREATE_HANDOFF_CONTEXT_SYSTEM_PROMPT,
@@ -260,7 +327,7 @@ test("aborts when user denies overwrite of editor text", async () => {
   assert.equal(harness.customCallCount, 0);
 });
 
-test("falls back to ctx.model when preferred summary model is missing from registry", async () => {
+test("hard-errors when preferred summary model is missing from registry", async () => {
   const harness = createHarness();
   harness.ctx.sessionManager.getBranch = nonEmptyBranch;
   harness.ctx.modelRegistry.find = () => null;
@@ -268,14 +335,14 @@ test("falls back to ctx.model when preferred summary model is missing from regis
   createHandoffExtension()(harness.pi);
   const cmd = harness.commandMap.get("handoff");
   await cmd.handler("continue the work", harness.ctx);
-  assert.equal(
-    harness.notifications.find((n) => n.level === "error"),
-    undefined,
-    "should not emit an error when ctx.model fallback is usable",
-  );
+  assert.deepEqual(harness.notifications, [
+    { message: "Handoff summary model unavailable: openai-codex/gpt-5.3-codex is not registered", level: "error" },
+  ]);
+  assert.equal(harness.customCallCount, 0);
+  assert.equal(harness.newSessionCalls, 0);
 });
 
-test("falls back to ctx.model when preferred summary model auth fails", async () => {
+test("hard-errors when preferred summary model auth fails", async () => {
   const harness = createHarness();
   harness.ctx.sessionManager.getBranch = nonEmptyBranch;
   harness.ctx.modelRegistry.getApiKeyAndHeaders = async (model: any) => {
@@ -286,11 +353,14 @@ test("falls back to ctx.model when preferred summary model auth fails", async ()
   createHandoffExtension()(harness.pi);
   const cmd = harness.commandMap.get("handoff");
   await cmd.handler("continue the work", harness.ctx);
-  assert.equal(
-    harness.notifications.find((n) => n.level === "error"),
-    undefined,
-    "should not emit an error when fallback auth is usable",
-  );
+  assert.deepEqual(harness.notifications, [
+    {
+      message: "Handoff summary model unavailable: openai-codex/gpt-5.3-codex credentials unavailable: no key",
+      level: "error",
+    },
+  ]);
+  assert.equal(harness.customCallCount, 0);
+  assert.equal(harness.newSessionCalls, 0);
 });
 
 test("handoff tool prepares a slash command in interactive mode without switching sessions", async () => {
@@ -426,6 +496,21 @@ test("notifies when summary generation fails", async () => {
   ]);
 });
 
+test("notifies and does not switch sessions when summary generation returns empty text", async () => {
+  const harness = createHarness();
+  harness.ctx.sessionManager.getBranch = nonEmptyBranch;
+  harness.setCustomResult("   \n");
+  createHandoffExtension()(harness.pi);
+  const cmd = harness.commandMap.get("handoff");
+
+  await cmd.handler("continue the auth work", harness.ctx);
+
+  assert.equal(harness.newSessionCalls, 0);
+  assert.deepEqual(harness.notifications, [
+    { message: "Failed to generate handoff summary: empty summary returned by generator", level: "error" },
+  ]);
+});
+
 test("notifies when creating new session throws", async () => {
   const harness = createHarness();
   harness.ctx.sessionManager.getBranch = nonEmptyBranch;
@@ -485,6 +570,24 @@ test("generateHandoffSummary uses the system prompt and serialized conversation"
   assert.deepEqual(completeCalls[0].options, { apiKey: "test-key", headers: { "x-test": "1" }, signal: undefined });
 });
 
+test("generateHandoffSummary hard-fails with diagnostics when the model returns empty text", async () => {
+  await assert.rejects(
+    generateHandoffSummary({
+      completeFn: async () => ({
+        role: "assistant",
+        content: [{ type: "text", text: "  \n" }],
+        stopReason: "stop",
+      }),
+      model: { provider: "openai-codex", id: "gpt-5.3-codex" },
+      apiKey: "test-key",
+      headers: { "x-test": "1" },
+      messages: [{ role: "user", content: [{ type: "text", text: "Continue the auth cleanup" }] }],
+      goal: "continue the auth cleanup",
+    }),
+    /empty summary from openai-codex\/gpt-5\.3-codex; stopReason=stop; inputMessages=1; llmMessages=1; conversationChars=\d+; promptChars=\d+; contentParts=1; partTypes=text; textLengths=3/,
+  );
+});
+
 test("prefers the configured summary model id first", async () => {
   const lookups: Array<[string, string]> = [];
   const harness = createHarness();
@@ -499,7 +602,7 @@ test("prefers the configured summary model id first", async () => {
   assert.deepEqual(lookups[0], ["openai-codex", "gpt-5.3-codex"]);
 });
 
-test("notifies when no usable model credentials are available", async () => {
+test("notifies when summary model credentials are unavailable", async () => {
   const harness = createHarness();
   harness.ctx.sessionManager.getBranch = nonEmptyBranch;
   harness.ctx.modelRegistry.getApiKeyAndHeaders = async () => ({ ok: false as const, error: "no key" });
@@ -507,7 +610,10 @@ test("notifies when no usable model credentials are available", async () => {
   const cmd = harness.commandMap.get("handoff");
   await cmd.handler("continue the work", harness.ctx);
   assert.deepEqual(harness.notifications, [
-    { message: "Handoff: no usable model credentials", level: "error" },
+    {
+      message: "Handoff summary model unavailable: openai-codex/gpt-5.3-codex credentials unavailable: no key",
+      level: "error",
+    },
   ]);
   assert.equal(harness.newSessionCalls, 0);
 });
