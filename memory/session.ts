@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -31,6 +32,33 @@ export const SCRIPTS_DIR = path.join(import.meta.dirname, "scripts");
 
 export function encodeProjectSessionPath(cwd: string): string {
   return "--" + cwd.replace(/^[/\\]/, "").replace(/[/\\:]/g, "-") + "--";
+}
+
+export function discoverGitWorktreePaths(cwd: string): string[] {
+  const result = spawnSync("git", ["-C", cwd, "worktree", "list", "--porcelain"], {
+    encoding: "utf-8",
+    stdio: ["ignore", "pipe", "ignore"],
+  });
+  if (result.status !== 0 || result.error) return [];
+
+  const paths: string[] = [];
+  for (const line of result.stdout.split("\n")) {
+    if (!line.startsWith("worktree ")) continue;
+    const worktreePath = line.slice("worktree ".length).trim();
+    if (worktreePath) paths.push(path.resolve(worktreePath));
+  }
+  return paths;
+}
+
+export function resolveRuminateProjectPaths(cwd: string): string[] {
+  const paths = [cwd, ...discoverGitWorktreePaths(cwd)];
+  const seen = new Set<string>();
+  return paths.filter((candidate) => {
+    const key = path.resolve(candidate);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 export function parseDate(value: string, flag: string, endOfDay = false): Date | string {
@@ -116,23 +144,34 @@ export function extractAndBatch(
   options: DateFilter,
   sessionsRoot: string = SESSIONS_ROOT,
   vaultDir: string = path.join(os.homedir(), ".pi", "memories"),
+  projectPaths: string[] = resolveRuminateProjectPaths(cwd),
 ): ExtractionResult | { error: string } {
-  const encodedCwd = encodeProjectSessionPath(cwd);
-  const projectSessionsDir = path.join(sessionsRoot, encodedCwd);
-
-  if (!fs.existsSync(projectSessionsDir)) {
-    return { error: "No sessions found for this project." };
+  const sessionDirs: { projectPath: string; dir: string }[] = [];
+  const seenSessionDirs = new Set<string>();
+  for (const projectPath of projectPaths) {
+    const encodedCwd = encodeProjectSessionPath(projectPath);
+    const projectSessionsDir = path.join(sessionsRoot, encodedCwd);
+    const key = path.resolve(projectSessionsDir);
+    if (seenSessionDirs.has(key) || !fs.existsSync(projectSessionsDir)) continue;
+    seenSessionDirs.add(key);
+    sessionDirs.push({ projectPath, dir: projectSessionsDir });
   }
 
-  const jsonlFiles: { path: string; mtime: Date }[] = [];
-  for (const entry of fs.readdirSync(projectSessionsDir, { withFileTypes: true })) {
-    if (!entry.isFile() || !entry.name.endsWith(".jsonl")) continue;
-    const full = path.join(projectSessionsDir, entry.name);
-    const stat = fs.statSync(full);
-    if (stat.size < MIN_FILE_SIZE) continue;
-    if (options.fromDate && stat.mtime < options.fromDate) continue;
-    if (options.toDate && stat.mtime > options.toDate) continue;
-    jsonlFiles.push({ path: full, mtime: stat.mtime });
+  if (sessionDirs.length === 0) {
+    return { error: "No sessions found for this project or its git worktrees." };
+  }
+
+  const jsonlFiles: { path: string; mtime: Date; projectPath: string }[] = [];
+  for (const sessionDir of sessionDirs) {
+    for (const entry of fs.readdirSync(sessionDir.dir, { withFileTypes: true })) {
+      if (!entry.isFile() || !entry.name.endsWith(".jsonl")) continue;
+      const full = path.join(sessionDir.dir, entry.name);
+      const stat = fs.statSync(full);
+      if (stat.size < MIN_FILE_SIZE) continue;
+      if (options.fromDate && stat.mtime < options.fromDate) continue;
+      if (options.toDate && stat.mtime > options.toDate) continue;
+      jsonlFiles.push({ path: full, mtime: stat.mtime, projectPath: sessionDir.projectPath });
+    }
   }
 
   if (jsonlFiles.length === 0) {
@@ -159,9 +198,10 @@ export function extractAndBatch(
       content = msgs.map((m) => m.text).join("\n\n");
     }
 
+    const sourceHeader = `Project path: ${jsonlFiles[idx].projectPath}\nSession file: ${jsonlFiles[idx].path}\n\n`;
     const basename = path.basename(jsonlFiles[idx].path, ".jsonl");
     const outPath = path.join(outputDir, `${String(idx).padStart(3, "0")}_${basename}.txt`);
-    fs.writeFileSync(outPath, content);
+    fs.writeFileSync(outPath, sourceHeader + content);
     extracted.push(outPath);
   }
 

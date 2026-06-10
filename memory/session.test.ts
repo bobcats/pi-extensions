@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { test } from "node:test";
 import * as assert from "node:assert";
 import * as fs from "node:fs";
@@ -5,15 +6,39 @@ import * as os from "node:os";
 import * as path from "node:path";
 import {
   encodeProjectSessionPath,
+  discoverGitWorktreePaths,
   parseDate,
   parseRuminateArgs,
   parseSessionMessages,
   extractCompactionSummaries,
   extractAndBatch,
+  resolveRuminateProjectPaths,
 } from "./session.ts";
 
 function tmpDir(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), "mem-session-test-"));
+}
+
+function hasGit(): boolean {
+  try {
+    execFileSync("git", ["--version"], { stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function git(cwd: string, args: string[]): void {
+  execFileSync("git", ["-C", cwd, ...args], {
+    stdio: "ignore",
+    env: {
+      ...process.env,
+      GIT_AUTHOR_NAME: "Memory Test",
+      GIT_AUTHOR_EMAIL: "memory-test@example.com",
+      GIT_COMMITTER_NAME: "Memory Test",
+      GIT_COMMITTER_EMAIL: "memory-test@example.com",
+    },
+  });
 }
 
 // --- encodeProjectSessionPath ---
@@ -24,6 +49,32 @@ test("encodeProjectSessionPath encodes cwd to pi session directory format", () =
 
 test("encodeProjectSessionPath handles Windows-style paths", () => {
   assert.strictEqual(encodeProjectSessionPath("C:\\Users\\dev\\code"), "--C--Users-dev-code--");
+});
+
+// --- worktree discovery ---
+
+test("resolveRuminateProjectPaths includes cwd first", () => {
+  const cwd = path.join(os.tmpdir(), "project");
+  assert.deepStrictEqual(resolveRuminateProjectPaths(cwd).slice(0, 1), [cwd]);
+});
+
+test("discoverGitWorktreePaths returns empty outside a git repo", () => {
+  assert.deepStrictEqual(discoverGitWorktreePaths(tmpDir()), []);
+});
+
+test("discoverGitWorktreePaths includes linked git worktrees", { skip: !hasGit() }, () => {
+  const root = tmpDir();
+  const main = path.join(root, "main");
+  const feature = path.join(root, "feature");
+  fs.mkdirSync(main);
+
+  execFileSync("git", ["init"], { cwd: main, stdio: "ignore" });
+  git(main, ["commit", "--allow-empty", "-m", "initial"]);
+  git(main, ["worktree", "add", "-b", "feature", feature]);
+
+  const worktrees = discoverGitWorktreePaths(main);
+  assert.ok(worktrees.includes(fs.realpathSync(main)));
+  assert.ok(worktrees.includes(fs.realpathSync(feature)));
 });
 
 // --- parseDate ---
@@ -249,6 +300,31 @@ test("extractAndBatch extracts and batches valid sessions", () => {
   assert.strictEqual(result.conversationCount, 1);
   assert.ok(result.batches.length >= 1);
   assert.ok(fs.existsSync(result.snapshotPath));
+});
+
+test("extractAndBatch can include sessions from multiple worktree project paths", () => {
+  const sessionsRoot = tmpDir();
+  const vaultDir = tmpDir();
+  fs.writeFileSync(path.join(vaultDir, "index.md"), "# Memory\n");
+
+  const projectPaths = ["/repo/main", "/repo/worktrees/feature"];
+  for (const [idx, projectPath] of projectPaths.entries()) {
+    const projectDir = path.join(sessionsRoot, encodeProjectSessionPath(projectPath));
+    fs.mkdirSync(projectDir, { recursive: true });
+    const lines = Array.from({ length: 20 }, (_, i) =>
+      JSON.stringify({ message: { role: "user", content: `Project ${idx} message ${i} with enough content to be meaningful and pass the minimum size check.` } })
+    );
+    fs.writeFileSync(path.join(projectDir, `session${idx}.jsonl`), lines.join("\n"));
+  }
+
+  const result = extractAndBatch(projectPaths[0], {}, sessionsRoot, vaultDir, projectPaths);
+  assert.ok(!("error" in result));
+  assert.strictEqual(result.conversationCount, 2);
+
+  const extractedFiles = result.batches.flatMap((batch) => fs.readFileSync(batch, "utf-8").trim().split("\n"));
+  const extractedText = extractedFiles.map((file) => fs.readFileSync(file, "utf-8")).join("\n");
+  assert.ok(extractedText.includes("Project path: /repo/main"));
+  assert.ok(extractedText.includes("Project path: /repo/worktrees/feature"));
 });
 
 test("extractAndBatch --to includes sessions modified during that day", () => {
