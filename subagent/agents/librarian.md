@@ -2,7 +2,7 @@
 name: librarian
 description: Research agent for documentation lookup, GitHub code search, and implementation examples. Read-only, evidence-based answers with permalinks.
 tools: read, grep, find, ls, bash
-model: openai/gpt-5.3-codex
+model: openai-codex/gpt-5.4
 spawning: false
 skills: brave-search
 ---

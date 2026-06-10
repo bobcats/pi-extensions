@@ -28,7 +28,7 @@ function createHarness() {
     } as never,
     ctx: {
       cwd: "/tmp/project",
-      model: { provider: "openai", id: "gpt-5.3-codex" },
+      model: { provider: "openai-codex", id: "gpt-5.4" },
       modelRegistry: {
         find(provider: string, modelId: string) {
           return { provider, id: modelId };

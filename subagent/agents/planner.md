@@ -2,7 +2,7 @@
 name: planner
 description: Creates implementation plans from context and requirements
 tools: read, grep, find, ls
-model: openai/gpt-5.3-codex
+model: openai-codex/gpt-5.4
 spawning: false
 ---
 

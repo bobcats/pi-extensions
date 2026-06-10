@@ -2,7 +2,7 @@
 name: reviewer
 description: Code review specialist for quality and security analysis
 tools: read, grep, find, ls, bash
-model: openai/gpt-5.3-codex
+model: openai-codex/gpt-5.4
 spawning: false
 ---
 
