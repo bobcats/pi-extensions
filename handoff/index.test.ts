@@ -27,6 +27,8 @@ function createHarness() {
   let findCalls = 0;
   let authCalls = 0;
   let oldContextIsStale = false;
+  let replacementSetEditorTextError: unknown = null;
+  let replacementNotifyError: unknown = null;
   const callOrder: string[] = [];
 
   const staleError = () => new Error(
@@ -56,6 +58,12 @@ function createHarness() {
     // instantiate a real BorderedLoader inside Node tests.
     setCustomResult(value: unknown) {
       customResult = value;
+    },
+    setReplacementSetEditorTextError(value: unknown) {
+      replacementSetEditorTextError = value;
+    },
+    setReplacementNotifyError(value: unknown) {
+      replacementNotifyError = value;
     },
     get newSessionCalls() {
       return newSessionCalls;
@@ -114,10 +122,12 @@ function createHarness() {
           await options.withSession({
             ui: {
               notify(message: string, level: string) {
+                if (replacementNotifyError) throw replacementNotifyError;
                 notifications.push({ message, level });
                 callOrder.push(`notify:${level}`);
               },
               setEditorText(text: string) {
+                if (replacementSetEditorTextError) throw replacementSetEditorTextError;
                 editorTexts.push(text);
                 callOrder.push("setEditorText");
               },
@@ -479,6 +489,35 @@ test("notifies New session cancelled when newSession is cancelled", async () => 
   assert.deepEqual(harness.notifications, [
     { message: "New session cancelled.", level: "info" },
   ]);
+});
+
+test("warns when replacement-session prompt and failure notification both fail", async () => {
+  const harness = createHarness();
+  const warnings: string[] = [];
+  const originalWarn = console.warn;
+  console.warn = (message?: unknown) => {
+    warnings.push(String(message));
+  };
+
+  try {
+    harness.ctx.sessionManager.getBranch = nonEmptyBranch;
+    harness.setCustomResult("- summary text");
+    harness.setReplacementSetEditorTextError(new Error("editor unavailable"));
+    harness.setReplacementNotifyError(new Error("notify unavailable"));
+    createHandoffExtension()(harness.pi);
+    const cmd = harness.commandMap.get("handoff");
+
+    await cmd.handler("continue the auth work", harness.ctx);
+  } finally {
+    console.warn = originalWarn;
+  }
+
+  assert.equal(harness.newSessionCalls, 1);
+  assert.equal(harness.editorTexts.length, 0);
+  assert.deepEqual(harness.notifications, []);
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0], /editor unavailable/);
+  assert.match(warnings[0], /notify unavailable/);
 });
 
 test("notifies when summary generation fails", async () => {

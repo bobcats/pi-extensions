@@ -294,6 +294,12 @@ function buildFinalPrompt(params: { goal: string; summary: string; sessionLineag
   return `${goal}\n\n${sessionReferenceSection}In the handoff note below, "I" refers to the previous assistant.\n\n<handoff_note>\n${summary}\n</handoff_note>`;
 }
 
+function errorToMessage(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  if (typeof error === "string") return error;
+  return "unknown error";
+}
+
 function prepareToolHandoff(ctx: HandoffToolContext, params: { goal: string }) {
   if (!ctx.hasUI) {
     return {
@@ -349,8 +355,7 @@ async function generateSummaryWithLoader(params: {
     })
       .then(done)
       .catch((error) => {
-        const message = error instanceof Error ? error.message : "unknown error";
-        done({ kind: "error", error: message });
+        done({ kind: "error", error: errorToMessage(error) });
       });
 
     return loader;
@@ -367,6 +372,8 @@ async function applyHandoffToNewSession(params: {
   const sessionLineage = buildSessionLineage(parentSession);
   const finalPrompt = buildFinalPrompt({ goal, summary, sessionLineage });
   let postSwitchFailed = false;
+  let postSwitchFailureMessage: string | null = null;
+  let postSwitchNotificationFailureMessage: string | null = null;
 
   let newSessionResult: { cancelled: boolean };
   try {
@@ -376,12 +383,13 @@ async function applyHandoffToNewSession(params: {
         try {
           replacementCtx.ui.setEditorText(finalPrompt);
           replacementCtx.ui.notify("Handoff ready — submit when ready.", "info");
-        } catch {
+        } catch (error) {
           postSwitchFailed = true;
+          postSwitchFailureMessage = errorToMessage(error);
           try {
             replacementCtx.ui.notify("Failed to prepare handoff prompt.", "error");
-          } catch {
-            // Ignore replacement-session notification failures.
+          } catch (notifyError) {
+            postSwitchNotificationFailureMessage = errorToMessage(notifyError);
           }
         }
       },
@@ -394,6 +402,13 @@ async function applyHandoffToNewSession(params: {
   if (newSessionResult.cancelled) {
     ctx.ui.notify("New session cancelled.", "info");
     return false;
+  }
+
+  if (postSwitchNotificationFailureMessage) {
+    console.warn(
+      `Handoff failed to prepare the replacement session prompt (${postSwitchFailureMessage ?? "unknown error"}) ` +
+        `and could not notify the replacement session (${postSwitchNotificationFailureMessage}).`,
+    );
   }
 
   return !postSwitchFailed;
