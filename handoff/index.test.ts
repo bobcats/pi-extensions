@@ -81,7 +81,7 @@ function createHarness() {
       modelRegistry: {
         find(provider: string, modelId: string) {
           findCalls += 1;
-          return provider === "openai-codex" && modelId === "gpt-5.3-codex"
+          return provider === "openai-codex" && modelId === "gpt-5.5"
             ? { provider, id: modelId }
             : null;
         },
@@ -336,7 +336,7 @@ test("hard-errors when preferred summary model is missing from registry", async 
   const cmd = harness.commandMap.get("handoff");
   await cmd.handler("continue the work", harness.ctx);
   assert.deepEqual(harness.notifications, [
-    { message: "Handoff summary model unavailable: openai-codex/gpt-5.3-codex is not registered", level: "error" },
+    { message: "Handoff summary model unavailable: openai-codex/gpt-5.5 is not registered", level: "error" },
   ]);
   assert.equal(harness.customCallCount, 0);
   assert.equal(harness.newSessionCalls, 0);
@@ -355,7 +355,7 @@ test("hard-errors when preferred summary model auth fails", async () => {
   await cmd.handler("continue the work", harness.ctx);
   assert.deepEqual(harness.notifications, [
     {
-      message: "Handoff summary model unavailable: openai-codex/gpt-5.3-codex credentials unavailable: no key",
+      message: "Handoff summary model unavailable: openai-codex/gpt-5.5 credentials unavailable: no key",
       level: "error",
     },
   ]);
@@ -550,7 +550,7 @@ test("generateHandoffSummary uses the system prompt and serialized conversation"
         stopReason: "stop",
       };
     },
-    model: { provider: "openai-codex", id: "gpt-5.3-codex" },
+    model: { provider: "openai-codex", id: "gpt-5.5" },
     apiKey: "test-key",
     headers: { "x-test": "1" },
     messages: [{ role: "user", content: [{ type: "text", text: "Continue the auth cleanup" }] }],
@@ -578,13 +578,32 @@ test("generateHandoffSummary hard-fails with diagnostics when the model returns 
         content: [{ type: "text", text: "  \n" }],
         stopReason: "stop",
       }),
-      model: { provider: "openai-codex", id: "gpt-5.3-codex" },
+      model: { provider: "openai-codex", id: "gpt-5.5" },
       apiKey: "test-key",
       headers: { "x-test": "1" },
       messages: [{ role: "user", content: [{ type: "text", text: "Continue the auth cleanup" }] }],
       goal: "continue the auth cleanup",
     }),
-    /empty summary from openai-codex\/gpt-5\.3-codex; stopReason=stop; inputMessages=1; llmMessages=1; conversationChars=\d+; promptChars=\d+; contentParts=1; partTypes=text; textLengths=3/,
+    /empty summary from openai-codex\/gpt-5\.5; stopReason=stop; errorMessage=none; inputMessages=1; llmMessages=1; conversationChars=\d+; promptChars=\d+; contentParts=1; partTypes=text; textLengths=3/,
+  );
+});
+
+test("generateHandoffSummary hard-fails with provider error diagnostics", async () => {
+  await assert.rejects(
+    generateHandoffSummary({
+      completeFn: async () => ({
+        role: "assistant",
+        content: [],
+        stopReason: "error",
+        errorMessage: "backend rejected model",
+      }),
+      model: { provider: "openai-codex", id: "gpt-5.5" },
+      apiKey: "test-key",
+      headers: { "x-test": "1" },
+      messages: [{ role: "user", content: [{ type: "text", text: "Continue the auth cleanup" }] }],
+      goal: "continue the auth cleanup",
+    }),
+    /summary generation provider error from openai-codex\/gpt-5\.5; stopReason=error; errorMessage=backend rejected model; inputMessages=1; llmMessages=1; conversationChars=\d+; promptChars=\d+; contentParts=0; partTypes=none; textLengths=none/,
   );
 });
 
@@ -599,7 +618,7 @@ test("prefers the configured summary model id first", async () => {
   createHandoffExtension()(harness.pi);
   const cmd = harness.commandMap.get("handoff");
   await cmd.handler("continue the auth work", harness.ctx);
-  assert.deepEqual(lookups[0], ["openai-codex", "gpt-5.3-codex"]);
+  assert.deepEqual(lookups[0], ["openai-codex", "gpt-5.5"]);
 });
 
 test("notifies when summary model credentials are unavailable", async () => {
@@ -611,7 +630,7 @@ test("notifies when summary model credentials are unavailable", async () => {
   await cmd.handler("continue the work", harness.ctx);
   assert.deepEqual(harness.notifications, [
     {
-      message: "Handoff summary model unavailable: openai-codex/gpt-5.3-codex credentials unavailable: no key",
+      message: "Handoff summary model unavailable: openai-codex/gpt-5.5 credentials unavailable: no key",
       level: "error",
     },
   ]);

@@ -431,24 +431,29 @@ export async function generateHandoffSummary(params: {
   );
 
   const stopReason = (response as any).stopReason;
+  const errorMessage = (response as any).errorMessage;
   if (stopReason === "aborted") return null;
 
   const contentParts = Array.isArray(response.content) ? response.content : [];
   const textParts = contentParts.filter((part: any) => part.type === "text");
+  const diagnosticSuffix =
+    `stopReason=${stopReason ?? "unknown"}; errorMessage=${errorMessage || "none"}; ` +
+    `inputMessages=${params.messages.length}; llmMessages=${llmMessages.length}; ` +
+    `conversationChars=${conversationText.length}; promptChars=${promptText.length}; ` +
+    `contentParts=${contentParts.length}; ` +
+    `partTypes=${contentParts.map((part: any) => part?.type ?? "unknown").join(", ") || "none"}; ` +
+    `textLengths=${textParts.map((part: any) => String(part?.text ?? "").length).join(", ") || "none"}`;
+
+  if (stopReason === "error") {
+    throw new Error(`summary generation provider error from ${params.model.provider}/${params.model.id}; ${diagnosticSuffix}`);
+  }
   const summary = textParts
     .map((part: any) => (part as any).text ?? "")
     .join("\n")
     .trim();
 
   if (!summary) {
-    const partTypes = contentParts.map((part: any) => part?.type ?? "unknown").join(", ") || "none";
-    const textLengths = textParts.map((part: any) => String(part?.text ?? "").length).join(", ") || "none";
-    throw new Error(
-      `empty summary from ${params.model.provider}/${params.model.id}; stopReason=${stopReason ?? "unknown"}; ` +
-        `inputMessages=${params.messages.length}; llmMessages=${llmMessages.length}; ` +
-        `conversationChars=${conversationText.length}; promptChars=${promptText.length}; ` +
-        `contentParts=${contentParts.length}; partTypes=${partTypes}; textLengths=${textLengths}`,
-    );
+    throw new Error(`empty summary from ${params.model.provider}/${params.model.id}; ${diagnosticSuffix}`);
   }
 
   return summary;
@@ -457,7 +462,7 @@ export async function generateHandoffSummary(params: {
 export function createHandoffExtension(deps: HandoffDeps = {}) {
   const completeFn = deps.completeFn ?? complete;
   const SUMMARY_PROVIDER = deps.summaryProvider ?? "openai-codex";
-  const SUMMARY_MODEL = deps.summaryModel ?? "gpt-5.3-codex";
+  const SUMMARY_MODEL = deps.summaryModel ?? "gpt-5.5";
 
   return function handoff(pi: ExtensionAPI) {
     pi.registerTool({

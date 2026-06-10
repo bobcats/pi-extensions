@@ -53,9 +53,9 @@ In non-interactive mode, the tool returns a clear error explaining that an inter
 
 ## Model selection
 
-Uses `openai-codex/gpt-5.3-codex` for summary generation. If that model is not in the registry or lacks credentials, the command emits a hard error and returns; it does not fall back to the current session model.
+Uses `openai-codex/gpt-5.5` for summary generation. If that model is not in the registry or lacks credentials, the command emits a hard error and returns; it does not fall back to the current session model.
 
-`gpt-5.3-codex` is used because summary generation is an ancillary task and this model provides a good quality/cost tradeoff for extracting concise handoff context.
+`gpt-5.5` is used because summary generation is an ancillary task and this model provides a good quality/cost tradeoff for extracting concise handoff context.
 
 ## Parent session tracking
 
