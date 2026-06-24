@@ -16,6 +16,7 @@
       "./files/index.ts",
       "./session-breakdown/index.ts",
       "./subagent/index.ts",
+      "./claude-code-tmux/index.ts",
       "./tldraw-desktop/index.ts",
       "./exa/index.ts",
       "./openai-fast/index.ts",

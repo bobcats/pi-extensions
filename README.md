@@ -28,6 +28,7 @@ Pi discovers extensions, prompt templates, and authored skill roots from root `p
 | Extension | Description |
 |-----------|-------------|
 | [auto-name-session](./auto-name-session/) | Auto-names sessions after the first completed exchange using the cheapest model |
+| [claude-code-tmux](./claude-code-tmux/) | Drives Claude Code through an isolated interactive tmux session |
 | [confirm-rm](./confirm-rm/) | Confirms before any `rm` command |
 | [context](./context/) | Shows loaded extensions, context files, and token/cost usage |
 | [exa](./exa/) | Adds Exa-powered web search, answers, and research tools |
