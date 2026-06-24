@@ -2,7 +2,7 @@ import { performance } from "node:perf_hooks";
 import { pathToFileURL } from "node:url";
 import * as fs from "node:fs";
 import { Effect } from "effect";
-import type { Message } from "@mariozechner/pi-ai";
+import type { Message } from "@earendil-works/pi-ai";
 import type { AgentConfig } from "./agents.ts";
 import { applyProcessJsonEvent, createInitialSingleResult } from "./process-effect.ts";
 import { parseSubagentRequest } from "./request.ts";

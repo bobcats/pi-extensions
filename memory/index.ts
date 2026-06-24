@@ -10,14 +10,15 @@
  * Dashboard is a pure function of state reconstructed from JSONL.
  */
 
+import { CONFIG_DIR_NAME } from "@earendil-works/pi-coding-agent";
 import type {
   ExtensionAPI,
   ExtensionContext,
-} from "@mariozechner/pi-coding-agent";
-import { StringEnum } from "@mariozechner/pi-ai";
-import { Text, truncateToWidth, matchesKey } from "@mariozechner/pi-tui";
-import type { AutocompleteItem } from "@mariozechner/pi-tui";
-import { Type } from "@sinclair/typebox";
+} from "@earendil-works/pi-coding-agent";
+import { StringEnum } from "@earendil-works/pi-ai";
+import { Text, truncateToWidth, matchesKey } from "@earendil-works/pi-tui";
+import type { AutocompleteItem } from "@earendil-works/pi-tui";
+import { Type } from "typebox";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -151,7 +152,7 @@ export default function memoryExtension(pi: ExtensionAPI) {
   };
   let activeBrain: ActiveBrain = {
     name: "main",
-    vaultDir: path.join(os.homedir(), ".pi", "memories"),
+    vaultDir: path.join(os.homedir(), CONFIG_DIR_NAME, "memories"),
     source: "default",
   };
 
@@ -894,7 +895,7 @@ export default function memoryExtension(pi: ExtensionAPI) {
           ctx.ui.notify(`Brain ${name} already exists at ${config.brains[name].path}.`, "warning");
           return;
         }
-        const brainPath = rest.length > 0 ? rest.join(" ") : path.join(os.homedir(), ".pi", "memory-brains", name);
+        const brainPath = rest.length > 0 ? rest.join(" ") : path.join(os.homedir(), CONFIG_DIR_NAME, "memory-brains", name);
         config.brains[name] = { path: brainPath };
         saveMemoryConfig(os.homedir(), config);
         ctx.ui.notify(`Added brain ${name} at ${config.brains[name].path}.`, "success");
@@ -916,7 +917,7 @@ export default function memoryExtension(pi: ExtensionAPI) {
           ctx.ui.notify(`Brain ${name} already exists at ${config.brains[name].path}.`, "warning");
           return;
         }
-        const brainPath = path.join(os.homedir(), ".pi", "memory-brains", name);
+        const brainPath = path.join(os.homedir(), CONFIG_DIR_NAME, "memory-brains", name);
         config.brains[name] = { path: brainPath };
         saveMemoryConfig(os.homedir(), config);
         const result = initVault(brainPath, true);

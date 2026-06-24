@@ -1,9 +1,9 @@
 import { existsSync, readFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
-import { complete, type Message } from "@mariozechner/pi-ai";
-import type { ExtensionAPI, SessionEntry } from "@mariozechner/pi-coding-agent";
-import { BorderedLoader, convertToLlm, serializeConversation } from "@mariozechner/pi-coding-agent";
-import { Type } from "@sinclair/typebox";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import type { ExtensionAPI, SessionEntry } from "@earendil-works/pi-coding-agent";
+import { BorderedLoader, convertToLlm, serializeConversation } from "@earendil-works/pi-coding-agent";
+import { Type } from "typebox";
 
 export const CREATE_HANDOFF_CONTEXT_SYSTEM_PROMPT = `Extract relevant context from the conversation. Write from first person
 perspective ("I did...", "I told you...").
@@ -34,8 +34,31 @@ no code fences. Use workspace-relative paths for files.`;
 
 // ── Local types ───────────────────────────────────────────────────────────────
 
+type Message = {
+  role: string;
+  content: unknown;
+  timestamp?: number;
+};
+
+type CompleteFn = (model: any, context: any, options?: any) => Promise<any>;
+
+let cachedCompleteFn: CompleteFn | undefined;
+
+async function loadCompatComplete(): Promise<CompleteFn> {
+  if (cachedCompleteFn) return cachedCompleteFn;
+
+  const rootEntry = fileURLToPath(import.meta.resolve("@earendil-works/pi-ai"));
+  const compatUrl = pathToFileURL(join(dirname(rootEntry), "compat.js")).href;
+  const compat = await import(compatUrl) as { complete?: CompleteFn };
+  if (typeof compat.complete !== "function") {
+    throw new Error("@earendil-works/pi-ai compat complete() is unavailable");
+  }
+  cachedCompleteFn = compat.complete;
+  return cachedCompleteFn;
+}
+
 type HandoffDeps = {
-  completeFn?: typeof complete;
+  completeFn?: CompleteFn;
   summaryProvider?: string;
   summaryModel?: string;
 };
@@ -334,7 +357,7 @@ function prepareToolHandoff(ctx: HandoffToolContext, params: { goal: string }) {
 
 async function generateSummaryWithLoader(params: {
   ctx: HandoffCommandContext;
-  completeFn: typeof complete;
+  completeFn: CompleteFn;
   resolved: SummaryModelResolution;
   messages: any[];
   goal: string;
@@ -417,7 +440,7 @@ async function applyHandoffToNewSession(params: {
 // ── Public API ────────────────────────────────────────────────────────────────
 
 export async function generateHandoffSummary(params: {
-  completeFn: typeof complete;
+  completeFn: CompleteFn;
   model: { provider: string; id: string };
   apiKey: string | undefined;
   headers: Record<string, string> | undefined;
@@ -475,7 +498,6 @@ export async function generateHandoffSummary(params: {
 }
 
 export function createHandoffExtension(deps: HandoffDeps = {}) {
-  const completeFn = deps.completeFn ?? complete;
   const SUMMARY_PROVIDER = deps.summaryProvider ?? "openai-codex";
   const SUMMARY_MODEL = deps.summaryModel ?? "gpt-5.5";
 
@@ -520,6 +542,7 @@ export function createHandoffExtension(deps: HandoffDeps = {}) {
           return;
         }
 
+        const completeFn = deps.completeFn ?? await loadCompatComplete();
         const summary = await generateSummaryWithLoader({ ctx: hctx, completeFn, resolved: resolved.resolved, messages, goal });
         if (summary === null) {
           hctx.ui.notify("Handoff cancelled.", "info");

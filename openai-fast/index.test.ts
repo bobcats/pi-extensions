@@ -1,32 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { visibleWidth } from "@mariozechner/pi-tui";
 import openaiFast, { _test } from "./index.js";
 
 describe("openai-fast helpers", () => {
-	it("builds footer right-side candidates with thinking level", () => {
-		assert.deepEqual(
-			_test.buildFooterRightSideCandidates(
-				{ provider: "openai-codex", id: "gpt-5.4", reasoning: true } as any,
-				"medium",
-			),
-			["(openai-codex) gpt-5.4 • medium", "gpt-5.4 • medium"],
-		);
-	});
-
-	it("injects the fast indicator without changing footer width", () => {
-		const originalLine = "cwd branch                      (openai-codex) gpt-5.4 • medium";
-		const updatedLine = _test.injectFastIntoFooterLine(
-			originalLine,
-			{ provider: "openai-codex", id: "gpt-5.4", reasoning: true } as any,
-			"medium",
-			"⚡",
-		);
-
-		assert.equal(updatedLine, "cwd branch                 (openai-codex) gpt-5.4 • medium • ⚡");
-		assert.equal(visibleWidth(updatedLine), visibleWidth(originalLine));
-	});
-
 	it("adds priority service tier to provider payloads", () => {
 		assert.deepEqual(_test.applyFastServiceTier({ model: "gpt-5.4" }), {
 			model: "gpt-5.4",
@@ -113,7 +89,6 @@ describe("openai-fast extension registration", () => {
 			writeConfigFile(path: string, config: unknown) {
 				writes.push({ path, config });
 			},
-			footerComponent: { prototype: { render() { return []; } } },
 		});
 
 		extension({
@@ -129,17 +104,24 @@ describe("openai-fast extension registration", () => {
 			},
 		} as any);
 
+		const statuses: Array<string | undefined> = [];
 		await sessionStartHandler?.({}, {
 			cwd: "/tmp/project",
 			model: { provider: "openai", id: "gpt-5.4" },
+			isProjectTrusted: () => true,
 			ui: {
+				theme: { fg: (_color: string, text: string) => text },
 				notify(message: string) {
 					notifications.push(message);
+				},
+				setStatus(_name: string, value: string | undefined) {
+					statuses.push(value);
 				},
 			},
 		});
 
 		assert.equal(notifications[0], "Fast mode is on for openai/gpt-5.4.");
+		assert.deepEqual(statuses, ["⚡"]);
 		assert.deepEqual(writes, [
 			{
 				path: "/tmp/home/.pi/agent/openai-fast.json",

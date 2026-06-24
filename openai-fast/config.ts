@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
+import { CONFIG_DIR_NAME } from "@earendil-works/pi-coding-agent";
 
 export const FAST_CONFIG_BASENAME = "openai-fast.json";
 export const DEFAULT_SUPPORTED_MODEL_KEYS = ["openai/gpt-5.4", "openai-codex/gpt-5.4", "openai-codex/gpt-5.5"] as const;
@@ -33,10 +34,18 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-export function getConfigPaths(cwd: string, homeDir: string = homedir()) {
+export function getConfigPaths(
+	cwd: string,
+	homeDir: string = homedir(),
+	options: { configDirName?: string; agentDir?: string } = {},
+) {
+	const configDirName = options.configDirName ?? CONFIG_DIR_NAME;
+	const agentDir = typeof options.agentDir === "string" && options.agentDir.length > 0
+		? options.agentDir
+		: join(homeDir, configDirName, "agent");
 	return {
-		projectConfigPath: join(cwd, ".pi", "extensions", FAST_CONFIG_BASENAME),
-		globalConfigPath: join(homeDir, ".pi", "agent", FAST_CONFIG_BASENAME),
+		projectConfigPath: join(cwd, configDirName, "extensions", FAST_CONFIG_BASENAME),
+		globalConfigPath: join(agentDir, FAST_CONFIG_BASENAME),
 	};
 }
 
@@ -144,12 +153,16 @@ function ensureGlobalConfigFile(globalConfigPath: string): void {
 	writeConfigFile(globalConfigPath, DEFAULT_CONFIG_FILE);
 }
 
-export function resolveFastConfig(cwd: string, homeDir: string = homedir()): ResolvedFastConfig {
-	const { projectConfigPath, globalConfigPath } = getConfigPaths(cwd, homeDir);
+export function resolveFastConfig(
+	cwd: string,
+	homeDir: string = homedir(),
+	options: { projectTrusted?: boolean; configDirName?: string; agentDir?: string } = {},
+): ResolvedFastConfig {
+	const { projectConfigPath, globalConfigPath } = getConfigPaths(cwd, homeDir, options);
 	ensureGlobalConfigFile(globalConfigPath);
 
 	const globalConfig = readConfigFile(globalConfigPath) ?? {};
-	const projectConfig = readConfigFile(projectConfigPath) ?? {};
+	const projectConfig = options.projectTrusted === false ? {} : (readConfigFile(projectConfigPath) ?? {});
 	const supportedModels =
 		parseSupportedModels(projectConfig.supportedModels) ??
 		parseSupportedModels(globalConfig.supportedModels) ??

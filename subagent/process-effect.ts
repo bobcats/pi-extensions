@@ -1,8 +1,8 @@
 import { spawn } from "node:child_process";
 import * as path from "node:path";
 import { Cause, Effect } from "effect";
-import type { AgentToolResult } from "@mariozechner/pi-agent-core";
-import type { Message } from "@mariozechner/pi-ai";
+import type { AgentToolResult } from "@earendil-works/pi-agent-core";
+import type { Message } from "@earendil-works/pi-ai";
 import type { AgentConfig } from "./agents.ts";
 import { ChildProcessAborted, ChildProcessFailed } from "./errors.ts";
 import { makeTempPromptFile } from "./temp-effect.ts";

@@ -1,4 +1,4 @@
-import { Markdown, type MarkdownTheme } from "@mariozechner/pi-tui";
+import { Markdown, type MarkdownTheme } from "@earendil-works/pi-tui";
 
 const SHELL_PROMPT_PATTERN = /\s\$\s+[A-Za-z0-9_./-]+/u;
 const CONTROL_CHARS_PATTERN = /[\u0000-\u001f\u007f]/gu;

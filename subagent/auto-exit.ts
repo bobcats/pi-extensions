@@ -6,7 +6,7 @@
  * If the user sends any input, auto-exit is permanently disabled —
  * the user has taken over the session.
  */
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 type InputEvent = { source?: unknown };
 type ShutdownContext = { shutdown(): void };

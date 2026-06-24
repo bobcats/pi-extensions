@@ -9,9 +9,9 @@
     "exa-js": "^2.10.1"
   },
   "devDependencies": {
-    "@mariozechner/pi-coding-agent": "*",
-    "@mariozechner/pi-ai": "*",
-    "@sinclair/typebox": "*",
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-ai": "*",
+    "typebox": "*",
     "tsx": "^4.20.0"
   }
 }

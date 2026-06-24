@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import os from "node:os";
 import path from "node:path";
 import { describe, it } from "node:test";
-import { estimateTokens, getAgentDir, normalizeReadPath, shortenPath, sumSessionUsage } from "./lib.ts";
+import { estimateTokens, normalizeReadPath, shortenPath, sumSessionUsage } from "./lib.ts";
 
 describe("estimateTokens", () => {
 	it("returns 0 for empty string", () => {
@@ -39,32 +39,6 @@ describe("normalizeReadPath", () => {
 	it("strips @ prefix", () => {
 		const result = normalizeReadPath("@src/foo.ts", "/home/user/project");
 		assert.equal(result, "/home/user/project/src/foo.ts");
-	});
-});
-
-describe("getAgentDir", () => {
-	it("returns env var value when PI_CODING_AGENT_DIR is set", () => {
-		process.env.PI_CODING_AGENT_DIR = "/custom/agent/dir";
-		try {
-			assert.equal(getAgentDir(), "/custom/agent/dir");
-		} finally {
-			delete process.env.PI_CODING_AGENT_DIR;
-		}
-	});
-
-	it("defaults to ~/.pi/agent when no env var is set", () => {
-		const saved: Record<string, string | undefined> = {};
-		for (const k of Object.keys(process.env).filter((k) => k.endsWith("_CODING_AGENT_DIR"))) {
-			saved[k] = process.env[k];
-			delete process.env[k];
-		}
-		try {
-			assert.equal(getAgentDir(), path.join(os.homedir(), ".pi", "agent"));
-		} finally {
-			for (const [k, v] of Object.entries(saved)) {
-				if (v !== undefined) process.env[k] = v;
-			}
-		}
 	});
 });
 

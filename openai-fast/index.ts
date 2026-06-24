@@ -1,5 +1,4 @@
-import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
-import { truncateToWidth, visibleWidth } from "@mariozechner/pi-tui";
+import { getAgentDir, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import {
 	DEFAULT_CONFIG_FILE,
 	DEFAULT_SUPPORTED_MODEL_KEYS,
@@ -24,30 +23,15 @@ interface FastModeState {
 	active: boolean;
 }
 
-type FooterComponentLike = {
-	prototype: {
-		render(width: number): string[];
-	};
-};
-
 interface FastConfigApi {
-	resolveFastConfig(cwd: string): ResolvedFastConfig;
+	resolveFastConfig(cwd: string, homeDir?: string, options?: { projectTrusted?: boolean; agentDir?: string }): ResolvedFastConfig;
 	readConfigFile(filePath: string): FastConfigFile | null;
 	writeConfigFile(filePath: string, config: FastConfigFile): void;
-	footerComponent?: FooterComponentLike;
 }
 
 type FastPayload = Record<string, unknown> & {
 	service_tier?: string;
 };
-
-type FooterModel = NonNullable<ExtensionContext["model"]> & {
-	reasoning?: boolean;
-};
-
-let originalFooterRender: ((width: number) => string[]) | undefined;
-let patchedFooterComponent: FooterComponentLike | undefined;
-let footerPatched = false;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -113,104 +97,6 @@ function getFastIndicator(
 	return ctx.ui.theme.fg("success", "⚡");
 }
 
-function buildFooterRightSideCandidates(model: FooterModel, thinkingLevel: string | undefined): string[] {
-	let rightSideWithoutProvider = model.id;
-
-	if (model.reasoning) {
-		const level = thinkingLevel || "off";
-		rightSideWithoutProvider = level === "off" ? `${model.id} • thinking off` : `${model.id} • ${level}`;
-	}
-
-	return [`(${model.provider}) ${rightSideWithoutProvider}`, rightSideWithoutProvider];
-}
-
-function injectFastIntoFooterLine(
-	line: string,
-	model: FooterModel,
-	thinkingLevel: string | undefined,
-	indicator: string,
-): string {
-	const candidates = buildFooterRightSideCandidates(model, thinkingLevel);
-	const suffix = ` • ${indicator}`;
-
-	for (const candidate of candidates) {
-		const candidateStart = line.lastIndexOf(candidate);
-		if (candidateStart === -1) {
-			continue;
-		}
-
-		let paddingStart = candidateStart;
-		while (paddingStart > 0 && line[paddingStart - 1] === " ") {
-			paddingStart -= 1;
-		}
-
-		const prefix = line.slice(0, paddingStart);
-		const suffixAnsi = line.slice(candidateStart + candidate.length);
-		const availableWidth = candidateStart - paddingStart + visibleWidth(candidate);
-		const desiredRightSide = `${candidate}${suffix}`;
-		const fittedRightSide = truncateToWidth(desiredRightSide, availableWidth, "");
-		const fittedWidth = visibleWidth(fittedRightSide);
-		const nextPadding = " ".repeat(Math.max(0, availableWidth - fittedWidth));
-		return `${prefix}${nextPadding}${fittedRightSide}${suffixAnsi}`;
-	}
-
-	return line;
-}
-
-async function loadFooterComponent(): Promise<FooterComponentLike | undefined> {
-	try {
-		const module = await import("@mariozechner/pi-coding-agent");
-		return module.FooterComponent as FooterComponentLike;
-	} catch {
-		return undefined;
-	}
-}
-
-function patchFooterRender(
-	footerComponent: FooterComponentLike | undefined,
-	getIndicator: (ctx: { model?: FooterModel; thinkingLevel?: string }) => string | undefined,
-): void {
-	if (footerPatched || !footerComponent) {
-		return;
-	}
-
-	originalFooterRender = footerComponent.prototype.render;
-	patchedFooterComponent = footerComponent;
-	footerComponent.prototype.render = function renderWithFast(this: unknown, width: number): string[] {
-		const lines = originalFooterRender?.call(this, width) ?? [];
-		if (lines.length < 2) {
-			return lines;
-		}
-
-		const session = (this as { session?: { state?: { model?: FooterModel; thinkingLevel?: string } } }).session;
-		const model = session?.state?.model;
-		if (!model) {
-			return lines;
-		}
-
-		const indicator = getIndicator({ model, thinkingLevel: session?.state?.thinkingLevel });
-		if (!indicator) {
-			return lines;
-		}
-
-		const nextLines = [...lines];
-		nextLines[1] = injectFastIntoFooterLine(lines[1] ?? "", model, session?.state?.thinkingLevel, indicator);
-		return nextLines;
-	};
-	footerPatched = true;
-}
-
-function unpatchFooterRender(): void {
-	if (!footerPatched || !originalFooterRender || !patchedFooterComponent) {
-		return;
-	}
-
-	patchedFooterComponent.prototype.render = originalFooterRender;
-	footerPatched = false;
-	originalFooterRender = undefined;
-	patchedFooterComponent = undefined;
-}
-
 function applyFastServiceTier(payload: unknown): unknown {
 	if (!isRecord(payload)) {
 		return payload;
@@ -228,33 +114,22 @@ export function createOpenaiFastExtension(
 		let state: FastModeState = { active: false };
 		let cachedConfig: ResolvedFastConfig | undefined;
 
-		const applyFooterPatch = (footerComponent: FooterComponentLike | undefined) => {
-			patchFooterRender(footerComponent, ({ model, thinkingLevel }) => {
-				if (!model) {
-					return undefined;
-				}
-
-				const supportedModels = cachedConfig?.supportedModels ?? parseSupportedModels(DEFAULT_SUPPORTED_MODEL_KEYS) ?? [];
-				return getFastIndicator(
-					{ model, ui: { theme: { fg: (_color: string, text: string) => text } } as ExtensionContext["ui"] },
-					state.active,
-					supportedModels,
-				);
-			});
-		};
-
-		applyFooterPatch(configApi.footerComponent);
-		if (!configApi.footerComponent) {
-			void loadFooterComponent().then(applyFooterPatch);
-		}
-
 		function refreshConfig(ctx: ExtensionContext): ResolvedFastConfig {
-			cachedConfig = configApi.resolveFastConfig(getConfigCwd(ctx));
+			const projectTrusted = typeof ctx.isProjectTrusted === "function" ? ctx.isProjectTrusted() : true;
+			cachedConfig = configApi.resolveFastConfig(getConfigCwd(ctx), undefined, {
+				projectTrusted,
+				agentDir: getAgentDir(),
+			});
 			return cachedConfig;
 		}
 
 		function getConfig(ctx: ExtensionContext): ResolvedFastConfig {
 			return cachedConfig ?? refreshConfig(ctx);
+		}
+
+		function updateFastStatus(ctx: ExtensionContext): void {
+			const config = getConfig(ctx);
+			ctx.ui.setStatus("openai-fast", getFastIndicator(ctx, state.active, config.supportedModels));
 		}
 
 		function persistState(config: ResolvedFastConfig): void {
@@ -270,6 +145,7 @@ export function createOpenaiFastExtension(
 		async function enableFastMode(ctx: ExtensionContext, notify: boolean = true): Promise<void> {
 			const config = refreshConfig(ctx);
 			if (state.active) {
+				updateFastStatus(ctx);
 				if (notify) {
 					ctx.ui.notify("Fast mode is already on.", "info");
 				}
@@ -278,6 +154,7 @@ export function createOpenaiFastExtension(
 
 			state = { active: true };
 			persistState(config);
+			updateFastStatus(ctx);
 			if (notify) {
 				ctx.ui.notify(describeCurrentState(ctx, state.active, config.supportedModels), "info");
 			}
@@ -286,6 +163,7 @@ export function createOpenaiFastExtension(
 		async function disableFastMode(ctx: ExtensionContext, notify: boolean = true): Promise<void> {
 			const config = refreshConfig(ctx);
 			if (!state.active) {
+				updateFastStatus(ctx);
 				if (notify) {
 					ctx.ui.notify("Fast mode is already off.", "info");
 				}
@@ -294,6 +172,7 @@ export function createOpenaiFastExtension(
 
 			state = { active: false };
 			persistState(config);
+			updateFastStatus(ctx);
 			if (notify) {
 				ctx.ui.notify("Fast mode disabled.", "info");
 			}
@@ -362,10 +241,12 @@ export function createOpenaiFastExtension(
 			if (pi.getFlag(FAST_FLAG) === true) {
 				state = { active: true };
 				persistState(config);
+				updateFastStatus(ctx);
 				ctx.ui.notify(describeCurrentState(ctx, state.active, config.supportedModels), "info");
 				return;
 			}
 
+			updateFastStatus(ctx);
 			if (state.active) {
 				ctx.ui.notify(describeCurrentState(ctx, state.active, config.supportedModels), "info");
 			}
@@ -373,10 +254,11 @@ export function createOpenaiFastExtension(
 
 		pi.on("model_select", async (_event, ctx) => {
 			refreshConfig(ctx);
+			updateFastStatus(ctx);
 		});
 
-		pi.on("session_shutdown", async () => {
-			unpatchFooterRender();
+		pi.on("session_shutdown", async (_event, ctx) => {
+			ctx.ui.setStatus("openai-fast", undefined);
 		});
 	};
 }
@@ -401,8 +283,6 @@ export const _test = {
 	isFastSupportedModel,
 	describeSupportedModels,
 	describeCurrentState,
-	buildFooterRightSideCandidates,
-	injectFastIntoFooterLine,
 	getFastIndicator,
 	applyFastServiceTier,
 	createOpenaiFastExtension,

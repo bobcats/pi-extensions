@@ -2,6 +2,7 @@ import { spawnSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { CONFIG_DIR_NAME, getAgentDir } from "@earendil-works/pi-coding-agent";
 import type { DateFilter, ExtractionResult, SessionMessage } from "./types.js";
 import { buildVaultSnapshot } from "./lib.js";
 
@@ -21,7 +22,7 @@ interface RawSummaryEntry {
   summary?: string;
 }
 
-const SESSIONS_ROOT = path.join(os.homedir(), ".pi", "agent", "sessions");
+const SESSIONS_ROOT = path.join(getAgentDir(), "sessions");
 const USER_TEXT_LIMIT = 3000;
 const ASSISTANT_TEXT_LIMIT = 800;
 const MIN_TEXT_LENGTH = 10;
@@ -143,7 +144,7 @@ export function extractAndBatch(
   cwd: string,
   options: DateFilter,
   sessionsRoot: string = SESSIONS_ROOT,
-  vaultDir: string = path.join(os.homedir(), ".pi", "memories"),
+  vaultDir: string = path.join(os.homedir(), CONFIG_DIR_NAME, "memories"),
   projectPaths: string[] = resolveRuminateProjectPaths(cwd),
 ): ExtractionResult | { error: string } {
   const sessionDirs: { projectPath: string; dir: string }[] = [];

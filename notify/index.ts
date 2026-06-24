@@ -12,7 +12,7 @@
  * License: MIT
  */
 
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { extractLastAssistantText, formatNotification, toTerminalNotificationSequence } from "./lib.ts";
 
 /**

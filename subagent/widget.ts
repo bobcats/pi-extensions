@@ -3,8 +3,8 @@
  * Adapted from HazAT's pi-interactive-subagents.
  */
 
-import type { ExtensionContext } from "@mariozechner/pi-coding-agent";
-import { truncateToWidth, visibleWidth } from "@mariozechner/pi-tui";
+import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import type { AsyncRun } from "./types.ts";
 
 const ACCENT = "\x1b[38;2;77;163;255m";

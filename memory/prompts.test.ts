@@ -16,7 +16,7 @@ import {
   parseOperationsJSONL,
 } from "./dashboard.ts";
 import type { MemoryState, ExtractionResult } from "./types.ts";
-import type { Theme } from "@mariozechner/pi-coding-agent";
+import type { Theme } from "@earendil-works/pi-coding-agent";
 
 // Mock theme that just returns plain text (no ANSI)
 const plainTheme: Theme = {

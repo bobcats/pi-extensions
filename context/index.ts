@@ -9,58 +9,24 @@
  * Original author: Armin Ronacher (mitsuhiko)
  * License: MIT
  */
-import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext, ToolResultEvent } from "@mariozechner/pi-coding-agent";
-import { DynamicBorder } from "@mariozechner/pi-coding-agent";
-import { Container, Key, Text, matchesKey, type Component, type TUI } from "@mariozechner/pi-tui";
-import os from "node:os";
+import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext, ToolResultEvent } from "@earendil-works/pi-coding-agent";
+import { DynamicBorder } from "@earendil-works/pi-coding-agent";
+import { Container, Key, Text, matchesKey, type Component, type TUI } from "@earendil-works/pi-tui";
 import path from "node:path";
-import fs from "node:fs/promises";
-import { existsSync } from "node:fs";
 import { formatUsd } from "../shared/lib.ts";
-import { estimateTokens, getAgentDir, normalizeReadPath, shortenPath, sumSessionUsage } from "./lib.ts";
+import { estimateTokens, normalizeReadPath, shortenPath, sumSessionUsage } from "./lib.ts";
 
-async function readFileIfExists(filePath: string): Promise<{ path: string; content: string; bytes: number } | null> {
-	if (!existsSync(filePath)) return null;
-	try {
-		const buf = await fs.readFile(filePath);
-		return { path: filePath, content: buf.toString("utf8"), bytes: buf.byteLength };
-	} catch {
-		return null;
-	}
+function loadCurrentContextFiles(ctx: ExtensionCommandContext): Array<{ path: string; tokens: number; bytes: number }> {
+	return (ctx.getSystemPromptOptions().contextFiles ?? []).map((file) => ({
+		path: file.path,
+		tokens: estimateTokens(file.content),
+		bytes: Buffer.byteLength(file.content, "utf8"),
+	}));
 }
 
-async function loadProjectContextFiles(cwd: string): Promise<Array<{ path: string; tokens: number; bytes: number }>> {
-	const out: Array<{ path: string; tokens: number; bytes: number }> = [];
-	const seen = new Set<string>();
-
-	const loadFromDir = async (dir: string) => {
-		for (const name of ["AGENTS.md", "CLAUDE.md"]) {
-			const p = path.join(dir, name);
-			const f = await readFileIfExists(p);
-			if (f && !seen.has(f.path)) {
-				seen.add(f.path);
-				out.push({ path: f.path, tokens: estimateTokens(f.content), bytes: f.bytes });
-				// pi loads at most one of those per dir
-				return;
-			}
-		}
-	};
-
-	await loadFromDir(getAgentDir());
-
-	// Ancestors: root → cwd (same order as pi)
-	const stack: string[] = [];
-	let current = path.resolve(cwd);
-	while (true) {
-		stack.push(current);
-		const parent = path.resolve(current, "..");
-		if (parent === current) break;
-		current = parent;
-	}
-	stack.reverse();
-	for (const dir of stack) await loadFromDir(dir);
-
-	return out;
+function commandSourcePath(command: { sourceInfo?: { path?: string }; path?: string }, cwd: string): string {
+	const sourcePath = command.sourceInfo?.path ?? command.path ?? "";
+	return sourcePath ? normalizeReadPath(sourcePath, cwd) : "";
 }
 
 function normalizeSkillName(name: string): string {
@@ -78,7 +44,7 @@ function buildSkillIndex(pi: ExtensionAPI, cwd: string): SkillIndexEntry[] {
 		.getCommands()
 		.filter((c) => c.source === "skill")
 		.map((c) => {
-			const p = c.path ? normalizeReadPath(c.path, cwd) : "";
+			const p = commandSourcePath(c, cwd);
 			return {
 				name: normalizeSkillName(c.name),
 				skillFilePath: p,
@@ -371,7 +337,7 @@ export default function contextExtension(pi: ExtensionAPI) {
 
 			const extensionsByPath = new Map<string, string[]>();
 			for (const c of extensionCmds) {
-				const p = c.path ?? "<unknown>";
+				const p = c.sourceInfo?.path ?? "<unknown>";
 				const arr = extensionsByPath.get(p) ?? [];
 				arr.push(c.name);
 				extensionsByPath.set(p, arr);
@@ -384,7 +350,7 @@ export default function contextExtension(pi: ExtensionAPI) {
 				.map((c) => normalizeSkillName(c.name))
 				.sort((a, b) => a.localeCompare(b));
 
-			const agentFiles = await loadProjectContextFiles(ctx.cwd);
+			const agentFiles = loadCurrentContextFiles(ctx);
 			const agentFilePaths = agentFiles.map((f) => shortenPath(f.path, ctx.cwd));
 			const agentTokens = agentFiles.reduce((a, f) => a + f.tokens, 0);
 

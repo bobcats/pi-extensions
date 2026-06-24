@@ -21,7 +21,7 @@ import {
 } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import type { ExtensionAPI, ExtensionContext, SessionEntry } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext, SessionEntry } from "@earendil-works/pi-coding-agent";
 import {
 	type ContentBlock,
 	extractFileReferencesFromText,
@@ -37,11 +37,10 @@ import {
 	toCanonicalPath,
 	toCanonicalPathMaybeMissing,
 } from "./git.ts";
-import { DynamicBorder } from "@mariozechner/pi-coding-agent";
+import { DynamicBorder } from "@earendil-works/pi-coding-agent";
 import {
 	Container,
 	fuzzyFilter,
-	getEditorKeybindings,
 	Input,
 	matchesKey,
 	type SelectItem,
@@ -49,7 +48,7 @@ import {
 	Spacer,
 	Text,
 	type TUI,
-} from "@mariozechner/pi-tui";
+} from "@earendil-works/pi-tui";
 
 type FileReference = {
 	path: string;
@@ -623,7 +622,7 @@ const showFileSelector = async (
 	});
 
 	let quickAction: "diff" | null = null;
-	const selection = await ctx.ui.custom<string | null>((tui, theme, _kb, done) => {
+	const selection = await ctx.ui.custom<string | null>((tui, theme, keybindings, done) => {
 		const container = new Container();
 		container.addChild(new DynamicBorder((str) => theme.fg("accent", str)));
 		container.addChild(new Text(theme.fg("accent", theme.bold(" Select file")), 0, 0));
@@ -704,16 +703,15 @@ const showFileSelector = async (
 					}
 				}
 
-				const kb = getEditorKeybindings();
 				if (
-					kb.matches(data, "selectUp") ||
-					kb.matches(data, "selectDown") ||
-					kb.matches(data, "selectConfirm") ||
-					kb.matches(data, "selectCancel")
+					keybindings.matches(data, "selectUp") ||
+					keybindings.matches(data, "selectDown") ||
+					keybindings.matches(data, "selectConfirm") ||
+					keybindings.matches(data, "selectCancel")
 				) {
 					if (selectList) {
 						selectList.handleInput(data);
-					} else if (kb.matches(data, "selectCancel")) {
+					} else if (keybindings.matches(data, "selectCancel")) {
 						done(null);
 					}
 					tui.requestRender();

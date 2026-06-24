@@ -1,6 +1,7 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { CONFIG_DIR_NAME } from "@earendil-works/pi-coding-agent";
 
 type ModelLike = {
 	provider: string;
@@ -10,7 +11,7 @@ type ModelLike = {
 function findNearestProjectSettingsPath(cwd: string): string | null {
 	let currentDir = cwd;
 	while (true) {
-		const candidate = path.join(currentDir, ".pi", "settings.json");
+		const candidate = path.join(currentDir, CONFIG_DIR_NAME, "settings.json");
 		if (fs.existsSync(candidate)) return candidate;
 
 		const parentDir = path.dirname(currentDir);
@@ -42,7 +43,7 @@ export function getSavedScopedModelIds(cwd: string, homeDir: string = os.homedir
 		if (projectModels.length > 0) return projectModels;
 	}
 
-	const globalSettingsPath = path.join(homeDir, ".pi", "agent", "settings.json");
+	const globalSettingsPath = path.join(homeDir, CONFIG_DIR_NAME, "agent", "settings.json");
 	return readEnabledModels(globalSettingsPath);
 }
 

@@ -17,33 +17,6 @@ export function normalizeReadPath(inputPath: string, cwd: string): string {
 	return path.resolve(p);
 }
 
-export function getAgentDir(): string {
-	// Mirrors pi's behavior reasonably well.
-	const envCandidates = ["PI_CODING_AGENT_DIR", "TAU_CODING_AGENT_DIR"];
-	let envDir: string | undefined;
-	for (const k of envCandidates) {
-		if (process.env[k]) {
-			envDir = process.env[k];
-			break;
-		}
-	}
-	if (!envDir) {
-		for (const [k, v] of Object.entries(process.env)) {
-			if (k.endsWith("_CODING_AGENT_DIR") && v) {
-				envDir = v;
-				break;
-			}
-		}
-	}
-
-	if (envDir) {
-		if (envDir === "~") return os.homedir();
-		if (envDir.startsWith("~/")) return path.join(os.homedir(), envDir.slice(2));
-		return envDir;
-	}
-	return path.join(os.homedir(), ".pi", "agent");
-}
-
 export type SessionEntryLike = {
 	type?: unknown;
 	message?: {

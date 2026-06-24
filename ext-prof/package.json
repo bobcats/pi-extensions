@@ -6,7 +6,8 @@
     "test": "tsx --test *.test.ts"
   },
   "devDependencies": {
-    "@mariozechner/pi-tui": "*",
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*",
     "tsx": "^4.20.0"
   }
 }

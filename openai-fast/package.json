@@ -6,8 +6,8 @@
     "test": "tsx --test --test-timeout=5000 *.test.ts"
   },
   "devDependencies": {
-    "@mariozechner/pi-coding-agent": "*",
-    "@mariozechner/pi-tui": "*",
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*",
     "tsx": "^4.20.0"
   }
 }

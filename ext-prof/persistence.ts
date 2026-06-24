@@ -1,5 +1,6 @@
 import path from "node:path";
 import { appendFile, mkdir } from "node:fs/promises";
+import { CONFIG_DIR_NAME } from "@earendil-works/pi-coding-agent";
 import type { Surface } from "./collector.ts";
 
 export type RecordingStartRow = {
@@ -37,7 +38,7 @@ export type RecordingEndRow = {
 export type ProfileRow = RecordingStartRow | AggregateDeltaRow | RecordingEndRow;
 
 export function profileDirectory(homeDir: string): string {
-  return path.join(homeDir, ".pi", "profiles", "ext-prof", "v2");
+  return path.join(homeDir, CONFIG_DIR_NAME, "profiles", "ext-prof", "v2");
 }
 
 export function createProfilePath(args: { homeDir: string; startedAt: string; runId: string }): string {

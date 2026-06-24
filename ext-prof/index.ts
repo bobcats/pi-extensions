@@ -3,8 +3,8 @@ import { homedir } from "node:os";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
-import type { AutocompleteItem } from "@mariozechner/pi-tui";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { AutocompleteItem } from "@earendil-works/pi-tui";
 import { createController } from "./commands.ts";
 import { formatProfileReport } from "./formatter.ts";
 import { patchRunnerPrototype, type PatchStatus } from "./patcher.ts";
@@ -59,7 +59,7 @@ function resolveRunnerModuleUrl(): string {
   };
 
   try {
-    const pkgEntry = require.resolve("@mariozechner/pi-coding-agent");
+    const pkgEntry = require.resolve("@earendil-works/pi-coding-agent");
     const found = addCandidate(path.join(path.dirname(pkgEntry), "core", "extensions", "runner.js"));
     if (found) return pathToFileURL(found).href;
   } catch (error) {
@@ -69,7 +69,7 @@ function resolveRunnerModuleUrl(): string {
 
   try {
     if (typeof import.meta.resolve === "function") {
-      const resolved = import.meta.resolve("@mariozechner/pi-coding-agent");
+      const resolved = import.meta.resolve("@earendil-works/pi-coding-agent");
       const pkgPath = toPath(resolved);
       const found = addCandidate(path.join(path.dirname(pkgPath), "core", "extensions", "runner.js"));
       if (found) return pathToFileURL(found).href;
@@ -87,33 +87,26 @@ function resolveRunnerModuleUrl(): string {
 
   for (const seed of seedDirs) {
     for (const dir of walkUpDirectories(seed)) {
-      const found =
-        addCandidate(
-          path.join(
-            dir,
-            "node_modules",
-            "@mariozechner",
-            "pi-coding-agent",
-            "dist",
-            "core",
-            "extensions",
-            "runner.js",
-          ),
-        ) ??
-        addCandidate(
-          path.join(
-            dir,
-            "lib",
-            "node_modules",
-            "@mariozechner",
-            "pi-coding-agent",
-            "dist",
-            "core",
-            "extensions",
-            "runner.js",
-          ),
-        ) ??
-        addCandidate(path.join(dir, "dist", "core", "extensions", "runner.js"));
+      let found: string | undefined;
+      for (const scope of ["@earendil-works", "@mariozechner"]) {
+        found =
+          addCandidate(path.join(dir, "node_modules", scope, "pi-coding-agent", "dist", "core", "extensions", "runner.js")) ??
+          addCandidate(
+            path.join(
+              dir,
+              "lib",
+              "node_modules",
+              scope,
+              "pi-coding-agent",
+              "dist",
+              "core",
+              "extensions",
+              "runner.js",
+            ),
+          );
+        if (found) break;
+      }
+      found ??= addCandidate(path.join(dir, "dist", "core", "extensions", "runner.js"));
 
       if (found) {
         return pathToFileURL(found).href;

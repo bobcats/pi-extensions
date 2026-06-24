@@ -18,8 +18,8 @@ import {
 	type Model,
 	type SimpleStreamOptions,
 	createAssistantMessageEventStream,
-} from "@mariozechner/pi-ai";
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+} from "@earendil-works/pi-ai";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 const DEFAULT_BASE_URL = "http://127.0.0.1:8080";
 

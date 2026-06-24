@@ -16,12 +16,12 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { Effect } from "effect";
-import type { Message } from "@mariozechner/pi-ai";
-import { StringEnum } from "@mariozechner/pi-ai";
-import type { ExtensionContext } from "@mariozechner/pi-coding-agent";
-import { type ExtensionAPI, getMarkdownTheme } from "@mariozechner/pi-coding-agent";
-import { Container, Markdown, Spacer, Text } from "@mariozechner/pi-tui";
-import { Type } from "@sinclair/typebox";
+import type { Message } from "@earendil-works/pi-ai";
+import { StringEnum } from "@earendil-works/pi-ai";
+import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { CONFIG_DIR_NAME, type ExtensionAPI, getAgentDir, getMarkdownTheme } from "@earendil-works/pi-coding-agent";
+import { Container, Markdown, Spacer, Text } from "@earendil-works/pi-tui";
+import { Type } from "typebox";
 import { createAsyncOwner } from "./async-owner.js";
 import { type AgentConfig, type AgentScope, discoverAgents } from "./agents.js";
 import { getSavedScopedModelIds, resolveModelOverride } from "./model-selection.js";
@@ -84,8 +84,8 @@ function readLastAssistantMessage(sessionFile: string): string {
 
 function resolveSkillPath(skillName: string, cwd: string): string | null {
 	const candidates = [
-		path.join(cwd, ".pi", "skills", skillName, "SKILL.md"),
-		path.join(os.homedir(), ".pi", "agent", "skills", skillName, "SKILL.md"),
+		path.join(cwd, CONFIG_DIR_NAME, "skills", skillName, "SKILL.md"),
+		path.join(getAgentDir(), "skills", skillName, "SKILL.md"),
 	];
 	for (const p of candidates) {
 		if (fs.existsSync(p)) return p;
@@ -299,14 +299,20 @@ export default function (pi: ExtensionAPI) {
 			"Delegate tasks to specialized subagents with isolated context.",
 			"Modes: single (agent + task), parallel (tasks array), chain (sequential with {previous} placeholder).",
 			"Optional model parameter overrides the agent frontmatter model and is validated against saved scoped models from settings (enabledModels).",
-			'Default agent scope is "user" (from ~/.pi/agent/agents).',
-			'To enable project-local agents in .pi/agents, set agentScope: "both" (or "project").',
+			'Default agent scope is "user" (from the Pi agent config agents directory).',
+			`To enable project-local agents in ${CONFIG_DIR_NAME}/agents, set agentScope: "both" (or "project").`,
 			"",
 			"WHEN TO USE: Subagents are worth the overhead for tasks that require independent reasoning, analysis, or multi-step work (code review, planning, research, implementation).",
 			"WHEN NOT TO USE: Do NOT use subagents just to read files in parallel. Reading files is fast and cheap — use the read tool directly. Spawning a subagent process for simple reads wastes time and tokens.",
 			"",
 			"ASYNC MODE: Pass async: true to run in tmux. Single async tasks open a temporary split beside the current pi pane. Parallel async tasks open a dedicated tmux window with one pane per task. Results steer back when done. Requires tmux. Not supported for chains.",
 		].join(" "),
+		promptSnippet: "Delegate tasks to specialized subagents with isolated context.",
+		promptGuidelines: [
+			"Use subagents for independent reasoning, analysis, code review, research, or implementation work that benefits from isolated context.",
+			"Do not use subagents just to read files in parallel; read files directly instead.",
+			"Use async mode only when the user wants background work or when long-running delegated work should remain inspectable in tmux.",
+		],
 		parameters: SubagentParams,
 
 		async execute(_toolCallId, params, signal, onUpdate, ctx) {

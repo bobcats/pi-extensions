@@ -6,8 +6,31 @@
  */
 
 import path from "path";
-import { complete, type Message } from "@mariozechner/pi-ai";
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+
+type Message = {
+	role: string;
+	content: unknown;
+	timestamp?: number;
+};
+
+type CompleteFn = (model: any, context: any, options?: any) => Promise<any>;
+
+let cachedCompleteFn: CompleteFn | undefined;
+
+async function loadCompatComplete(): Promise<CompleteFn> {
+	if (cachedCompleteFn) return cachedCompleteFn;
+
+	const rootEntry = fileURLToPath(import.meta.resolve("@earendil-works/pi-ai"));
+	const compatUrl = pathToFileURL(path.join(path.dirname(rootEntry), "compat.js")).href;
+	const compat = await import(compatUrl) as { complete?: CompleteFn };
+	if (typeof compat.complete !== "function") {
+		throw new Error("@earendil-works/pi-ai compat complete() is unavailable");
+	}
+	cachedCompleteFn = compat.complete;
+	return cachedCompleteFn;
+}
 
 const AUTO_NAME_PROVIDER = "openai-codex";
 const AUTO_NAME_MODEL = "gpt-5.4-mini";
@@ -331,8 +354,8 @@ function shouldRetryTitle(parsed: ParsedTitle, skillNames: string[]): boolean {
 }
 
 async function generateTitle(params: {
-	completeFn: typeof complete;
-	model: Parameters<typeof complete>[0];
+	completeFn: CompleteFn;
+	model: any;
 	auth: { apiKey: string; headers?: Record<string, string> };
 	context: NamingContext;
 }): Promise<string | null> {
@@ -363,10 +386,8 @@ async function generateTitle(params: {
 }
 
 export function createAutoNameExtension(deps: {
-	completeFn?: typeof complete;
+	completeFn?: CompleteFn;
 } = {}) {
-	const completeFn = deps.completeFn ?? complete;
-
 	return function autoNameSession(pi: ExtensionAPI) {
 		pi.on("agent_end", async (event, ctx) => {
 			const existingName = pi.getSessionName();
@@ -388,6 +409,7 @@ export function createAutoNameExtension(deps: {
 			if (!auth.ok || !auth.apiKey) return;
 
 			try {
+				const completeFn = deps.completeFn ?? await loadCompatComplete();
 				const namingContext = buildNamingContext(userMessage, messages, textOf(finalAssistant));
 				if (!namingContext.cleanUserGoal && !namingContext.assistantResult) return;
 

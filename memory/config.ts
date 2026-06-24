@@ -1,8 +1,9 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { CONFIG_DIR_NAME } from "@earendil-works/pi-coding-agent";
 import type { ActiveBrain, MemoryBrainConfig, MemoryBrainDefinition, MemoryProjectMapping } from "./types.js";
 
-export const MEMORY_CONFIG_FILE = path.join(".pi", "memory-config.json");
+export const MEMORY_CONFIG_FILE = path.join(CONFIG_DIR_NAME, "memory-config.json");
 
 function expandHome(inputPath: string, homeDir: string): string {
   if (inputPath === "~") return homeDir;
@@ -34,7 +35,7 @@ function defaultConfig(homeDir: string): MemoryBrainConfig {
     defaultBrain: "main",
     brains: {
       main: {
-        path: path.join(homeDir, ".pi", "memories"),
+        path: path.join(homeDir, CONFIG_DIR_NAME, "memories"),
       },
     },
     projectMappings: [],
