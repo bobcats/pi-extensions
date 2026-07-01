@@ -199,16 +199,39 @@ test("buildForgetPrompt warns that forget is not secure erase", () => {
   assert.ok(prompt.includes("git history may retain"));
 });
 
-test("buildForgetPrompt renders QMD candidates as hints", () => {
+test("buildForgetPrompt renders QMD candidates as search seeds", () => {
   const prompt = buildForgetPrompt("/test/vault", "acme", [
     { title: "Acme Notes", file: "/test/vault/projects/acme.md", score: 0.91, snippet: "Acme deployment notes" },
   ]);
 
-  assert.ok(prompt.includes("Candidate files"));
+  assert.ok(prompt.includes("Search seeds"));
   assert.ok(prompt.includes("91% Acme Notes"));
   assert.ok(prompt.includes("/test/vault/projects/acme.md"));
   assert.ok(prompt.includes("Acme deployment notes"));
-  assert.ok(prompt.includes("Candidate files are hints, not deletion targets"));
+  assert.ok(prompt.includes("Candidate files are search seeds, not deletion targets or the full scope"));
+});
+
+test("buildForgetPrompt treats forget as vault-wide semantic removal", () => {
+  const prompt = buildForgetPrompt("/test/vault", "git", []);
+
+  assert.ok(prompt.includes("semantic topic, not just on a topic file"));
+  assert.ok(prompt.includes("relevant memories to appear across many notes"));
+  assert.ok(prompt.includes("exact-text search, semantic search, aliases, and related terms"));
+  assert.ok(prompt.includes("do not limit the search to candidate files or one apparent topic note"));
+});
+
+test("buildForgetPrompt distinguishes assertions from broader subjects", () => {
+  const prompt = buildForgetPrompt(
+    "/test/vault",
+    "forget the claim that project cache directories should contain full checkouts",
+    [],
+  );
+
+  assert.ok(prompt.includes("broad subject or a specific assertion"));
+  assert.ok(prompt.includes("claim, correction, example, or boundary"));
+  assert.ok(prompt.includes("without deleting unrelated durable guidance about the broader subject"));
+  assert.ok(prompt.includes("whole note is within the forget scope"));
+  assert.ok(prompt.includes("replacement context"));
 });
 
 test("buildForgetPrompt omits blank candidate snippets", () => {

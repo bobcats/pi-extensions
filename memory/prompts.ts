@@ -116,22 +116,32 @@ Remove memories about this topic from the active memory vault.
 
 This is not a secure erase. Remove content from the working vault, but git history may retain previous versions until a separate destructive history purge exists.
 
-## Candidate files
+## Search seeds
 
-Candidate files are hints, not deletion targets. Inspect them and their related wikilinks before editing.
+Candidate files are search seeds, not deletion targets or the full scope. Inspect them and their related wikilinks, but do not stop there.
 
 ${formatForgetCandidates(candidates)}
+
+## Forget scope
+
+Forget operates on the vault's remembered knowledge about a semantic topic, not just on a topic file.
+- If the topic is broad, expect relevant memories to appear across many notes.
+- If the topic is a specific claim, correction, example, or boundary, remove or rewrite that assertion without deleting unrelated durable guidance about the broader subject.
+- Use appropriate discovery methods for the scope, such as the vault index, wikilinks, exact-text search, semantic search, aliases, and related terms.
+- Delete a note only when the whole note is within the forget scope and no unrelated durable guidance remains.
+- If the user provides replacement context, preserve it when it is needed to prevent the forgotten assertion from being relearned.
 
 ## Process
 
 1. Read \`${dir}/index.md\` to understand the vault structure.
-2. Inspect candidate files and related wikilinks for the topic.
-3. Remove notes whose primary subject is the topic.
-4. Surgically remove topic-specific sections, claims, examples, project/client facts, or private details from broader notes.
-5. Preserve generalized lessons by rewriting them without topic-specific details when possible.
-6. Treat ambiguous broad terms conservatively. If you cannot tell whether content should be forgotten, ask for clarification or log noop instead of guessing.
-7. Update \`${dir}/index.md\` if files were removed or renamed.
-8. Call log_operation(type="forget", status="keep"|"noop", description="...", findings_count=N) when done.
+2. Determine whether the user wants to forget a broad subject or a specific assertion about a broader subject.
+3. Discover relevant memories across the vault; do not limit the search to candidate files or one apparent topic note.
+4. Remove notes only when their whole subject is within that forget scope and no unrelated durable guidance remains.
+5. Surgically remove topic-specific sections, claims, examples, project/client facts, or private details from broader notes.
+6. Preserve generalized lessons by rewriting them without topic-specific details when possible.
+7. Treat ambiguous broad terms conservatively. If you cannot tell whether content should be forgotten, ask for clarification or log noop instead of guessing.
+8. Update \`${dir}/index.md\` if files were removed or renamed.
+9. Call log_operation(type="forget", status="keep"|"noop", description="...", findings_count=N) when done.
 
 ## Raw source boundary
 
