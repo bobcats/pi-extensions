@@ -50,11 +50,8 @@ export function getSavedScopedModelIds(cwd: string, homeDir: string = os.homedir
 export function resolveModelOverride(
 	scopedModelIds: string[],
 	modelOverride: string | undefined,
-	agentModel: string | undefined,
 ): { model?: string; error?: string } {
-	if (!modelOverride) {
-		return { model: agentModel };
-	}
+	if (!modelOverride) return {};
 
 	const scopedModels = new Set(scopedModelIds);
 	if (!scopedModels.has(modelOverride)) {

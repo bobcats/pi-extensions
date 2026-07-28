@@ -1,4 +1,4 @@
-import { Effect } from "effect";
+import { Effect, Scope } from "effect";
 import {
 	closePane,
 	closeWindow,
@@ -51,11 +51,11 @@ export function requireTmux(ops: TmuxOps = liveTmuxOps): Effect.Effect<void, Tmu
 		: Effect.fail(new TmuxUnavailable({ message: "async: true requires tmux. Start pi inside a tmux session." }));
 }
 
-export function adoptPane(pane: string, ops: TmuxOps = liveTmuxOps): Effect.Effect<string> {
+export function adoptPane(pane: string, ops: TmuxOps = liveTmuxOps): Effect.Effect<string, never, Scope.Scope> {
 	return Effect.acquireRelease(Effect.succeed(pane), (ownedPane) => Effect.sync(() => ops.closePane(ownedPane)));
 }
 
-export function adoptWindow(windowId: string, ops: TmuxOps = liveTmuxOps): Effect.Effect<string> {
+export function adoptWindow(windowId: string, ops: TmuxOps = liveTmuxOps): Effect.Effect<string, never, Scope.Scope> {
 	return Effect.acquireRelease(
 		Effect.succeed(windowId),
 		(ownedWindow) => Effect.sync(() => ops.closeWindow(ownedWindow)),
@@ -70,15 +70,17 @@ export function pollForExitEffect(
 	const intervalMs = options.intervalMs ?? 1000;
 	const screenLines = options.screenLines ?? 200;
 
-	return Effect.gen(function* loop() {
-		const screen = yield* Effect.tryPromise({
-			try: () => ops.readScreen(pane, screenLines),
-			catch: (cause) => new TmuxCommandFailed({ command: "capture-pane", cause }),
+	const poll = (): Effect.Effect<number, TmuxCommandFailed> =>
+		Effect.gen(function* () {
+			const screen = yield* Effect.tryPromise({
+				try: () => ops.readScreen(pane, screenLines),
+				catch: (cause) => new TmuxCommandFailed({ command: "capture-pane", cause }),
+			});
+			const match = screen.match(/__SUBAGENT_DONE_(\d+)__/);
+			if (match) return parseInt(match[1], 10);
+			options.onTick?.();
+			yield* Effect.sleep(`${intervalMs} millis`);
+			return yield* poll();
 		});
-		const match = screen.match(/__SUBAGENT_DONE_(\d+)__/);
-		if (match) return parseInt(match[1], 10);
-		options.onTick?.();
-		yield* Effect.sleep(`${intervalMs} millis`);
-		return yield* loop();
-	});
+	return poll();
 }
