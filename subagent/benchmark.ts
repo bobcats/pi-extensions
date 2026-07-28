@@ -3,7 +3,6 @@ import { pathToFileURL } from "node:url";
 import * as fs from "node:fs";
 import { Effect } from "effect";
 import type { Message } from "@earendil-works/pi-ai";
-import type { AgentConfig } from "./agents.ts";
 import { applyProcessJsonEvent, createInitialSingleResult } from "./process-effect.ts";
 import { parseSubagentRequest } from "./request.ts";
 import { createAsyncRuntimeDeps, runSubagentRequest, type AsyncStartDeps, type RuntimeDeps } from "./runtime.ts";
@@ -42,24 +41,6 @@ export interface BenchmarkResult {
 
 const DEFAULT_OPTIONS: BenchmarkOptions = { iterations: 50, warmup: 5 };
 
-const workerAgent: AgentConfig = {
-	name: "worker",
-	description: "Worker",
-	source: "user",
-	filePath: "/agents/worker.md",
-	systemPrompt: "You work.",
-	model: "anthropic/claude-sonnet-4-6",
-};
-
-const reviewerAgent: AgentConfig = {
-	...workerAgent,
-	name: "reviewer",
-	description: "Reviewer",
-	filePath: "/agents/reviewer.md",
-};
-
-const agents = [workerAgent, reviewerAgent];
-
 function assistantMessage(text: string): Message {
 	return {
 		role: "assistant",
@@ -68,10 +49,10 @@ function assistantMessage(text: string): Message {
 	} as Message;
 }
 
-function successfulResult(agentName: string, task: string): SingleResult {
+function successfulResult(task: string): SingleResult {
 	return {
-		agent: agentName,
-		agentSource: "user",
+		agent: "subagent",
+		agentSource: "prompt",
 		task,
 		exitCode: 0,
 		messages: [assistantMessage(`Done ${task}`)],
@@ -82,7 +63,7 @@ function successfulResult(agentName: string, task: string): SingleResult {
 
 function runtimeDeps(): RuntimeDeps {
 	return {
-		runSingle: (input) => Effect.succeed(successfulResult(input.agent.name, input.task)),
+		runSingle: (input) => Effect.succeed(successfulResult(input.task)),
 		startAsyncSingle: () => Effect.succeed({ runId: "run1" }),
 		startAsyncParallel: () => Effect.succeed({ runIds: ["run1", "run2"], windowName: "subagents-1" }),
 		spawnStaggerMs: 0,
@@ -91,14 +72,7 @@ function runtimeDeps(): RuntimeDeps {
 
 function parseRequest(params: Parameters<typeof parseSubagentRequest>[0]["params"]): Promise<SubagentRequest> {
 	return Effect.runPromise(
-		parseSubagentRequest({
-			params,
-			agents,
-			defaultCwd: "/repo",
-			agentScope: "user",
-			projectAgentsDir: null,
-			selectedModel: undefined,
-		}),
+		parseSubagentRequest({ params, defaultCwd: "/repo", selectedModel: undefined }),
 	);
 }
 
@@ -126,7 +100,7 @@ function cleanupFiles(paths: readonly string[]): void {
 	}
 }
 
-function makeAsyncRuntimeDeps(cleanupPaths: string[]): Pick<RuntimeDeps, "startAsyncSingle" | "startAsyncParallel" | "reportRejectedAsyncTask"> {
+function makeAsyncRuntimeDeps(cleanupPaths: string[]): Pick<RuntimeDeps, "startAsyncSingle" | "startAsyncParallel"> {
 	const asyncRuns = new Map<string, AsyncRun>();
 	const asyncBatches = new Map<string, AsyncBatch>();
 	const asyncOwner = {
@@ -140,22 +114,20 @@ function makeAsyncRuntimeDeps(cleanupPaths: string[]): Pick<RuntimeDeps, "startA
 		asyncBatches,
 		asyncOwner,
 		latestCtx: () => null,
-		pi: { sendMessage: () => undefined, events: { emit: () => undefined } } as AsyncStartDeps["pi"],
+		pi: { sendMessage: () => undefined, events: { emit: () => undefined } } as unknown as AsyncStartDeps["pi"],
 		updateWidget: () => undefined,
 		startWidgetRefresh: () => undefined,
 		readLastAssistantMessage: () => "(no output)",
-		resolveSkillPath: () => null,
 		tmuxOps: fakeTmuxOps(),
 	});
 }
 
 export function createBenchmarkCases(): BenchmarkCase[] {
-	const parallelTasks = Array.from({ length: 8 }, (_, index) => ({ agent: "worker", task: `Task ${index}` }));
-	const parallelRuntimeTasks = Array.from({ length: 8 }, (_, index) => ({ agent: workerAgent, task: `Task ${index}` }));
+	const parallelTasks = Array.from({ length: 8 }, (_, index) => ({ task: `Task ${index}` }));
 	const chainSteps = [
-		{ agent: "worker", task: "First" },
-		{ agent: "reviewer", task: "Review {previous}" },
-		{ agent: "worker", task: "Summarize {previous}" },
+		{ task: "First" },
+		{ task: "Review {previous}" },
+		{ task: "Summarize {previous}" },
 	];
 	const processEventLines = Array.from({ length: 10 }, (_, index) => JSON.stringify({
 		type: "message_end",
@@ -166,7 +138,7 @@ export function createBenchmarkCases(): BenchmarkCase[] {
 		{
 			name: "parse-single",
 			group: "request",
-			run: () => parseRequest({ agent: "worker", task: "Review code" }),
+			run: () => parseRequest({ task: "Review code" }),
 		},
 		{
 			name: "parse-parallel",
@@ -183,7 +155,7 @@ export function createBenchmarkCases(): BenchmarkCase[] {
 			group: "runtime",
 			run: () => Effect.runPromise(
 				runSubagentRequest(
-					{ type: "single", agent: workerAgent, task: "Task", options: { defaultCwd: "/repo" } },
+					{ type: "single", task: "Task", options: { defaultCwd: "/repo" } },
 					runtimeDeps(),
 				),
 			),
@@ -193,7 +165,7 @@ export function createBenchmarkCases(): BenchmarkCase[] {
 			group: "runtime",
 			run: () => Effect.runPromise(
 				runSubagentRequest(
-					{ type: "parallel", tasks: parallelRuntimeTasks, options: { defaultCwd: "/repo" } },
+					{ type: "parallel", tasks: parallelTasks, options: { defaultCwd: "/repo" } },
 					runtimeDeps(),
 				),
 			),
@@ -205,11 +177,7 @@ export function createBenchmarkCases(): BenchmarkCase[] {
 				runSubagentRequest(
 					{
 						type: "chain",
-						steps: [
-							{ agent: workerAgent, task: "First" },
-							{ agent: reviewerAgent, task: "Review {previous}" },
-							{ agent: workerAgent, task: "Summarize {previous}" },
-						],
+						steps: chainSteps,
 						options: { defaultCwd: "/repo" },
 					},
 					runtimeDeps(),
@@ -223,7 +191,7 @@ export function createBenchmarkCases(): BenchmarkCase[] {
 				const cleanupPaths: string[] = [];
 				await Effect.runPromise(
 					runSubagentRequest(
-						{ type: "asyncSingle", agent: workerAgent, task: "Async", options: { defaultCwd: "/repo" } },
+						{ type: "asyncSingle", task: "Async", options: { defaultCwd: "/repo" } },
 						{ ...runtimeDeps(), ...makeAsyncRuntimeDeps(cleanupPaths) },
 					),
 				);
@@ -239,11 +207,7 @@ export function createBenchmarkCases(): BenchmarkCase[] {
 					runSubagentRequest(
 						{
 							type: "asyncParallel",
-							tasks: [
-								{ agent: workerAgent, task: "Async A" },
-								{ agent: reviewerAgent, task: "Async B" },
-							],
-							rejectedTasks: [],
+							tasks: [{ task: "Async A" }, { task: "Async B" }],
 							options: { defaultCwd: "/repo" },
 						},
 						{ ...runtimeDeps(), ...makeAsyncRuntimeDeps(cleanupPaths) },
@@ -256,7 +220,7 @@ export function createBenchmarkCases(): BenchmarkCase[] {
 			name: "process-json-parse",
 			group: "process",
 			run: () => {
-				const result = createInitialSingleResult("worker", "Task", "user", undefined);
+				const result = createInitialSingleResult("Task", undefined);
 				for (const line of processEventLines) {
 					applyProcessJsonEvent(result, JSON.parse(line) as unknown);
 				}

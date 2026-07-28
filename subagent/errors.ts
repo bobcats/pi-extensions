@@ -17,12 +17,3 @@ export class ChildProcessFailed extends Data.TaggedError("ChildProcessFailed")<{
 	readonly message: string;
 	readonly exitCode?: number;
 }> {}
-
-export class ChildProcessAborted extends Data.TaggedError("ChildProcessAborted")<{
-	readonly message: string;
-}> {}
-
-export class TempResourceFailed extends Data.TaggedError("TempResourceFailed")<{
-	readonly operation: string;
-	readonly cause: unknown;
-}> {}

@@ -1,12 +1,11 @@
 import { spawn } from "node:child_process";
 import * as path from "node:path";
-import { Cause, Effect } from "effect";
+import { Effect } from "effect";
 import type { AgentToolResult } from "@earendil-works/pi-agent-core";
 import type { Message } from "@earendil-works/pi-ai";
-import type { AgentConfig } from "./agents.ts";
-import { ChildProcessAborted, ChildProcessFailed } from "./errors.ts";
-import { makeTempPromptFile } from "./temp-effect.ts";
-import { emptyUsageStats, getFinalOutput, type SingleResult, type SubagentDetails } from "./types.ts";
+import { getPackageDir } from "@earendil-works/pi-coding-agent";
+import { ChildProcessFailed } from "./errors.ts";
+import { SUBAGENT_LABEL, emptyUsageStats, getFinalOutput, type SingleResult, type SubagentDetails } from "./types.ts";
 
 type OnUpdateCallback = (partial: AgentToolResult<SubagentDetails>) => void;
 
@@ -19,7 +18,6 @@ export interface ChildProcessLike extends NodeJS.EventEmitter {
 
 export interface RunSingleAgentEffectInput {
 	defaultCwd: string;
-	agent: AgentConfig;
 	task: string;
 	cwd?: string;
 	thinking?: string;
@@ -28,29 +26,21 @@ export interface RunSingleAgentEffectInput {
 	onUpdate?: OnUpdateCallback;
 	makeDetails?: (results: SingleResult[]) => SubagentDetails;
 	spawnPi?: (args: string[], cwd: string) => ChildProcessLike;
-	resolveSkillPath: (skillName: string, cwd: string) => string | null;
 	killGraceMs?: number;
 }
 
 function emitUpdate(input: RunSingleAgentEffectInput, currentResult: SingleResult): void {
 	if (!input.onUpdate || !input.makeDetails) return;
-
 	input.onUpdate({
 		content: [{ type: "text", text: getFinalOutput(currentResult.messages) || "(running...)" }],
 		details: input.makeDetails([structuredClone(currentResult)]),
 	});
 }
 
-export function createInitialSingleResult(
-	agent: string,
-	task: string,
-	agentSource: SingleResult["agentSource"],
-	model: string | undefined,
-	step?: number,
-): SingleResult {
+export function createInitialSingleResult(task: string, model: string | undefined, step?: number): SingleResult {
 	return {
-		agent,
-		agentSource,
+		agent: SUBAGENT_LABEL,
+		agentSource: "prompt",
 		task,
 		exitCode: 0,
 		messages: [],
@@ -72,8 +62,7 @@ function asMessageUsage(message: Message): {
 	if (!("usage" in message)) return null;
 	const usage = (message as Message & { usage?: unknown }).usage;
 	if (!usage || typeof usage !== "object") return null;
-
-	const record = usage as {
+	return usage as {
 		input?: number;
 		output?: number;
 		cacheRead?: number;
@@ -81,14 +70,9 @@ function asMessageUsage(message: Message): {
 		cost?: { total?: number };
 		totalTokens?: number;
 	};
-	return record;
 }
 
-function asMessageMeta(message: Message): {
-	model?: string;
-	stopReason?: string;
-	errorMessage?: string;
-} {
+function asMessageMeta(message: Message): { model?: string; stopReason?: string; errorMessage?: string } {
 	const typed = message as Message & { model?: unknown; stopReason?: unknown; errorMessage?: unknown };
 	return {
 		model: typeof typed.model === "string" ? typed.model : undefined,
@@ -104,7 +88,6 @@ export function applyProcessJsonEvent(result: SingleResult, event: unknown): voi
 	if (item.type === "message_end" && item.message && typeof item.message === "object") {
 		const msg = item.message as Message;
 		result.messages.push(msg);
-
 		if (msg.role === "assistant") {
 			result.usage.turns++;
 			const usage = asMessageUsage(msg);
@@ -116,14 +99,12 @@ export function applyProcessJsonEvent(result: SingleResult, event: unknown): voi
 				result.usage.cost += usage.cost?.total || 0;
 				result.usage.contextTokens = usage.totalTokens || 0;
 			}
-
 			const meta = asMessageMeta(msg);
 			if (!result.model && meta.model) result.model = meta.model;
 			if (meta.stopReason) result.stopReason = meta.stopReason;
 			if (meta.errorMessage) result.errorMessage = meta.errorMessage;
 		}
 	}
-
 	if (item.type === "tool_result_end" && item.message && typeof item.message === "object") {
 		result.messages.push(item.message as Message);
 	}
@@ -137,45 +118,33 @@ function killProcess(proc: ChildProcessLike, killGraceMs: number): void {
 	}, killGraceMs).unref();
 }
 
-function buildArgs(input: RunSingleAgentEffectInput, promptPath?: string): string[] {
+function buildArgs(input: RunSingleAgentEffectInput): string[] {
 	const args: string[] = ["--mode", "json", "-p", "--no-session"];
 	if (input.model) args.push("--model", input.model);
-	if (input.agent.tools && input.agent.tools.length > 0) {
-		args.push("--tools", input.agent.tools.join(","));
-	}
-
-	const effectiveThinking = input.thinking ?? input.agent.thinking;
-	if (effectiveThinking) args.push("--thinking", effectiveThinking);
-
-	if (input.agent.skills && input.agent.skills.length > 0) {
-		for (const skillName of input.agent.skills) {
-			const skillPath = input.resolveSkillPath(skillName, input.defaultCwd);
-			if (skillPath) args.push("--skill", skillPath);
-		}
-	}
-
-	if (input.agent.spawning === false) {
-		args.push("--no-extensions");
-	}
-
-	if (promptPath) {
-		args.push("--append-system-prompt", promptPath);
-	}
-
-	args.push(`Task: ${input.task}`);
+	if (input.thinking) args.push("--thinking", input.thinking);
+	args.push(input.task);
 	return args;
 }
 
-function resolveCwd(input: RunSingleAgentEffectInput): string {
-	if (input.cwd) return input.cwd;
-	if (!input.agent.cwd) return input.defaultCwd;
-	return path.isAbsolute(input.agent.cwd)
-		? input.agent.cwd
-		: path.resolve(input.defaultCwd, input.agent.cwd);
+/** Resolve the Pi CLI entrypoint for the currently running installation (no PATH). */
+export function resolvePiCliPath(packageDir = getPackageDir()): string {
+	return path.join(packageDir, "dist", "cli.js");
+}
+
+/** Command + argv used to respawn the same Pi install (node + package dist/cli.js). */
+export function buildPiSpawnInvocation(
+	args: string[],
+	options: { execPath?: string; packageDir?: string } = {},
+): { command: string; args: string[] } {
+	return {
+		command: options.execPath ?? process.execPath,
+		args: [resolvePiCliPath(options.packageDir), ...args],
+	};
 }
 
 function defaultSpawnPi(args: string[], cwd: string): ChildProcessLike {
-	return spawn("pi", args, {
+	const invocation = buildPiSpawnInvocation(args);
+	return spawn(invocation.command, invocation.args, {
 		cwd,
 		shell: false,
 		stdio: ["ignore", "pipe", "pipe"],
@@ -188,81 +157,55 @@ function runSpawnedProcess(
 	result: SingleResult,
 ): Effect.Effect<SingleResult, ChildProcessFailed> {
 	const killGraceMs = input.killGraceMs ?? 5000;
-
 	return Effect.async<SingleResult, ChildProcessFailed>((resume) => {
 		if (!proc.stdout || !proc.stderr) {
-			resume(
-				Effect.fail(
-					new ChildProcessFailed({
-						message: "Subagent process did not expose stdout/stderr pipes.",
-					}),
-				),
-			);
+			resume(Effect.fail(new ChildProcessFailed({ message: "Subagent process did not expose stdout/stderr pipes." })));
 			return Effect.void;
 		}
-
 		let done = false;
 		let buffer = "";
 		let closed = false;
-
 		const processLine = (line: string) => {
 			if (!line.trim()) return;
 			try {
-				const event = JSON.parse(line) as unknown;
-				applyProcessJsonEvent(result, event);
+				applyProcessJsonEvent(result, JSON.parse(line) as unknown);
 				if (result.messages.length > 0) emitUpdate(input, result);
 			} catch {
-				// Ignore non-JSON lines to preserve existing behavior.
+				// Ignore non-JSON lines emitted alongside Pi's JSON stream.
 			}
 		};
-
 		const onStdout = (data: Buffer | string) => {
 			buffer += data.toString();
 			const lines = buffer.split("\n");
 			buffer = lines.pop() || "";
 			for (const line of lines) processLine(line);
 		};
-
-		const onStderr = (data: Buffer | string) => {
-			result.stderr += data.toString();
-		};
-
-		const finish = (effect: Effect.Effect<SingleResult, ChildProcessFailed>) => {
-			if (done) return;
-			done = true;
-			cleanup();
-			resume(effect);
-		};
-
-		const onClose = (code: number | null) => {
-			closed = true;
-			if (buffer.trim()) processLine(buffer);
-			result.exitCode = code ?? 0;
-			finish(Effect.succeed(result));
-		};
-
-		const onError = () => {
-			finish(
-				Effect.fail(
-					new ChildProcessFailed({
-						message: `Failed to run subagent process for ${input.agent.name}.`,
-					}),
-				),
-			);
-		};
-
+		const onStderr = (data: Buffer | string) => { result.stderr += data.toString(); };
 		const cleanup = () => {
 			proc.stdout?.off("data", onStdout);
 			proc.stderr?.off("data", onStderr);
 			proc.off("close", onClose);
 			proc.off("error", onError);
 		};
-
+		const finish = (effect: Effect.Effect<SingleResult, ChildProcessFailed>) => {
+			if (done) return;
+			done = true;
+			cleanup();
+			resume(effect);
+		};
+		const onClose = (code: number | null) => {
+			closed = true;
+			if (buffer.trim()) processLine(buffer);
+			result.exitCode = code ?? 0;
+			finish(Effect.succeed(result));
+		};
+		const onError = (error: Error) => {
+			finish(Effect.fail(new ChildProcessFailed({ message: `Failed to run subagent process: ${error.message}` })));
+		};
 		proc.stdout.on("data", onStdout);
 		proc.stderr.on("data", onStderr);
 		proc.on("close", onClose);
 		proc.on("error", onError);
-
 		return Effect.sync(() => {
 			cleanup();
 			if (!closed) killProcess(proc, killGraceMs);
@@ -272,30 +215,10 @@ function runSpawnedProcess(
 
 export function runSingleAgentEffect(
 	input: RunSingleAgentEffectInput,
-): Effect.Effect<SingleResult, ChildProcessAborted | ChildProcessFailed> {
-	return Effect.scoped(
-		Effect.gen(function* () {
-			const prompt = input.agent.systemPrompt.trim()
-				? yield* makeTempPromptFile(input.agent.name, input.agent.systemPrompt)
-				: undefined;
-			const args = buildArgs(input, prompt?.filePath);
-			const cwd = resolveCwd(input);
-			const spawnPi = input.spawnPi ?? defaultSpawnPi;
-			const proc = spawnPi(args, cwd);
-			const result = createInitialSingleResult(
-				input.agent.name,
-				input.task,
-				input.agent.source,
-				input.model,
-				input.step,
-			);
-			return yield* runSpawnedProcess(proc, input, result);
-		}),
-	).pipe(
-		Effect.catchAllCause((cause) =>
-			Cause.isInterruptedOnly(cause)
-				? Effect.fail(new ChildProcessAborted({ message: "Subagent was aborted" }))
-				: Effect.failCause(cause),
-		),
+): Effect.Effect<SingleResult, ChildProcessFailed> {
+	return runSpawnedProcess(
+		(input.spawnPi ?? defaultSpawnPi)(buildArgs(input), input.cwd ?? input.defaultCwd),
+		input,
+		createInitialSingleResult(input.task, input.model, input.step),
 	);
 }

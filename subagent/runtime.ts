@@ -6,12 +6,12 @@ import { Effect } from "effect";
 import type { AgentToolResult } from "@earendil-works/pi-agent-core";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { ChildProcessFailed, TmuxCommandFailed } from "./errors.ts";
-import { runSingleAgentEffect, type RunSingleAgentEffectInput } from "./process-effect.ts";
-import { createPromptTempFileSync } from "./temp-effect.ts";
+import { resolvePiCliPath, runSingleAgentEffect, type RunSingleAgentEffectInput } from "./process-effect.ts";
 import { liveTmuxOps, pollForExitEffect, requireTmux, type TmuxOps } from "./tmux-effect.ts";
 import {
 	MAX_CONCURRENCY,
 	SPAWN_STAGGER_MS,
+	SUBAGENT_LABEL,
 	emptyUsageStats,
 	getFinalOutput,
 	type AsyncBatch,
@@ -31,12 +31,8 @@ export interface RuntimeDeps {
 	startAsyncParallel: (
 		request: Extract<SubagentRequest, { type: "asyncParallel" }>,
 	) => Effect.Effect<{ runIds: string[]; windowName: string }, unknown>;
-	reportRejectedAsyncTask?: (
-		task: Extract<SubagentRequest, { type: "asyncParallel" }>["rejectedTasks"][number],
-	) => Effect.Effect<void, unknown>;
 	onUpdate?: (partial: AgentToolResult<SubagentDetails>) => void;
 	makeDetails?: (mode: SubagentDetails["mode"]) => (results: SingleResult[]) => SubagentDetails;
-	resolveSkillPath?: (skillName: string, cwd: string) => string | null;
 	spawnStaggerMs?: number;
 }
 
@@ -61,7 +57,6 @@ export interface AsyncWatcherDeps {
 export interface AsyncStartDeps extends AsyncWatcherDeps {
 	asyncOwner: { start(run: AsyncRun): void };
 	startWidgetRefresh: (ctx: ExtensionContext | null, runs: Map<string, AsyncRun>) => void;
-	resolveSkillPath: (skillName: string, cwd: string) => string | null;
 }
 
 function isFailedResult(result: SingleResult): boolean {
@@ -102,7 +97,6 @@ function buildRunSingleInput(
 	request: SubagentRequest,
 	deps: RuntimeDeps,
 	args: {
-		agent: Extract<SubagentRequest, { type: "single" | "asyncSingle" }>["agent"];
 		task: string;
 		cwd?: string;
 		model?: string;
@@ -113,7 +107,6 @@ function buildRunSingleInput(
 ): RunSingleAgentEffectInput {
 	return {
 		defaultCwd: request.options.defaultCwd,
-		agent: args.agent,
 		task: args.task,
 		cwd: args.cwd,
 		thinking: request.options.thinking,
@@ -121,7 +114,6 @@ function buildRunSingleInput(
 		step: args.step,
 		onUpdate: args.onUpdate,
 		makeDetails: args.makeDetails,
-		resolveSkillPath: deps.resolveSkillPath ?? (() => null),
 	};
 }
 
@@ -188,52 +180,23 @@ function finishBatchRun(asyncBatches: Map<string, AsyncBatch>, run: AsyncRun, op
 }
 
 function buildAsyncPiCommand(
-	agent: Extract<SubagentRequest, { type: "asyncSingle" }>["agent"],
 	task: string,
 	defaultCwd: string,
 	cwd: string | undefined,
 	thinking: string | undefined,
 	model: string | undefined,
 	sessionFile: string,
-	tempFiles: string[],
-	resolveSkillPath: (skillName: string, cwd: string) => string | null,
 	ops: TmuxOps,
-	trackCreatedTempFile?: (filePath: string) => void,
 ): string {
 	const args: string[] = ["--session", sessionFile];
 	if (model) args.push("--model", model);
-	if (agent.tools && agent.tools.length > 0) args.push("--tools", agent.tools.join(","));
+	if (thinking) args.push("--thinking", thinking);
+	args.push("-e", path.join(RUNTIME_DIR, "auto-exit.ts"));
+	args.push(task);
 
-	const effectiveThinking = thinking ?? agent.thinking;
-	if (effectiveThinking) args.push("--thinking", effectiveThinking);
-
-	if (agent.skills && agent.skills.length > 0) {
-		for (const skillName of agent.skills) {
-			const skillPath = resolveSkillPath(skillName, defaultCwd);
-			if (skillPath) args.push("--skill", skillPath);
-		}
-	}
-
-	const autoExitPath = path.join(RUNTIME_DIR, "auto-exit.ts");
-	if (agent.spawning === false) {
-		args.push("--no-extensions", "-e", autoExitPath);
-	} else {
-		args.push("-e", autoExitPath);
-	}
-
-	if (agent.systemPrompt.trim()) {
-		const temp = createPromptTempFileSync(agent.name, agent.systemPrompt);
-		args.push("--append-system-prompt", temp.filePath);
-		tempFiles.push(temp.filePath, temp.dir);
-		trackCreatedTempFile?.(temp.filePath);
-		trackCreatedTempFile?.(temp.dir);
-	}
-
-	args.push(`Task: ${task}`);
-
-	const effectiveCwd = cwd ??
-		(agent.cwd ? (path.isAbsolute(agent.cwd) ? agent.cwd : path.resolve(defaultCwd, agent.cwd)) : defaultCwd);
-	return `cd ${ops.shellEscape(effectiveCwd)} && pi ${args.map(ops.shellEscape).join(" ")}; echo '__SUBAGENT_DONE_'$?'__'`;
+	const effectiveCwd = cwd ?? defaultCwd;
+	const piCmd = `${ops.shellEscape(process.execPath)} ${ops.shellEscape(resolvePiCliPath())}`;
+	return `cd ${ops.shellEscape(effectiveCwd)} && ${piCmd} ${args.map(ops.shellEscape).join(" ")}; echo '__SUBAGENT_DONE_'$?'__'`;
 }
 
 export function createAsyncRunWatcher(deps: AsyncWatcherDeps): (run: AsyncRun) => Effect.Effect<void, unknown> {
@@ -287,7 +250,7 @@ export function createAsyncRunWatcher(deps: AsyncWatcherDeps): (run: AsyncRun) =
 
 export function createAsyncRuntimeDeps(
 	deps: AsyncStartDeps,
-): Pick<RuntimeDeps, "startAsyncSingle" | "startAsyncParallel" | "reportRejectedAsyncTask"> {
+): Pick<RuntimeDeps, "startAsyncSingle" | "startAsyncParallel"> {
 	const ops = deps.tmuxOps ?? liveTmuxOps;
 
 	return {
@@ -305,24 +268,21 @@ export function createAsyncRuntimeDeps(
 				tempFiles.push(...session.tempFiles);
 
 				const command = buildAsyncPiCommand(
-					request.agent,
 					request.task,
 					request.options.defaultCwd,
 					request.cwd,
 					request.options.thinking,
 					request.model,
 					session.sessionFile,
-					tempFiles,
-					deps.resolveSkillPath,
 					ops,
 				);
 				pane = yield* tmuxTry("split-window", () =>
-					ops.createPaneWithCommand(asyncPaneTitle(request.agent.name, request.task), command)
+					ops.createPaneWithCommand(asyncPaneTitle(SUBAGENT_LABEL, request.task), command)
 				);
 
 				const run: AsyncRun = {
 					id: runId,
-					agent: request.agent.name,
+					agent: SUBAGENT_LABEL,
 					task: request.task,
 					startedAt: Date.now(),
 					pane,
@@ -371,21 +331,17 @@ export function createAsyncRuntimeDeps(
 					for (const filePath of tempFiles) trackTempFile(tempFilesForSetup, filePath);
 
 					const command = buildAsyncPiCommand(
-						task.agent,
 						task.task,
 						request.options.defaultCwd,
 						task.cwd,
 						request.options.thinking,
-						request.options.selectedModel ?? task.agent.model,
+						request.options.selectedModel,
 						session.sessionFile,
-						tempFiles,
-						deps.resolveSkillPath,
 						ops,
-						(filePath) => trackTempFile(tempFilesForSetup, filePath),
 					);
 					for (const filePath of tempFiles) trackTempFile(tempFilesForSetup, filePath);
 
-					const name = asyncPaneTitle(task.agent.name, task.task);
+					const name = asyncPaneTitle(SUBAGENT_LABEL, task.task);
 					let pane: string;
 					if (i === 0 && initialPane) {
 						yield* tmuxTry("send-keys", () => ops.runCommandInPane(initialPane, name, command));
@@ -397,7 +353,7 @@ export function createAsyncRuntimeDeps(
 
 					const run: AsyncRun = {
 						id: runId,
-						agent: task.agent.name,
+						agent: SUBAGENT_LABEL,
 						task: task.task,
 						startedAt: Date.now(),
 						pane,
@@ -441,18 +397,6 @@ export function createAsyncRuntimeDeps(
 			);
 		},
 
-		reportRejectedAsyncTask: (task) =>
-			Effect.sync(() => {
-				deps.pi.sendMessage(
-					{
-						customType: "subagent_result",
-						content: `Async subagent "${task.agent}" failed (invalid agent).\n\n${task.reason}`,
-						display: true,
-						details: { runId: null, agent: task.agent, task: task.task, exitCode: 1 },
-					},
-					{ triggerTurn: true, deliverAs: "steer" },
-				);
-			}),
 	};
 }
 
@@ -465,7 +409,6 @@ export function runSubagentRequest(request: SubagentRequest, deps: RuntimeDeps):
 			return Effect.gen(function* () {
 				const result = yield* runSingle(
 					buildRunSingleInput(request, deps, {
-						agent: request.agent,
 						task: request.task,
 						cwd: request.cwd,
 						model: request.model,
@@ -512,10 +455,9 @@ export function runSubagentRequest(request: SubagentRequest, deps: RuntimeDeps):
 
 					const result = yield* runSingle(
 						buildRunSingleInput(request, deps, {
-							agent: step.agent,
 							task: taskWithContext,
 							cwd: step.cwd,
-							model: request.options.selectedModel ?? step.agent.model,
+							model: request.options.selectedModel,
 							step: i + 1,
 							onUpdate: chainUpdate,
 							makeDetails: deps.makeDetails?.("chain"),
@@ -526,7 +468,7 @@ export function runSubagentRequest(request: SubagentRequest, deps: RuntimeDeps):
 					if (isFailedResult(result)) {
 						return yield* Effect.fail(
 							new ChildProcessFailed({
-								message: `Chain stopped at step ${i + 1} (${step.agent.name}): ${failureText(result)}`,
+								message: `Chain stopped at step ${i + 1}: ${failureText(result)}`,
 								exitCode: result.exitCode,
 							}),
 						);
@@ -545,7 +487,7 @@ export function runSubagentRequest(request: SubagentRequest, deps: RuntimeDeps):
 
 		case "parallel": {
 			return Effect.gen(function* () {
-				const allResults = request.tasks.map((task) => makePlaceholderResult(task.agent.name, task.task));
+				const allResults = request.tasks.map((task) => makePlaceholderResult(SUBAGENT_LABEL, task.task));
 				const mode: SubagentDetails["mode"] = "parallel";
 
 				const results = yield* Effect.forEach(
@@ -559,10 +501,9 @@ export function runSubagentRequest(request: SubagentRequest, deps: RuntimeDeps):
 
 							const result = yield* runSingle(
 								buildRunSingleInput(request, deps, {
-									agent: task.agent,
 									task: task.task,
 									cwd: task.cwd,
-									model: request.options.selectedModel ?? task.agent.model,
+									model: request.options.selectedModel,
 									onUpdate: (partial) => {
 										const current = partial.details?.results[0];
 										if (!current) return;
@@ -601,7 +542,7 @@ export function runSubagentRequest(request: SubagentRequest, deps: RuntimeDeps):
 				return {
 					mode: "single",
 					results: [],
-					contentText: `Started async subagent "${request.agent.name}" (run: ${started.runId})`,
+					contentText: `Started async subagent (run: ${started.runId})`,
 					asyncStarted: { runId: started.runId },
 				};
 			});
@@ -609,12 +550,6 @@ export function runSubagentRequest(request: SubagentRequest, deps: RuntimeDeps):
 
 		case "asyncParallel": {
 			return Effect.gen(function* () {
-				if (deps.reportRejectedAsyncTask) {
-					for (const task of request.rejectedTasks) {
-						yield* deps.reportRejectedAsyncTask(task);
-					}
-				}
-
 				if (request.tasks.length === 0) {
 					return {
 						mode: "parallel",

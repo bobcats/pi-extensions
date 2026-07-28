@@ -1,31 +1,21 @@
 /**
- * Subagent Tool - Delegate tasks to specialized agents
+ * Prompt-driven subagent tool.
  *
- * Spawns a separate `pi` process for each subagent invocation,
- * giving it an isolated context window.
- *
- * Supports three modes:
- *   - Single: { agent: "name", task: "..." }
- *   - Parallel: { tasks: [{ agent: "name", task: "..." }, ...] }
- *   - Chain: { chain: [{ agent: "name", task: "... {previous} ..." }, ...] }
- *
- * Uses JSON mode to capture structured output from subagents.
+ * Spawns isolated `pi` processes with no configured persona. The parent session
+ * supplies each complete prompt through single, parallel, or chained tasks.
  */
 
 import * as fs from "node:fs";
 import * as os from "node:os";
-import * as path from "node:path";
 import { Effect } from "effect";
 import type { Message } from "@earendil-works/pi-ai";
-import { StringEnum } from "@earendil-works/pi-ai";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { CONFIG_DIR_NAME, type ExtensionAPI, getAgentDir, getMarkdownTheme } from "@earendil-works/pi-coding-agent";
+import { type ExtensionAPI, getMarkdownTheme } from "@earendil-works/pi-coding-agent";
 import { Container, Markdown, Spacer, Text } from "@earendil-works/pi-tui";
-import { Type } from "typebox";
+import { Type } from "@sinclair/typebox";
 import { createAsyncOwner } from "./async-owner.js";
-import { type AgentConfig, type AgentScope, discoverAgents } from "./agents.js";
 import { getSavedScopedModelIds, resolveModelOverride } from "./model-selection.js";
-import { parseSubagentRequest, projectAgentsForConfirmation } from "./request.js";
+import { parseSubagentRequest } from "./request.js";
 import { createAsyncRunWatcher, createAsyncRuntimeDeps, runSubagentRequest } from "./runtime.js";
 import { closePane, closeWindow } from "./tmux.js";
 import {
@@ -35,10 +25,9 @@ import {
 	type AsyncRun,
 	type SingleResult,
 	type SubagentDetails,
+	type SubagentRequest,
 } from "./types.js";
 import { updateWidget, startWidgetRefresh, stopWidgetRefresh } from "./widget.js";
-
-const BUNDLED_AGENTS_DIR = path.join(import.meta.dirname, "agents");
 
 function readSessionLines(sessionFile: string): string[] {
 	try {
@@ -82,16 +71,6 @@ function readLastAssistantMessage(sessionFile: string): string {
 	return "(no output)";
 }
 
-function resolveSkillPath(skillName: string, cwd: string): string | null {
-	const candidates = [
-		path.join(cwd, CONFIG_DIR_NAME, "skills", skillName, "SKILL.md"),
-		path.join(getAgentDir(), "skills", skillName, "SKILL.md"),
-	];
-	for (const p of candidates) {
-		if (fs.existsSync(p)) return p;
-	}
-	return null;
-}
 function formatTokens(count: number): string {
 	if (count < 1000) return count.toString();
 	if (count < 10000) return `${(count / 1000).toFixed(1)}k`;
@@ -209,37 +188,25 @@ function getDisplayItems(messages: Message[]): DisplayItem[] {
 }
 
 const TaskItem = Type.Object({
-	agent: Type.String({ description: "Name of the agent to invoke" }),
-	task: Type.String({ description: "Task to delegate to the agent" }),
-	cwd: Type.Optional(Type.String({ description: "Working directory for the agent process" })),
+	task: Type.String({ description: "Complete prompt for the subagent" }),
+	cwd: Type.Optional(Type.String({ description: "Working directory for the subagent process" })),
 });
 
 const ChainItem = Type.Object({
-	agent: Type.String({ description: "Name of the agent to invoke" }),
-	task: Type.String({ description: "Task with optional {previous} placeholder for prior output" }),
-	cwd: Type.Optional(Type.String({ description: "Working directory for the agent process" })),
-});
-
-const AgentScopeSchema = StringEnum(["user", "project", "both"] as const, {
-	description: 'Which agent directories to use. Default: "user". Use "both" to include project-local agents.',
-	default: "user",
+	task: Type.String({ description: "Complete prompt with optional {previous} placeholder for prior output" }),
+	cwd: Type.Optional(Type.String({ description: "Working directory for the subagent process" })),
 });
 
 const SubagentParams = Type.Object({
-	agent: Type.Optional(Type.String({ description: "Name of the agent to invoke (for single mode)" })),
-	task: Type.Optional(Type.String({ description: "Task to delegate (for single mode)" })),
-	tasks: Type.Optional(Type.Array(TaskItem, { description: "Array of {agent, task} for parallel execution" })),
-	chain: Type.Optional(Type.Array(ChainItem, { description: "Array of {agent, task} for sequential execution" })),
-	agentScope: Type.Optional(AgentScopeSchema),
-	confirmProjectAgents: Type.Optional(
-		Type.Boolean({ description: "Prompt before running project-local agents. Default: true.", default: true }),
-	),
-	cwd: Type.Optional(Type.String({ description: "Working directory for the agent process (single mode)" })),
+	task: Type.Optional(Type.String({ description: "Complete prompt for a single subagent" })),
+	tasks: Type.Optional(Type.Array(TaskItem, { description: "Prompt-driven tasks for parallel execution" })),
+	chain: Type.Optional(Type.Array(ChainItem, { description: "Prompt-driven steps for sequential execution" })),
+	cwd: Type.Optional(Type.String({ description: "Working directory for the subagent process (single mode)" })),
 	thinking: Type.Optional(Type.String({
 		description: "Override thinking level: off, minimal, low, medium, high, xhigh",
 	})),
 	model: Type.Optional(Type.String({
-		description: "Override the agent frontmatter model. Must match one of the saved scoped models (enabledModels) in provider/model-id format, e.g. anthropic/claude-sonnet-4-6.",
+		description: "Model for all subagents. Must match a saved scoped model (enabledModels), e.g. anthropic/claude-sonnet-4-6.",
 	})),
 	async: Type.Optional(Type.Boolean({
 		description: "Run in background. Returns immediately, result steers back on completion. Requires tmux. Not supported for chains.",
@@ -280,80 +247,42 @@ export default function (pi: ExtensionAPI) {
 		latestCtx = null;
 	});
 
-	// Shared agent registry — other extensions push agents here via subagent:register.
-	// We also emit subagent:discover at execute time so late-loading extensions can respond.
-	const externalAgents: AgentConfig[] = [];
-
-	pi.events.on("subagent:register", (agents: AgentConfig[]) => {
-		for (const agent of agents) {
-			const idx = externalAgents.findIndex((a) => a.name === agent.name);
-			if (idx >= 0) externalAgents[idx] = agent;
-			else externalAgents.push(agent);
-		}
-	});
-
 	pi.registerTool({
 		name: "subagent",
 		label: "Subagent",
 		description: [
-			"Delegate tasks to specialized subagents with isolated context.",
-			"Modes: single (agent + task), parallel (tasks array), chain (sequential with {previous} placeholder).",
-			"Optional model parameter overrides the agent frontmatter model and is validated against saved scoped models from settings (enabledModels).",
-			'Default agent scope is "user" (from the Pi agent config agents directory).',
-			`To enable project-local agents in ${CONFIG_DIR_NAME}/agents, set agentScope: "both" (or "project").`,
+			"Delegate complete prompts to isolated subagents.",
+			"Modes: single (task), parallel (tasks array), chain (sequential with {previous} placeholder).",
+			"Subagents have no built-in persona; the parent must include all role, context, constraints, and output instructions in each task prompt.",
+			"Optional model parameter is validated against saved scoped models from settings (enabledModels).",
 			"",
 			"WHEN TO USE: Subagents are worth the overhead for tasks that require independent reasoning, analysis, or multi-step work (code review, planning, research, implementation).",
 			"WHEN NOT TO USE: Do NOT use subagents just to read files in parallel. Reading files is fast and cheap — use the read tool directly. Spawning a subagent process for simple reads wastes time and tokens.",
 			"",
 			"ASYNC MODE: Pass async: true to run in tmux. Single async tasks open a temporary split beside the current pi pane. Parallel async tasks open a dedicated tmux window with one pane per task. Results steer back when done. Requires tmux. Not supported for chains.",
 		].join(" "),
-		promptSnippet: "Delegate tasks to specialized subagents with isolated context.",
+		promptSnippet: "Delegate complete prompts to isolated subagents.",
 		promptGuidelines: [
-			"Use subagents for independent reasoning, analysis, code review, research, or implementation work that benefits from isolated context.",
-			"Do not use subagents just to read files in parallel; read files directly instead.",
-			"Use async mode only when the user wants background work or when long-running delegated work should remain inspectable in tmux.",
+			"Subagents have no built-in persona; include all role, context, constraints, and output instructions in each task prompt.",
+			"Do not spawn subagents for simple file reads; use direct read tools instead.",
 		],
 		parameters: SubagentParams,
 
 		async execute(_toolCallId, params, signal, onUpdate, ctx) {
-			const agentScope: AgentScope = params.agentScope ?? "user";
-			// Give late-loading extensions a chance to register agents
-			pi.events.emit("subagent:discover", {});
-			const discovery = discoverAgents(ctx.cwd, agentScope, BUNDLED_AGENTS_DIR);
-			// Merge external agents (lowest priority — discovered agents override)
-			const agentMap = new Map<string, AgentConfig>();
-			for (const agent of externalAgents) agentMap.set(agent.name, agent);
-			for (const agent of discovery.agents) agentMap.set(agent.name, agent);
-			const agents = Array.from(agentMap.values());
-			const confirmProjectAgents = params.confirmProjectAgents ?? true;
 			const scopedModelIds = getSavedScopedModelIds(ctx.cwd);
-			const { model: selectedModel, error: modelError } = resolveModelOverride(
-				scopedModelIds,
-				params.model,
-				undefined,
-			);
+			const { model: selectedModel, error: modelError } = resolveModelOverride(scopedModelIds, params.model);
 
 			if (modelError) {
 				return {
 					content: [{ type: "text", text: modelError }],
-					details: {
-						mode: "single",
-						agentScope,
-						projectAgentsDir: discovery.projectAgentsDir,
-						results: [],
-					},
+					details: { mode: "single", results: [] },
 					isError: true,
 				};
 			}
 
 			const makeDetails =
 				(mode: "single" | "parallel" | "chain") =>
-				(results: SingleResult[]): SubagentDetails => ({
-					mode,
-					agentScope,
-					projectAgentsDir: discovery.projectAgentsDir,
-					results,
-				});
+				(results: SingleResult[]): SubagentDetails => ({ mode, results });
 
 			const modeFromRequest = (type: string): "single" | "parallel" | "chain" => {
 				if (type === "chain") return "chain";
@@ -361,17 +290,10 @@ export default function (pi: ExtensionAPI) {
 				return "single";
 			};
 
-			let request: Parameters<typeof projectAgentsForConfirmation>[0];
+			let request: SubagentRequest;
 			try {
 				request = await Effect.runPromise(
-					parseSubagentRequest({
-						params,
-						agents,
-						defaultCwd: ctx.cwd,
-						agentScope,
-						projectAgentsDir: discovery.projectAgentsDir,
-						selectedModel,
-					}),
+					parseSubagentRequest({ params, defaultCwd: ctx.cwd, selectedModel }),
 				);
 			} catch (error) {
 				const text =
@@ -389,27 +311,6 @@ export default function (pi: ExtensionAPI) {
 
 			const requestMode = modeFromRequest(request.type);
 
-			if ((agentScope === "project" || agentScope === "both") && confirmProjectAgents && ctx.hasUI) {
-				const projectAgentsRequested = projectAgentsForConfirmation(request);
-				if (projectAgentsRequested.length > 0) {
-					const names = projectAgentsRequested.map((a) => a.name).join(", ");
-					const dir = discovery.projectAgentsDir ?? "(unknown)";
-					const ok = await ctx.ui.confirm(
-						"Run project-local agents?",
-						`Agents: ${names}
-Source: ${dir}
-
-Project agents are repo-controlled. Only continue for trusted repositories.`,
-					);
-					if (!ok) {
-						return {
-							content: [{ type: "text", text: "Canceled: project-local agents not approved." }],
-							details: makeDetails(requestMode)([]),
-						};
-					}
-				}
-			}
-
 			const asyncRuntimeDeps = createAsyncRuntimeDeps({
 				asyncRuns,
 				asyncBatches,
@@ -419,7 +320,6 @@ Project agents are repo-controlled. Only continue for trusted repositories.`,
 				updateWidget,
 				startWidgetRefresh,
 				readLastAssistantMessage,
-				resolveSkillPath,
 			});
 
 			try {
@@ -428,7 +328,6 @@ Project agents are repo-controlled. Only continue for trusted repositories.`,
 						...asyncRuntimeDeps,
 						onUpdate,
 						makeDetails,
-						resolveSkillPath,
 					}),
 					{ signal },
 				);
@@ -455,47 +354,27 @@ Project agents are repo-controlled. Only continue for trusted repositories.`,
 		},
 
 		renderCall(args, theme) {
-			const scope: AgentScope = args.agentScope ?? "user";
 			if (args.chain && args.chain.length > 0) {
-				let text =
-					theme.fg("toolTitle", theme.bold("subagent ")) +
-					theme.fg("accent", `chain (${args.chain.length} steps)`) +
-					theme.fg("muted", ` [${scope}]`);
+				let text = theme.fg("toolTitle", theme.bold("subagent ")) + theme.fg("accent", `chain (${args.chain.length} steps)`);
 				for (let i = 0; i < Math.min(args.chain.length, 3); i++) {
-					const step = args.chain[i];
-					// Clean up {previous} placeholder for display
-					const cleanTask = step.task.replace(/\{previous\}/g, "").trim();
+					const cleanTask = args.chain[i].task.replace(/\{previous\}/g, "").trim();
 					const preview = cleanTask.length > 40 ? `${cleanTask.slice(0, 40)}...` : cleanTask;
-					text +=
-						"\n  " +
-						theme.fg("muted", `${i + 1}.`) +
-						" " +
-						theme.fg("accent", step.agent) +
-						theme.fg("dim", ` ${preview}`);
+					text += `\n  ${theme.fg("muted", `${i + 1}.`)} ${theme.fg("dim", preview)}`;
 				}
 				if (args.chain.length > 3) text += `\n  ${theme.fg("muted", `... +${args.chain.length - 3} more`)}`;
 				return new Text(text, 0, 0);
 			}
 			if (args.tasks && args.tasks.length > 0) {
-				let text =
-					theme.fg("toolTitle", theme.bold("subagent ")) +
-					theme.fg("accent", `parallel (${args.tasks.length} tasks)`) +
-					theme.fg("muted", ` [${scope}]`);
-				for (const t of args.tasks.slice(0, 3)) {
-					const preview = t.task.length > 40 ? `${t.task.slice(0, 40)}...` : t.task;
-					text += `\n  ${theme.fg("accent", t.agent)}${theme.fg("dim", ` ${preview}`)}`;
+				let text = theme.fg("toolTitle", theme.bold("subagent ")) + theme.fg("accent", `parallel (${args.tasks.length} tasks)`);
+				for (const item of args.tasks.slice(0, 3)) {
+					const preview = item.task.length > 40 ? `${item.task.slice(0, 40)}...` : item.task;
+					text += `\n  ${theme.fg("dim", preview)}`;
 				}
 				if (args.tasks.length > 3) text += `\n  ${theme.fg("muted", `... +${args.tasks.length - 3} more`)}`;
 				return new Text(text, 0, 0);
 			}
-			const agentName = args.agent || "...";
 			const preview = args.task ? (args.task.length > 60 ? `${args.task.slice(0, 60)}...` : args.task) : "...";
-			let text =
-				theme.fg("toolTitle", theme.bold("subagent ")) +
-				theme.fg("accent", agentName) +
-				theme.fg("muted", ` [${scope}]`);
-			text += `\n  ${theme.fg("dim", preview)}`;
-			return new Text(text, 0, 0);
+			return new Text(`${theme.fg("toolTitle", theme.bold("subagent"))}\n  ${theme.fg("dim", preview)}`, 0, 0);
 		},
 
 		renderResult(result, { expanded }, theme) {

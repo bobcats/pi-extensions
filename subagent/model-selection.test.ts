@@ -83,31 +83,21 @@ describe("getSavedScopedModelIds", () => {
 });
 
 describe("resolveModelOverride", () => {
-	it("prefers the explicit override over the agent frontmatter model", () => {
+	it("accepts an explicit saved model override", () => {
 		// Arrange
 		const scopedModelIds = ["anthropic/claude-sonnet-4-6", "openai/gpt-5"];
 
 		// Act
-		const result = resolveModelOverride(
-			scopedModelIds,
-			"anthropic/claude-sonnet-4-6",
-			"openai/gpt-5",
-		);
+		const result = resolveModelOverride(scopedModelIds, "anthropic/claude-sonnet-4-6");
 
 		// Assert
 		assert.equal(result.model, "anthropic/claude-sonnet-4-6");
 		assert.equal(result.error, undefined);
 	});
 
-	it("falls back to the agent frontmatter model when no override is provided", () => {
-		// Arrange
-		const scopedModelIds = ["openai/gpt-5"];
-
-		// Act
-		const result = resolveModelOverride(scopedModelIds, undefined, "openai/gpt-5");
-
-		// Assert
-		assert.equal(result.model, "openai/gpt-5");
+	it("leaves model selection to Pi when no override is provided", () => {
+		const result = resolveModelOverride(["openai/gpt-5"], undefined);
+		assert.equal(result.model, undefined);
 		assert.equal(result.error, undefined);
 	});
 
@@ -116,11 +106,7 @@ describe("resolveModelOverride", () => {
 		const scopedModelIds = ["anthropic/claude-sonnet-4-6"];
 
 		// Act
-		const result = resolveModelOverride(
-			scopedModelIds,
-			"openai/gpt-5",
-			"anthropic/claude-sonnet-4-6",
-		);
+		const result = resolveModelOverride(scopedModelIds, "openai/gpt-5");
 
 		// Assert
 		assert.equal(result.model, undefined);

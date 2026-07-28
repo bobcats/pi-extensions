@@ -3,11 +3,12 @@ import { EventEmitter } from "node:events";
 import { describe, it } from "node:test";
 import { Effect } from "effect";
 import type { Message } from "@earendil-works/pi-ai";
-import type { AgentConfig } from "./agents.ts";
 import { emptyUsageStats } from "./types.ts";
 import {
 	applyProcessJsonEvent,
+	buildPiSpawnInvocation,
 	createInitialSingleResult,
+	resolvePiCliPath,
 	runSingleAgentEffect,
 	type ChildProcessLike,
 } from "./process-effect.ts";
@@ -35,14 +36,6 @@ class FakeProcess extends EventEmitter implements ChildProcessLike {
 	}
 }
 
-const agent: AgentConfig = {
-	name: "worker",
-	description: "Worker",
-	source: "user",
-	filePath: "/agents/worker.md",
-	systemPrompt: "Prompt",
-};
-
 function assistantMessage(text: string): Message {
 	return {
 		role: "assistant",
@@ -52,15 +45,44 @@ function assistantMessage(text: string): Message {
 }
 
 describe("process-effect", () => {
-	it("creates an unknown-agent shaped result", () => {
-		const result = createInitialSingleResult("missing", "Task", "unknown", undefined);
-		assert.equal(result.agent, "missing");
+	it("resolves the Pi CLI entrypoint from the running package without PATH", () => {
+		assert.equal(resolvePiCliPath("/opt/pi-coding-agent"), "/opt/pi-coding-agent/dist/cli.js");
+		assert.equal(resolvePiCliPath("C:\\pi-coding-agent"), "C:\\pi-coding-agent/dist/cli.js");
+	});
+
+	it("builds child spawn as process.execPath + package dist/cli.js, not bare pi", () => {
+		const invocation = buildPiSpawnInvocation(["--mode", "json", "-p", "--no-session", "Task: hi"], {
+			execPath: "/usr/bin/node",
+			packageDir: "/opt/pi-coding-agent",
+		});
+		assert.equal(invocation.command, "/usr/bin/node");
+		assert.deepEqual(invocation.args, [
+			"/opt/pi-coding-agent/dist/cli.js",
+			"--mode",
+			"json",
+			"-p",
+			"--no-session",
+			"Task: hi",
+		]);
+		assert.notEqual(invocation.command, "pi");
+		assert.ok(!invocation.args.includes("pi"));
+
+		const live = buildPiSpawnInvocation(["--mode", "json"]);
+		assert.equal(live.command, process.execPath);
+		assert.equal(live.args[0], resolvePiCliPath());
+		assert.match(live.args[0], /dist[/\\]cli\.js$/);
+	});
+
+	it("creates a prompt-driven subagent result", () => {
+		const result = createInitialSingleResult("Task", undefined);
+		assert.equal(result.agent, "subagent");
+		assert.equal(result.agentSource, "prompt");
 		assert.equal(result.exitCode, 0);
 		assert.deepEqual(result.usage, emptyUsageStats());
 	});
 
 	it("applies message_end events and accumulates usage", () => {
-		const result = createInitialSingleResult("worker", "Task", "user", undefined);
+		const result = createInitialSingleResult("Task", undefined);
 		const message = assistantMessage("Done") as any;
 		message.usage = {
 			input: 10,
@@ -89,18 +111,15 @@ describe("process-effect", () => {
 
 	it("runs a fake child process and parses stdout json lines", async () => {
 		const proc = new FakeProcess();
+		let spawnedArgs: string[] = [];
 		const resultPromise = Effect.runPromise(
 			runSingleAgentEffect({
 				defaultCwd: "/repo",
-				agent,
-				task: "Task",
-				cwd: undefined,
-				thinking: undefined,
-				model: undefined,
-				step: undefined,
-				onUpdate: undefined,
-				spawnPi: () => proc,
-				resolveSkillPath: () => null,
+				task: "Review this code as a security specialist",
+				spawnPi: (args) => {
+					spawnedArgs = args;
+					return proc;
+				},
 			}),
 		);
 
@@ -112,6 +131,8 @@ describe("process-effect", () => {
 		assert.equal(result.exitCode, 0);
 		assert.equal(result.stderr, "warning");
 		assert.equal(result.messages.length, 1);
+		assert.equal(spawnedArgs.at(-1), "Review this code as a security specialist");
+		assert.equal(spawnedArgs.includes("--append-system-prompt"), false);
 	});
 
 	it("kills a live child process when the abort signal interrupts runPromise", async () => {
@@ -121,15 +142,8 @@ describe("process-effect", () => {
 			runSingleAgentEffect(
 				{
 					defaultCwd: "/repo",
-					agent,
 					task: "Task",
-					cwd: undefined,
-					thinking: undefined,
-					model: undefined,
-					step: undefined,
-					onUpdate: undefined,
 					spawnPi: () => proc,
-					resolveSkillPath: () => null,
 					killGraceMs: 10,
 				},
 			),
