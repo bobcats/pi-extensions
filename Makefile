@@ -12,7 +12,7 @@ ifeq ($(FORCE),1)
 INSTALL_ARGS += --force
 endif
 
-.PHONY: all help check-python build install install-skills clean test
+.PHONY: all help check-python build install install-codex install-skills clean test
 
 all: help
 
@@ -20,9 +20,11 @@ help:
 	@echo "bobcats-skills - Skills Installer"
 	@echo ""
 	@echo "Usage:"
-	@echo "  make install            Build and install skills"
+	@echo "  make install            Build and install full skills to all agent roots"
+	@echo "  make install-codex      Install Codex-compatible skills to ~/.codex/skills only"
 	@echo "  make install FORCE=1    Bootstrap/reset managed install state over collisions"
-	@echo "  make install-skills     Install skills only"
+	@echo "  make install-codex FORCE=1  Bootstrap Codex install state over collisions"
+	@echo "  make install-skills     Alias for make install"
 	@echo "  make build              Build flattened skills into build/"
 	@echo "  make clean              Remove build artifacts"
 	@echo "  make test               Run installer tests"
@@ -43,6 +45,10 @@ build: check-python
 install: check-python
 	@$(PYTHON) $(BUILD_SCRIPT) install $(INSTALL_ARGS)
 	@echo "All skills installed"
+
+install-codex: check-python
+	@$(PYTHON) $(BUILD_SCRIPT) install --target codex $(INSTALL_ARGS)
+	@echo "Codex skills installed"
 
 install-skills: install
 

@@ -3,10 +3,12 @@
 Build and install Bobcats skills for AI coding agents.
 
 Shared skill sources live under ./skills/<bucket>/<skill>/SKILL.md, extension-owned skills live under explicit extension skill roots such as ./memory/skills/<skill>/, and Pi prompt templates live under ./prompts/*.md.
-This builder flattens authored skills and generated prompt-skills into ./build/skills/<skill>/, then installs the flattened tree for:
+This builder flattens authored skills and generated prompt-skills into ./build/skills/<skill>/, then installs that tree for selected agents:
 - Claude Code (~/.claude/skills)
 - OpenCode, Pi, and unified consumers (~/.agents/skills)
 - Codex (~/.codex/skills)
+
+Codex installs exclude extension-owned skills such as memory-ingest.
 
 The installer uses a manifest and staged swaps so updates preserve unmanaged
 files and refuse to overwrite local edits unless --force is provided.
@@ -39,6 +41,8 @@ AUTHORED_SKILL_ROOTS = (SHARED_SKILLS_DIR, EXTENSION_SKILLS_DIR)
 PROMPTS_DIR = ROOT / "prompts"
 BUILD_DIR = ROOT / "build"
 
+INSTALL_TARGET_NAMES = ("claude", "unified", "codex")
+
 HOME = Path.home()
 INSTALL_PATHS = {
     "claude": HOME / ".claude" / "skills",
@@ -61,6 +65,7 @@ class InstallTarget:
     source: Path
     destination: Path
     kind: Literal["tree", "file"]
+    excluded_skill_names: frozenset[str] = frozenset()
 
 
 @dataclass(frozen=True)
@@ -111,7 +116,7 @@ def load_install_manifest(manifest_path: Path = MANIFEST_PATH) -> dict | None:
     if manifest.get("version") != MANIFEST_VERSION:
         raise InstallConflict(
             f"Unsupported bobcats-skills install manifest version at {manifest_path}. "
-            "Run `make install FORCE=1` to reinitialize it."
+            "Re-run the same install command with FORCE=1 to reinitialize it."
         )
     return manifest
 
@@ -127,7 +132,10 @@ def iter_source_files(target: InstallTarget) -> dict[str, Path]:
         return files
 
     for source_file in sorted(path for path in target.source.rglob("*") if path.is_file()):
-        files[source_file.relative_to(target.source).as_posix()] = source_file
+        relative_path = source_file.relative_to(target.source)
+        if relative_path.parts and relative_path.parts[0] in target.excluded_skill_names:
+            continue
+        files[relative_path.as_posix()] = source_file
     return files
 
 
@@ -177,11 +185,8 @@ def manifest_for_install(
             raise
         return empty_manifest()
 
-    if manifest is not None and not force:
+    if manifest is not None:
         return manifest
-
-    if manifest is not None and force:
-        return empty_manifest()
 
     if force:
         return empty_manifest()
@@ -191,7 +196,7 @@ def manifest_for_install(
         details = "\n".join(f"  - {path}" for path in non_empty)
         raise InstallConflict(
             "No bobcats-skills install manifest found, and install destinations are not empty. "
-            "Run `make install FORCE=1` once to initialize managed install state.\n"
+            "Re-run the same install command with FORCE=1 once to initialize managed install state.\n"
             f"Non-empty destinations:\n{details}"
         )
 
@@ -485,11 +490,13 @@ def duplicate_skill_error(name: str, first: Path, second: Path) -> RuntimeError:
     )
 
 
-def discover_skill_sources() -> list[tuple[str, Path]]:
+def discover_skill_sources(
+    roots: Iterable[Path] | None = None,
+) -> list[tuple[str, Path]]:
     skills: list[tuple[str, Path]] = []
     names: dict[str, Path] = {}
 
-    for root in AUTHORED_SKILL_ROOTS:
+    for root in AUTHORED_SKILL_ROOTS if roots is None else roots:
         if not root.exists():
             continue
         for skill_md in sorted(root.rglob("SKILL.md")):
@@ -577,7 +584,7 @@ When invoking this skill manually, template variables such as `$ARGUMENTS`, `$@`
     return "\n".join(frontmatter_lines) + "\n" + wrapper + body
 
 
-def build_skill(name: str, source: Path) -> bool:
+def build_skill(name: str, source: Path, output_dir: Path) -> bool:
     skill_md = source / "SKILL.md"
     if not skill_md.exists():
         print(f"    Warning: {source} has no SKILL.md, skipping")
@@ -585,7 +592,7 @@ def build_skill(name: str, source: Path) -> bool:
 
     raw_content = skill_md.read_text()
 
-    dest = BUILD_DIR / "skills" / name
+    dest = output_dir / name
     dest.mkdir(parents=True, exist_ok=True)
 
     (dest / "SKILL.md").write_text(fix_skill_frontmatter_name(raw_content, name))
@@ -602,8 +609,8 @@ def build_skill(name: str, source: Path) -> bool:
     return True
 
 
-def build_prompt_skill(prompt_name: str, prompt_path: Path) -> bool:
-    dest = BUILD_DIR / "skills" / f"prompt-{prompt_name}"
+def build_prompt_skill(prompt_name: str, prompt_path: Path, output_dir: Path) -> bool:
+    dest = output_dir / f"prompt-{prompt_name}"
     dest.mkdir(parents=True, exist_ok=True)
     (dest / "SKILL.md").write_text(generated_prompt_skill_content(prompt_name, prompt_path))
     return True
@@ -612,10 +619,10 @@ def build_prompt_skill(prompt_name: str, prompt_path: Path) -> bool:
 def build_skills() -> None:
     print("Building skills...")
 
-    skills_build = BUILD_DIR / "skills"
-    if skills_build.exists():
-        shutil.rmtree(skills_build)
-    skills_build.mkdir(parents=True)
+    output_dir = BUILD_DIR / "skills"
+    if output_dir.exists():
+        shutil.rmtree(output_dir)
+    output_dir.mkdir(parents=True)
 
     built = 0
     names: dict[str, Path] = {}
@@ -623,7 +630,7 @@ def build_skills() -> None:
         if name in names:
             raise duplicate_skill_error(name, names[name], source)
         names[name] = source
-        if build_skill(name, source):
+        if build_skill(name, source, output_dir):
             print(f"  {name}")
             built += 1
 
@@ -632,7 +639,7 @@ def build_skills() -> None:
         if generated_name in names:
             raise duplicate_skill_error(generated_name, names[generated_name], prompt_path)
         names[generated_name] = prompt_path
-        if build_prompt_skill(prompt_name, prompt_path):
+        if build_prompt_skill(prompt_name, prompt_path, output_dir):
             print(f"  {generated_name}")
             built += 1
 
@@ -647,13 +654,30 @@ def install_lock():
         yield
 
 
-def skill_install_targets() -> list[InstallTarget]:
-    source = BUILD_DIR / "skills"
-    return [
-        InstallTarget("bobcats-claude-skills", source, INSTALL_PATHS["claude"], "tree"),
-        InstallTarget("bobcats-unified-skills", source, INSTALL_PATHS["unified"], "tree"),
-        InstallTarget("bobcats-codex-skills", source, INSTALL_PATHS["codex"], "tree"),
-    ]
+def skill_install_targets(target_names: Iterable[str] | None = None) -> list[InstallTarget]:
+    selected = list(INSTALL_TARGET_NAMES if target_names is None else target_names)
+    invalid = sorted(set(selected) - set(INSTALL_TARGET_NAMES))
+    if invalid:
+        raise InstallConflict(
+            f"Unknown install target(s): {', '.join(invalid)}. "
+            f"Choose from: {', '.join(INSTALL_TARGET_NAMES)}"
+        )
+    if len(set(selected)) != len(selected):
+        raise InstallConflict("Install targets must be unique")
+
+    targets: list[InstallTarget] = []
+    for name in selected:
+        excluded = frozenset(skill_dir.name for _, skill_dir in discover_skill_sources((EXTENSION_SKILLS_DIR,))) if name == "codex" else frozenset()
+        targets.append(
+            InstallTarget(
+                f"bobcats-{name}-skills",
+                BUILD_DIR / "skills",
+                INSTALL_PATHS[name],
+                "tree",
+                excluded,
+            )
+        )
+    return targets
 
 
 def deprecated_skill_names() -> set[str]:
@@ -688,7 +712,10 @@ def remove_deprecated_install_entries(
     return removed
 
 
-def install_skills(force: bool = False) -> None:
+def install_skills(
+    force: bool = False,
+    target_names: Iterable[str] | None = None,
+) -> None:
     print("Installing skills...")
 
     source = BUILD_DIR / "skills"
@@ -696,7 +723,7 @@ def install_skills(force: bool = False) -> None:
         print("  No skills built, run 'make build' first")
         return
 
-    targets = skill_install_targets()
+    targets = skill_install_targets(target_names)
     try:
         previous_manifest = load_install_manifest(MANIFEST_PATH)
     except InstallConflict:
@@ -707,9 +734,9 @@ def install_skills(force: bool = False) -> None:
     result = safe_install_targets(targets, force=force)
     deprecated_removed = remove_deprecated_install_entries(targets, deprecated_skill_names(), previous_manifest)
 
-    count = len([path for path in source.iterdir() if path.is_dir()])
-    for name, dest in INSTALL_PATHS.items():
-        print(f"  {name}: {count} skills -> {dest}")
+    for target in targets:
+        count = len({path.split("/", 1)[0] for path in iter_source_files(target)})
+        print(f"  {target.name.removeprefix('bobcats-').removesuffix('-skills')}: {count} skills -> {target.destination}")
     print(f"  Synced {result.files_written} files, removed {result.files_removed} managed files")
     if deprecated_removed:
         print(f"  Removed {deprecated_removed} deprecated installed skill entries")
@@ -736,6 +763,13 @@ def main() -> None:
         action="store_true",
         help="Overwrite colliding install files and initialize/reset managed install state",
     )
+    parser.add_argument(
+        "--target",
+        dest="targets",
+        action="append",
+        choices=INSTALL_TARGET_NAMES,
+        help="Install only the selected target (repeatable); default: all targets",
+    )
     args = parser.parse_args()
 
     try:
@@ -744,7 +778,7 @@ def main() -> None:
         elif args.command in {"install", "install-skills"}:
             with install_lock():
                 build_skills()
-                install_skills(force=args.force)
+                install_skills(force=args.force, target_names=args.targets)
             print("\nAll done!")
         elif args.command == "clean":
             clean()

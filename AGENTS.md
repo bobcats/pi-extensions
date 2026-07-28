@@ -21,7 +21,7 @@ This repository is the canonical Bobcats source for Pi extensions, Pi prompt tem
 - Shared skill sources live under `skills/<bucket>/<skill-name>/SKILL.md`.
 - Extension-owned skills live next to their extension, currently `memory/skills/memory-ingest/`.
 - Pi prompt templates live under `prompts/*.md` and stay canonical there.
-- `scripts/build.py` builds a flattened `build/skills/` tree for non-Pi/global skill installs.
+- `scripts/build.py` builds the flattened `build/skills/` tree for non-Pi installs and excludes extension-owned skills from Codex targets.
 - Generated prompt-skills are build artifacts only; do not commit generated `build/skills/prompt-*` files.
 
 ## Skill standards
@@ -60,3 +60,5 @@ Prompt templates are Pi-native slash-command snippets. Keep source in `prompts/*
 Use `make build` and `make test` for local validation. `make install` mutates `~/.agents/skills/` and `~/.claude/skills/`, so do not run it unless the user explicitly approves changing global agent skill directories.
 
 The installer state namespace remains `bobcats-skills` under `$XDG_STATE_HOME` or `~/.local/state`. `pi update` handles Pi-native extensions, prompts, and authored skill roots from `package.json`; it must not mutate non-Pi global skill directories.
+
+The Pi package exports the full authored skill tree through `pi.skills`, including extension-owned skills. Use `make install-codex` to update only `~/.codex/skills/`. Do not install the same skills into `~/.agents/skills/` while also loading this repository as a Pi package, because Pi scans both sources and reports duplicate skill names. `memory/skills` is intentionally extension-owned and is excluded from Codex installs.

@@ -78,27 +78,57 @@ Build the flattened install tree:
 make build
 ```
 
+Install the Codex-compatible skills only to Codex:
+
+```bash
+make install-codex
+```
+
+`make install-codex` updates only `~/.codex/skills/`. Avoid installing the same skills into `~/.agents/skills/` on a machine that loads this repository as a Pi package: Pi scans both locations and reports duplicate skill names. The Pi package's `pi.skills` declaration remains the canonical source for Pi, and extension-owned `memory/skills` such as `memory-ingest` are intentionally excluded from Codex.
+
 Run installer tests:
 
 ```bash
 make test
 ```
 
-Install flattened skills for skill-only agents only when you intend to mutate global skill directories:
+Install flattened skills for skill-only agents only when you intend to mutate global skill directories. Use `make install-codex` for Codex only, or `make install` only when you explicitly want the skill tree in all configured agent roots:
 
 ```bash
 make install
 ```
 
-Install targets:
+Install targets for `make install`:
 
 - `~/.agents/skills/` for OpenCode, Pi, and other unified skill consumers
-- `~/.codex/skills/` for Codex
+- `~/.codex/skills/` for Codex (extension-owned skills are excluded)
 - `~/.claude/skills/` for Claude Code
+
+`make install-codex` selects only `~/.codex/skills/`. Target selection is also available as `python3 scripts/build.py install --target codex`.
 
 The installer tracks managed files in `$XDG_STATE_HOME/bobcats-skills/install-manifest.json` or `~/.local/state/bobcats-skills/install-manifest.json`, preserves unmanaged sibling files, removes stale managed files, and refuses to overwrite local edits unless bootstrapped with `make install FORCE=1`.
 
 ## Development
+
+Install the shared workspace dependencies:
+
+```bash
+npm install
+```
+
+All extension workspaces resolve the exact Pi development packages declared in the root `package.json`; the root `package-lock.json` is the only npm lockfile. Upgrade the four `@earendil-works/pi-*` versions together and regenerate the root lockfile.
+
+Run all extension and root TypeScript tests:
+
+```bash
+npm test
+```
+
+Import-smoke every extension listed in `package.json` `pi.extensions` against the shared Pi 0.82 workspace deps:
+
+```bash
+npm run smoke
+```
 
 Run repository-level installer tests:
 

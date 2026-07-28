@@ -82,6 +82,32 @@ class BuildInstallerTest(unittest.TestCase):
         )
         self.assertFalse((build_dir / "skills" / "old-skill").exists())
 
+    def test_codex_target_excludes_extension_owned_skills(self):
+        skills_dir = self.root / "skills"
+        memory_skills_dir = self.root / "memory" / "skills"
+        prompts_dir = self.root / "prompts"
+        build_dir = self.root / "build"
+        write_file(
+            skills_dir / "engineering" / "demo" / "SKILL.md",
+            "---\nname: demo\ndescription: Demo.\n---\n\n# Demo\n",
+        )
+        write_file(
+            memory_skills_dir / "memory-ingest" / "SKILL.md",
+            "---\nname: memory-ingest\ndescription: Ingest memory.\n---\n\n# Memory ingest\n",
+        )
+        write_file(prompts_dir / "zoom-out.md", "---\ndescription: Zoom out\n---\n\nZoom\n")
+
+        with self.build_path_patches(skills_dir, memory_skills_dir, prompts_dir, build_dir):
+            self.build.build_skills()
+            target = self.build.skill_install_targets(["codex"])[0]
+            files = self.build.iter_source_files(target)
+
+        self.assertTrue((build_dir / "skills" / "demo" / "SKILL.md").exists())
+        self.assertTrue((build_dir / "skills" / "memory-ingest" / "SKILL.md").exists())
+        self.assertIn("demo/SKILL.md", files)
+        self.assertIn("prompt-zoom-out/SKILL.md", files)
+        self.assertNotIn("memory-ingest/SKILL.md", files)
+
     def test_build_uses_shared_and_extension_skill_roots(self):
         skills_dir = self.root / "skills"
         memory_skills_dir = self.root / "memory" / "skills"
@@ -249,12 +275,99 @@ class BuildInstallerTest(unittest.TestCase):
             "bobcats-codex-skills",
         ):
             self.assertIn("prompt-zoom-out/SKILL.md", manifest["targets"][target_name]["files"])
-            self.assertIn("memory-ingest/SKILL.md", manifest["targets"][target_name]["files"])
+        self.assertIn("memory-ingest/SKILL.md", manifest["targets"]["bobcats-claude-skills"]["files"])
+        self.assertIn("memory-ingest/SKILL.md", manifest["targets"]["bobcats-unified-skills"]["files"])
+        self.assertNotIn("memory-ingest/SKILL.md", manifest["targets"]["bobcats-codex-skills"]["files"])
         for destination in (agents_destination, claude_destination, codex_destination):
             generated = (destination / "prompt-zoom-out" / "SKILL.md").read_text()
             self.assertIn("name: prompt-zoom-out", generated)
             self.assertIn("disable-model-invocation: true", generated)
-            self.assertTrue((destination / "memory-ingest" / "SKILL.md").exists())
+        self.assertTrue((agents_destination / "memory-ingest" / "SKILL.md").exists())
+        self.assertTrue((claude_destination / "memory-ingest" / "SKILL.md").exists())
+        self.assertFalse((codex_destination / "memory-ingest").exists())
+
+    def test_codex_only_install_excludes_extension_skills_and_preserves_other_targets(self):
+        skills_dir = self.root / "skills"
+        memory_skills_dir = self.root / "memory" / "skills"
+        prompts_dir = self.root / "prompts"
+        build_dir = self.root / "build"
+        agents_destination = self.root / "home" / ".agents" / "skills"
+        codex_destination = self.root / "home" / ".codex" / "skills"
+        claude_destination = self.root / "home" / ".claude" / "skills"
+        state_dir = self.root / "state"
+        manifest_path = state_dir / "install-manifest.json"
+        lock_path = state_dir / "install.lock"
+        write_file(skills_dir / "engineering" / "demo" / "SKILL.md", "---\nname: demo\ndescription: Demo.\n---\nDemo\n")
+        write_file(memory_skills_dir / "memory-ingest" / "SKILL.md", "---\nname: memory-ingest\ndescription: Ingest.\n---\nIngest\n")
+        write_file(codex_destination / "memory-ingest" / "SKILL.md", "installed extension skill\n")
+        write_file(agents_destination / "keep" / "SKILL.md", "unselected unified\n")
+        write_file(claude_destination / "keep" / "SKILL.md", "unselected claude\n")
+        manifest = {
+            "version": self.build.MANIFEST_VERSION,
+            "targets": {
+                "bobcats-codex-skills": {"path": str(codex_destination), "kind": "tree", "files": {"memory-ingest/SKILL.md": self.build.hash_file(codex_destination / "memory-ingest" / "SKILL.md")}},
+                "bobcats-unified-skills": {"path": str(agents_destination), "kind": "tree", "files": {}},
+            },
+        }
+        manifest_path.parent.mkdir(parents=True)
+        manifest_path.write_text(json.dumps(manifest))
+
+        with self.build_path_patches(skills_dir, memory_skills_dir, prompts_dir, build_dir), mock.patch.object(
+            self.build,
+            "INSTALL_PATHS",
+            {"claude": claude_destination, "unified": agents_destination, "codex": codex_destination},
+        ), mock.patch.object(self.build, "STATE_DIR", state_dir), mock.patch.object(
+            self.build, "MANIFEST_PATH", manifest_path
+        ), mock.patch.object(self.build, "LOCK_PATH", lock_path):
+            self.build.build_skills()
+            self.build.install_skills(target_names=["codex"])
+
+        self.assertTrue((codex_destination / "demo" / "SKILL.md").exists())
+        self.assertFalse((codex_destination / "memory-ingest").exists())
+        self.assertEqual((agents_destination / "keep" / "SKILL.md").read_text(), "unselected unified\n")
+        self.assertEqual((claude_destination / "keep" / "SKILL.md").read_text(), "unselected claude\n")
+        installed_manifest = json.loads(manifest_path.read_text())
+        self.assertIn("bobcats-unified-skills", installed_manifest["targets"])
+        self.assertIn("bobcats-codex-skills", installed_manifest["targets"])
+        self.assertNotIn("memory-ingest/SKILL.md", installed_manifest["targets"]["bobcats-codex-skills"]["files"])
+
+    def test_forced_codex_only_install_preserves_unselected_manifest_targets(self):
+        source = self.root / "build" / "skills"
+        codex_destination = self.root / "home" / ".codex" / "skills"
+        unified_destination = self.root / "home" / ".agents" / "skills"
+        manifest_path = self.root / "state" / "install-manifest.json"
+        write_file(source / "demo" / "SKILL.md", "demo\n")
+        write_file(codex_destination / "old" / "SKILL.md", "old\n")
+        manifest_path.parent.mkdir(parents=True)
+        manifest_path.write_text(json.dumps({
+            "version": self.build.MANIFEST_VERSION,
+            "targets": {
+                "bobcats-codex-skills": {
+                    "path": str(codex_destination),
+                    "kind": "tree",
+                    "files": {"old/SKILL.md": self.build.hash_file(codex_destination / "old" / "SKILL.md")},
+                },
+                "bobcats-unified-skills": {
+                    "path": str(unified_destination),
+                    "kind": "tree",
+                    "files": {"keep/SKILL.md": "preserved-hash"},
+                },
+            },
+        }))
+        target = self.build.InstallTarget(
+            "bobcats-codex-skills", source, codex_destination, "tree"
+        )
+
+        self.build.safe_install_targets([target], manifest_path=manifest_path, force=True)
+
+        manifest = json.loads(manifest_path.read_text())
+        self.assertIn("bobcats-unified-skills", manifest["targets"])
+        self.assertEqual(
+            manifest["targets"]["bobcats-unified-skills"]["files"],
+            {"keep/SKILL.md": "preserved-hash"},
+        )
+        self.assertFalse((codex_destination / "old").exists())
+        self.assertTrue((codex_destination / "demo" / "SKILL.md").exists())
 
     def test_skill_install_targets_include_codex_skill_directory(self):
         source = self.root / "build" / "skills"
