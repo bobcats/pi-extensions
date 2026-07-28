@@ -256,7 +256,8 @@ test("buildRuminatePrompt includes batch paths and counts", () => {
 
   const prompt = buildRuminatePrompt(extraction, "/test/vault");
   assert.ok(prompt.includes("42 past sessions"));
-  assert.ok(prompt.includes("memory-miner"));
+  assert.ok(!prompt.includes('"agent"'));
+  assert.equal(prompt.match(/You are a conversation miner/g)?.length, 2);
   assert.ok(prompt.includes("/tmp/batch_0.txt"));
   assert.ok(prompt.includes("/tmp/batch_1.txt"));
   assert.ok(prompt.includes("vault-snapshot.md"));

@@ -10,6 +10,8 @@ function createHarness() {
   const handlers = new Map<string, Function>();
   const commands = new Map<string, any>();
   const tools = new Map<string, any>();
+  const shortcuts = new Map<string, any>();
+  const widgets = new Map<string, any>();
   const sendUserMessageCalls: Array<{ content: string; options?: Record<string, unknown> }> = [];
   const notifications: Array<{ message: string; level: string }> = [];
   let idle = true;
@@ -19,6 +21,8 @@ function createHarness() {
     handlers,
     commands,
     tools,
+    shortcuts,
+    widgets,
     sendUserMessageCalls,
     notifications,
     pi: {
@@ -31,7 +35,9 @@ function createHarness() {
       registerTool(spec: any) {
         tools.set(spec.name, spec);
       },
-      registerShortcut() {},
+      registerShortcut(key: string, spec: any) {
+        shortcuts.set(key, spec);
+      },
       sendUserMessage(content: string, options?: Record<string, unknown>) {
         sendUserMessageCalls.push({ content, options });
       },
@@ -59,7 +65,9 @@ function createHarness() {
         notify(message: string, level: string) {
           notifications.push({ message, level });
         },
-        setWidget() {},
+        setWidget(name: string, widget: unknown) {
+          widgets.set(name, widget);
+        },
       },
     } as never,
   };
@@ -100,6 +108,101 @@ function createDefaultVault(homeDir: string): string {
   fs.writeFileSync(path.join(vaultDir, "index.md"), "# Memory\n");
   return vaultDir;
 }
+
+test("registers only current Pi session lifecycle events", async () => {
+  const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "memory-home-"));
+  const { memoryExtension, restore } = await loadExtensionForHome(homeDir);
+
+  try {
+    const harness = createHarness();
+    memoryExtension(harness.pi);
+
+    assert.equal(harness.handlers.has("session_start"), true);
+    assert.equal(harness.handlers.has("session_switch"), false);
+    assert.equal(harness.handlers.has("session_fork"), false);
+  } finally {
+    restore();
+    fs.rmSync(homeDir, { recursive: true, force: true });
+  }
+});
+
+test("session_start reconstructs vault state for replacement reasons", async () => {
+  const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "memory-home-"));
+  const vaultDir = createDefaultVault(homeDir);
+  const operationsPath = path.join(vaultDir, "memory-operations.jsonl");
+  const now = Date.now();
+  fs.writeFileSync(
+    operationsPath,
+    JSON.stringify({
+      type: "reflect",
+      status: "keep",
+      description: "Captured session reconstruction fixture",
+      findingsCount: 1,
+      filesChanged: ["fixture.md"],
+      durationMs: 10,
+      timestamp: now,
+    }) + "\n",
+  );
+  fs.writeFileSync(path.join(vaultDir, "fixture.md"), "# Fixture\n");
+
+  const { memoryExtension, restore } = await loadExtensionForHome(homeDir);
+
+  try {
+    const harness = createHarness();
+    memoryExtension(harness.pi);
+    const sessionStart = harness.handlers.get("session_start");
+    assert.ok(sessionStart);
+
+    // Pi 0.82 folds switch/fork into session_start with reason.
+    for (const reason of ["startup", "reload", "new", "resume", "fork"] as const) {
+      await sessionStart(
+        { type: "session_start", reason, previousSessionFile: reason === "startup" ? undefined : "/tmp/prev.jsonl" },
+        harness.ctx,
+      );
+
+      const widget = harness.widgets.get("memory");
+      assert.equal(typeof widget, "function", `expected widget after session_start reason=${reason}`);
+      const theme = {
+        fg(_color: string, value: string) { return value; },
+      };
+      const rendered = widget({}, theme).render(120).join("\n");
+      assert.match(rendered, /1 ops/, `ops missing for reason=${reason}`);
+      assert.match(rendered, /reflect/);
+    }
+  } finally {
+    restore();
+    fs.rmSync(homeDir, { recursive: true, force: true });
+  }
+});
+
+test("memory dashboard shortcuts and hints avoid the built-in ctrl+b binding", async () => {
+  const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "memory-home-"));
+  const vaultDir = createDefaultVault(homeDir);
+  fs.writeFileSync(path.join(vaultDir, "dashboard-note.md"), "# Dashboard note\n");
+  const { memoryExtension, restore } = await loadExtensionForHome(homeDir);
+
+  try {
+    const harness = createHarness();
+    memoryExtension(harness.pi);
+    await harness.handlers.get("session_start")?.({}, harness.ctx);
+
+    assert.equal(harness.shortcuts.has("ctrl+b"), false);
+    assert.equal(harness.shortcuts.has("ctrl+shift+m"), true);
+    assert.equal(harness.shortcuts.has("ctrl+shift+b"), true);
+
+    const widget = harness.widgets.get("memory");
+    assert.equal(typeof widget, "function");
+    const theme = {
+      fg(_color: string, value: string) { return value; },
+    };
+    const rendered = widget({}, theme).render(120).join("\n");
+    assert.match(rendered, /ctrl\+shift\+m expand/);
+    assert.match(rendered, /ctrl\+shift\+b fullscreen/);
+  } finally {
+    restore();
+    fs.rmSync(homeDir, { recursive: true, force: true });
+  }
+});
 
 test("dream auto-resume waits for settled window and sends a plain user message", async () => {
   const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "memory-home-"));
