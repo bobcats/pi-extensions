@@ -1,5 +1,5 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { Type } from "typebox";
+import { Type } from "@sinclair/typebox";
 import { StringEnum } from "@earendil-works/pi-ai";
 import Exa from "exa-js";
 
@@ -255,9 +255,10 @@ function searchParameters(queryDescription: string, includeUrl = false) {
   }));
 }
 
-export function createExaExtension(createClient = (apiKey: string): ExaClient => new Exa(apiKey) as unknown as ExaClient) {
+export function createExaExtension(createClient?: (apiKey: string) => ExaClient) {
+  const clientFactory = createClient ?? ((apiKey: string): ExaClient => new Exa(apiKey) as unknown as ExaClient);
   return function exaExtension(pi: ExtensionAPI) {
-    const getClient = () => createClient(requireApiKey());
+    const getClient = () => clientFactory(createClient ? (process.env.EXA_API_KEY ?? "") : requireApiKey());
 
     pi.registerTool({
       name: "exa_search",

@@ -14,7 +14,7 @@ import { DynamicBorder } from "@earendil-works/pi-coding-agent";
 import { Container, Key, Text, matchesKey, type Component, type TUI } from "@earendil-works/pi-tui";
 import path from "node:path";
 import { formatUsd } from "../shared/lib.ts";
-import { estimateTokens, normalizeReadPath, shortenPath, sumSessionUsage } from "./lib.ts";
+import { commandsFromSource, estimateTokens, normalizeReadPath, shortenPath, sumSessionUsage } from "./lib.ts";
 
 function loadCurrentContextFiles(ctx: ExtensionCommandContext): Array<{ path: string; tokens: number; bytes: number }> {
 	return (ctx.getSystemPromptOptions().contextFiles ?? []).map((file) => ({
@@ -22,11 +22,6 @@ function loadCurrentContextFiles(ctx: ExtensionCommandContext): Array<{ path: st
 		tokens: estimateTokens(file.content),
 		bytes: Buffer.byteLength(file.content, "utf8"),
 	}));
-}
-
-function commandSourcePath(command: { sourceInfo?: { path?: string }; path?: string }, cwd: string): string {
-	const sourcePath = command.sourceInfo?.path ?? command.path ?? "";
-	return sourcePath ? normalizeReadPath(sourcePath, cwd) : "";
 }
 
 function normalizeSkillName(name: string): string {
@@ -40,11 +35,9 @@ type SkillIndexEntry = {
 };
 
 function buildSkillIndex(pi: ExtensionAPI, cwd: string): SkillIndexEntry[] {
-	return pi
-		.getCommands()
-		.filter((c) => c.source === "skill")
+	return commandsFromSource(pi.getCommands(), "skill")
 		.map((c) => {
-			const p = commandSourcePath(c, cwd);
+			const p = c.sourceInfo.path ? normalizeReadPath(c.sourceInfo.path, cwd) : "";
 			return {
 				name: normalizeSkillName(c.name),
 				skillFilePath: p,
@@ -332,12 +325,12 @@ export default function contextExtension(pi: ExtensionAPI) {
 		description: "Show loaded context overview",
 		handler: async (_args, ctx: ExtensionCommandContext) => {
 			const commands = pi.getCommands();
-			const extensionCmds = commands.filter((c) => c.source === "extension");
-			const skillCmds = commands.filter((c) => c.source === "skill");
+			const extensionCmds = commandsFromSource(commands, "extension");
+			const skillCmds = commandsFromSource(commands, "skill");
 
 			const extensionsByPath = new Map<string, string[]>();
 			for (const c of extensionCmds) {
-				const p = c.sourceInfo?.path ?? "<unknown>";
+				const p = c.sourceInfo.path ?? "<unknown>";
 				const arr = extensionsByPath.get(p) ?? [];
 				arr.push(c.name);
 				extensionsByPath.set(p, arr);

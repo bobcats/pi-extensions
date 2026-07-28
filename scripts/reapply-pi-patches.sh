@@ -32,7 +32,10 @@ find_pi_package_root() {
 
 resolve_pi_root() {
   local arg="${1:-}"
-  local base="$HOME/.local/share/mise/installs/npm-mariozechner-pi-coding-agent"
+  local bases=(
+    "$HOME/.local/share/mise/installs/npm-earendil-works-pi-coding-agent"
+    "$HOME/.local/share/mise/installs/npm-mariozechner-pi-coding-agent"
+  )
 
   if [[ -n "$arg" ]]; then
     if [[ -d "$arg" && -f "$arg/package.json" ]]; then
@@ -48,35 +51,42 @@ resolve_pi_root() {
       fi
     fi
 
-    local by_version
-    if by_version="$(find_pi_package_root "$base/$arg")"; then
-      echo "$by_version"
-      return
-    fi
+    local base by_version
+    for base in "${bases[@]}"; do
+      if by_version="$(find_pi_package_root "$base/$arg")"; then
+        echo "$by_version"
+        return
+      fi
+    done
 
     echo "Could not resolve pi install from argument: $arg" >&2
     exit 1
   fi
 
-  if [[ ! -d "$base" ]]; then
-    echo "No pi installs found under: $base" >&2
-    exit 1
+  local base latest root
+  for base in "${bases[@]}"; do
+    [[ -d "$base" ]] || continue
+    latest="$(find "$base" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n 1)"
+    [[ -n "$latest" ]] || continue
+    if root="$(find_pi_package_root "$latest")"; then
+      echo "$root"
+      return
+    fi
+  done
+
+  # Fall back to whatever `pi` is on PATH (e.g. mise node global install).
+  if command -v pi >/dev/null 2>&1; then
+    local pi_bin pi_prefix
+    pi_bin="$(command -v pi)"
+    pi_prefix="$(cd "$(dirname "$pi_bin")/.." && pwd)"
+    if root="$(find_pi_package_root "$pi_prefix")"; then
+      echo "$root"
+      return
+    fi
   fi
 
-  local latest
-  latest="$(find "$base" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n 1)"
-  if [[ -z "$latest" ]]; then
-    echo "No pi installs found under: $base" >&2
-    exit 1
-  fi
-
-  local root
-  if ! root="$(find_pi_package_root "$latest")"; then
-    echo "Install found but pi package path missing under: $latest/lib/node_modules/{@earendil-works,@mariozechner}/pi-coding-agent" >&2
-    exit 1
-  fi
-
-  echo "$root"
+  echo "No pi installs found under: ${bases[*]} (or PATH)" >&2
+  exit 1
 }
 
 resolve_tui_dist() {
@@ -117,8 +127,8 @@ fi
 
 # Backup
 version=""
-if [[ "$PI_ROOT" =~ /npm-mariozechner-pi-coding-agent/([^/]+)/ ]]; then
-  version="${BASH_REMATCH[1]}"
+if [[ "$PI_ROOT" =~ /npm-(earendil-works|mariozechner)-pi-coding-agent/([^/]+)/ ]]; then
+  version="${BASH_REMATCH[2]}"
 else
   version="$(basename "$PI_ROOT")"
 fi

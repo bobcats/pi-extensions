@@ -2,7 +2,7 @@ import { mkdtemp, realpath, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { Type } from "typebox";
+import { Type } from "@sinclair/typebox";
 import {
   analyzeRepository,
   buildReportMetadata,

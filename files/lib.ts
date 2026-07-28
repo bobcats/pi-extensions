@@ -12,6 +12,20 @@ export const FILE_TAG_REGEX = /<file\s+name=["']([^"']+)["']>/g;
 export const FILE_URL_REGEX = /file:\/\/[^\s"'<>]+/g;
 export const PATH_REGEX = /(?:^|[\s"'`([{<])((?:~|\/)[^\s"'`<>)}\]]+)/g;
 
+const FILE_BROWSER_NAVIGATION_KEYBINDINGS = [
+	"tui.select.up",
+	"tui.select.down",
+	"tui.select.confirm",
+	"tui.select.cancel",
+] as const;
+
+export function isFileBrowserNavigationKey(
+	data: string,
+	keybindings: { matches(data: string, id: string): boolean },
+): boolean {
+	return FILE_BROWSER_NAVIGATION_KEYBINDINGS.some((id) => keybindings.matches(data, id));
+}
+
 export const extractFileReferencesFromText = (text: string): string[] => {
 	const refs: string[] = [];
 

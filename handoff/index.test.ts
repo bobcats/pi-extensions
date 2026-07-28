@@ -22,10 +22,11 @@ function createHarness() {
   let newSessionCalls = 0;
   let withSessionCalls = 0;
   let setSessionNameCalls = 0;
-  const newSessionArgs: Array<{ parentSession: string }> = [];
+  const newSessionArgs: Array<{ parentSession?: string }> = [];
   let customCallCount = 0;
   let findCalls = 0;
   let authCalls = 0;
+  const authProviders: string[] = [];
   let oldContextIsStale = false;
   let replacementSetEditorTextError: unknown = null;
   let replacementNotifyError: unknown = null;
@@ -45,6 +46,7 @@ function createHarness() {
     get customCallCount() { return customCallCount; },
     get findCalls() { return findCalls; },
     get authCalls() { return authCalls; },
+    get authProviders() { return authProviders; },
     get withSessionCalls() { return withSessionCalls; },
     get callOrder() { return callOrder; },
     setConfirmResult(value: boolean) {
@@ -83,6 +85,7 @@ function createHarness() {
       },
     } as never,
     ctx: {
+      mode: "tui",
       hasUI: true,
       model: { provider: "openai", id: "gpt-4o" },
       cwd: "/tmp/project",
@@ -93,12 +96,15 @@ function createHarness() {
             ? { provider, id: modelId }
             : null;
         },
-        async getApiKeyAndHeaders(model: any) {
+        async getProviderAuth(provider: string) {
           authCalls += 1;
+          authProviders.push(provider);
           return {
-            ok: true as const,
-            apiKey: `key-for-${model.provider}/${model.id}`,
-            headers: { "x-test": "1" } as Record<string, string>,
+            auth: {
+              apiKey: `key-for-${provider}`,
+              headers: { "x-test": "1" } as Record<string, string>,
+            },
+            env: { HANDOFF_TEST_ENV: "1" },
           };
         },
       },
@@ -110,7 +116,7 @@ function createHarness() {
           return "/tmp/project/.pi/sessions/current.jsonl";
         },
       },
-      newSession: async (options: { parentSession: string; withSession?: (ctx: any) => Promise<void> }) => {
+      newSession: async (options: { parentSession?: string; withSession?: (ctx: any) => Promise<void> }) => {
         newSessionCalls += 1;
         newSessionArgs.push({ parentSession: options.parentSession });
         callOrder.push("newSession");
@@ -283,6 +289,18 @@ test("notifies and aborts when not in interactive mode", async () => {
   assert.equal(harness.newSessionCalls, 0);
 });
 
+test("notifies and aborts when RPC mode cannot host the loader UI", async () => {
+  const harness = createHarness();
+  (harness.ctx as any).mode = "rpc";
+  createHandoffExtension()(harness.pi);
+  const cmd = harness.commandMap.get("handoff");
+  await cmd.handler("continue the work", harness.ctx);
+  assert.deepEqual(harness.notifications, [
+    { message: "Handoff requires interactive mode.", level: "error" },
+  ]);
+  assert.equal(harness.newSessionCalls, 0);
+});
+
 test("notifies when No model selected", async () => {
   const harness = createHarness();
   (harness.ctx as any).model = undefined;
@@ -355,9 +373,9 @@ test("hard-errors when preferred summary model is missing from registry", async 
 test("hard-errors when preferred summary model auth fails", async () => {
   const harness = createHarness();
   harness.ctx.sessionManager.getBranch = nonEmptyBranch;
-  harness.ctx.modelRegistry.getApiKeyAndHeaders = async (model: any) => {
-    if (model.provider === "openai-codex") return { ok: false as const, error: "no key" };
-    return { ok: true as const, apiKey: "fallback-key", headers: { "x-test": "1" } };
+  harness.ctx.modelRegistry.getProviderAuth = async (provider: string) => {
+    if (provider === "openai-codex") throw new Error("no key");
+    return { auth: { apiKey: "fallback-key", headers: { "x-test": "1" } } };
   };
   harness.setCustomResult("- summary text");
   createHandoffExtension()(harness.pi);
@@ -366,6 +384,26 @@ test("hard-errors when preferred summary model auth fails", async () => {
   assert.deepEqual(harness.notifications, [
     {
       message: "Handoff summary model unavailable: openai-codex/gpt-5.5 credentials unavailable: no key",
+      level: "error",
+    },
+  ]);
+  assert.equal(harness.customCallCount, 0);
+  assert.equal(harness.newSessionCalls, 0);
+});
+
+test("hard-errors when preferred summary model has no resolved provider auth", async () => {
+  const harness = createHarness();
+  harness.ctx.sessionManager.getBranch = nonEmptyBranch;
+  harness.ctx.modelRegistry.getProviderAuth = async () => undefined;
+  createHandoffExtension()(harness.pi);
+  const cmd = harness.commandMap.get("handoff");
+
+  await cmd.handler("continue the work", harness.ctx);
+
+  assert.deepEqual(harness.notifications, [
+    {
+      message:
+        "Handoff summary model unavailable: openai-codex/gpt-5.5 credentials unavailable: no configured authentication",
       level: "error",
     },
   ]);
@@ -412,6 +450,7 @@ test("happy path: preferred summary model available, generates summary, switches
   await cmd.handler("continue the auth work", harness.ctx);
   assert.equal(harness.newSessionCalls, 1);
   assert.equal(harness.withSessionCalls, 1);
+  assert.deepEqual(harness.authProviders, ["openai-codex"]);
   assert.equal(harness.editorTexts.length, 1);
   assert.equal(
     harness.editorTexts[0],
@@ -606,7 +645,12 @@ test("generateHandoffSummary uses the system prompt and serialized conversation"
     completeCalls[0].prompt.messages[0].content[0].text.includes("continue the auth cleanup"),
     "user message should contain the goal",
   );
-  assert.deepEqual(completeCalls[0].options, { apiKey: "test-key", headers: { "x-test": "1" }, signal: undefined });
+  assert.deepEqual(completeCalls[0].options, {
+    apiKey: "test-key",
+    headers: { "x-test": "1" },
+    env: undefined,
+    signal: undefined,
+  });
 });
 
 test("generateHandoffSummary hard-fails with diagnostics when the model returns empty text", async () => {
@@ -663,7 +707,9 @@ test("prefers the configured summary model id first", async () => {
 test("notifies when summary model credentials are unavailable", async () => {
   const harness = createHarness();
   harness.ctx.sessionManager.getBranch = nonEmptyBranch;
-  harness.ctx.modelRegistry.getApiKeyAndHeaders = async () => ({ ok: false as const, error: "no key" });
+  harness.ctx.modelRegistry.getProviderAuth = async () => {
+    throw new Error("no key");
+  };
   createHandoffExtension()(harness.pi);
   const cmd = harness.commandMap.get("handoff");
   await cmd.handler("continue the work", harness.ctx);

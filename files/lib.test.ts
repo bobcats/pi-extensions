@@ -5,11 +5,27 @@ import {
 	extractFileReferencesFromText,
 	extractPathsFromToolArgs,
 	formatDisplayPath,
+	isFileBrowserNavigationKey,
 	isCommentLikeReference,
 	normalizeReferencePath,
 	sanitizeReference,
 	stripLineSuffix,
 } from "./lib.ts";
+
+describe("isFileBrowserNavigationKey", () => {
+	it("uses Pi's namespaced TUI selection keybindings", () => {
+		const checked: string[] = [];
+		const keybindings = {
+			matches(_data: string, id: string) {
+				checked.push(id);
+				return id === "tui.select.confirm";
+			},
+		};
+
+		assert.equal(isFileBrowserNavigationKey("enter", keybindings), true);
+		assert.deepEqual(checked, ["tui.select.up", "tui.select.down", "tui.select.confirm"]);
+	});
+});
 
 describe("extractFileReferencesFromText", () => {
 	it("includes file tag name", () => {
