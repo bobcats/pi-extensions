@@ -2,6 +2,20 @@ import os from "node:os";
 import path from "node:path";
 import { extractCostTotal } from "../shared/lib.ts";
 
+/** Pi slash-command kind from SlashCommandInfo.source (not sourceInfo.source provenance). */
+export type SlashCommandSource = "extension" | "prompt" | "skill";
+
+type CommandWithSource = {
+	name: string;
+	source: SlashCommandSource | string;
+	sourceInfo: { path: string; source?: string };
+};
+
+/** Filter commands by SlashCommandInfo.source (extension | prompt | skill). */
+export function commandsFromSource<T extends CommandWithSource>(commands: readonly T[], source: SlashCommandSource | string): T[] {
+	return commands.filter((command) => command.source === source);
+}
+
 export function estimateTokens(text: string): number {
 	// Deliberately fuzzy (good enough for "how big-ish is this").
 	return Math.max(0, Math.ceil(text.length / 4));

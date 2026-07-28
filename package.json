@@ -7,6 +7,27 @@
   "keywords": [
     "pi-package"
   ],
+  "workspaces": [
+    "auto-name-session",
+    "claude-code-tmux",
+    "confirm-rm",
+    "exa",
+    "ext-prof",
+    "handoff",
+    "hypura",
+    "memory",
+    "openai-fast",
+    "slop-scan",
+    "subagent",
+    "tldraw-desktop"
+  ],
+  "scripts": {
+    "test": "npm run test:workspaces && npm run test:root",
+    "test:workspaces": "npm run test --workspaces --if-present",
+    "test:root": "tsx --test --test-timeout=5000 context/*.test.ts files/*.test.ts notify/*.test.ts session-breakdown/*.test.ts shared/*.test.ts memory/skills/memory-ingest/scripts/*.test.ts",
+    "smoke": "tsx scripts/smoke-extensions.ts",
+    "smoke:extensions": "tsx scripts/smoke-extensions.ts"
+  },
   "pi": {
     "extensions": [
       "./ext-prof/index.ts",
@@ -40,10 +61,12 @@
     "effect": "^3.21.2"
   },
   "devDependencies": {
-    "@earendil-works/pi-coding-agent": "*",
-    "@earendil-works/pi-ai": "*",
-    "@earendil-works/pi-agent-core": "*",
-    "@earendil-works/pi-tui": "*",
-    "typebox": "*"
+    "@earendil-works/pi-agent-core": "0.82.0",
+    "@earendil-works/pi-ai": "0.82.0",
+    "@earendil-works/pi-coding-agent": "0.82.0",
+    "@earendil-works/pi-tui": "0.82.0",
+    "@sinclair/typebox": "^0.34.41",
+    "tsx": "^4.20.0",
+    "typebox": "1.1.38"
   }
 }

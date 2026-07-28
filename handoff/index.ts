@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { dirname, resolve } from "node:path";
+import { complete, type AuthResult, type Message, type Model, type ProviderEnv, type ProviderHeaders } from "@earendil-works/pi-ai/compat";
 import type { ExtensionAPI, SessionEntry } from "@earendil-works/pi-coding-agent";
 import { BorderedLoader, convertToLlm, serializeConversation } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
@@ -34,51 +34,15 @@ no code fences. Use workspace-relative paths for files.`;
 
 // ── Local types ───────────────────────────────────────────────────────────────
 
-type Message = {
-  role: string;
-  content: unknown;
-  timestamp?: number;
-};
-
-type CompleteFn = (model: any, context: any, options?: any) => Promise<any>;
-
-let cachedCompleteFn: CompleteFn | undefined;
-
-async function loadCompatComplete(): Promise<CompleteFn> {
-  if (cachedCompleteFn) return cachedCompleteFn;
-
-  const rootEntry = fileURLToPath(import.meta.resolve("@earendil-works/pi-ai"));
-  const compatUrl = pathToFileURL(join(dirname(rootEntry), "compat.js")).href;
-  const compat = await import(compatUrl) as { complete?: CompleteFn };
-  if (typeof compat.complete !== "function") {
-    throw new Error("@earendil-works/pi-ai compat complete() is unavailable");
-  }
-  cachedCompleteFn = compat.complete;
-  return cachedCompleteFn;
-}
-
 type HandoffDeps = {
-  completeFn?: CompleteFn;
+  completeFn?: typeof complete;
   summaryProvider?: string;
   summaryModel?: string;
 };
 
-type AuthOk = {
-  ok: true;
-  apiKey?: string;
-  headers?: Record<string, string>;
-};
-
-type AuthError = {
-  ok: false;
-  error: string;
-};
-
-type AuthResult = AuthOk | AuthError;
-
 type SummaryModelResolution = {
-  model: { provider: string; id: string };
-  auth: AuthOk;
+  model: Model<any>;
+  auth: AuthResult;
 };
 
 type SummaryModelResolutionResult =
@@ -106,18 +70,19 @@ type SessionHeaderLike = {
 };
 
 type HandoffCommandContext = {
+  mode: "tui" | "rpc" | "json" | "print";
   hasUI: boolean;
   model: { provider: string; id: string } | undefined;
   modelRegistry: {
-    find(provider: string, modelId: string): { provider: string; id: string } | null;
-    getApiKeyAndHeaders(model: { provider: string; id: string }): Promise<AuthResult>;
+    find(provider: string, modelId: string): Model<any> | undefined;
+    getProviderAuth(provider: string): Promise<AuthResult | undefined>;
   };
   sessionManager: {
     getBranch(): SessionEntry[];
-    getSessionFile(): string;
+    getSessionFile(): string | undefined;
   };
   newSession(options: {
-    parentSession: string;
+    parentSession?: string;
     withSession?: (ctx: ReplacementSessionContext) => Promise<void>;
   }): Promise<{ cancelled: boolean }>;
   ui: {
@@ -194,7 +159,7 @@ function hasHandoffContextText(message: any): boolean {
 }
 
 function ensureInteractiveMode(ctx: HandoffCommandContext): boolean {
-  if (!ctx.hasUI) {
+  if (ctx.mode !== "tui" || !ctx.hasUI) {
     ctx.ui.notify("Handoff requires interactive mode.", "error");
     return false;
   }
@@ -245,12 +210,18 @@ async function resolveSummaryModel(
     return { ok: false, error: `${provider}/${modelId} is not registered` };
   }
 
-  const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
-  if (!auth.ok) {
-    return { ok: false, error: `${provider}/${modelId} credentials unavailable: ${auth.error}` };
+  let auth: AuthResult | undefined;
+  try {
+    auth = await ctx.modelRegistry.getProviderAuth(model.provider);
+  } catch (error) {
+    return { ok: false, error: `${provider}/${modelId} credentials unavailable: ${errorToMessage(error)}` };
+  }
+  if (!auth) {
+    return { ok: false, error: `${provider}/${modelId} credentials unavailable: no configured authentication` };
   }
 
-  return { ok: true, resolved: { model, auth } };
+  const requestModel = auth.auth.baseUrl ? { ...model, baseUrl: auth.auth.baseUrl } : model;
+  return { ok: true, resolved: { model: requestModel, auth } };
 }
 
 export function handoffMessagesFromBranch(branch: SessionEntry[]): any[] {
@@ -357,7 +328,7 @@ function prepareToolHandoff(ctx: HandoffToolContext, params: { goal: string }) {
 
 async function generateSummaryWithLoader(params: {
   ctx: HandoffCommandContext;
-  completeFn: CompleteFn;
+  completeFn: typeof complete;
   resolved: SummaryModelResolution;
   messages: any[];
   goal: string;
@@ -370,8 +341,9 @@ async function generateSummaryWithLoader(params: {
     generateHandoffSummary({
       completeFn,
       model: resolved.model,
-      apiKey: resolved.auth.apiKey,
-      headers: resolved.auth.headers,
+      apiKey: resolved.auth.auth.apiKey,
+      headers: resolved.auth.auth.headers,
+      env: resolved.auth.env,
       messages,
       goal,
       signal: loader.signal,
@@ -440,10 +412,11 @@ async function applyHandoffToNewSession(params: {
 // ── Public API ────────────────────────────────────────────────────────────────
 
 export async function generateHandoffSummary(params: {
-  completeFn: CompleteFn;
-  model: { provider: string; id: string };
+  completeFn: typeof complete;
+  model: Model<any>;
   apiKey: string | undefined;
-  headers: Record<string, string> | undefined;
+  headers: ProviderHeaders | undefined;
+  env?: ProviderEnv;
   messages: any[];
   goal: string;
   signal?: AbortSignal;
@@ -465,7 +438,7 @@ export async function generateHandoffSummary(params: {
   const response = await params.completeFn(
     params.model,
     { systemPrompt: CREATE_HANDOFF_CONTEXT_SYSTEM_PROMPT, messages: [userMessage] },
-    { apiKey: params.apiKey, headers: params.headers, signal: params.signal },
+    { apiKey: params.apiKey, headers: params.headers, env: params.env, signal: params.signal },
   );
 
   const stopReason = (response as any).stopReason;
@@ -498,6 +471,7 @@ export async function generateHandoffSummary(params: {
 }
 
 export function createHandoffExtension(deps: HandoffDeps = {}) {
+  const completeFn = deps.completeFn ?? complete;
   const SUMMARY_PROVIDER = deps.summaryProvider ?? "openai-codex";
   const SUMMARY_MODEL = deps.summaryModel ?? "gpt-5.5";
 
@@ -542,7 +516,6 @@ export function createHandoffExtension(deps: HandoffDeps = {}) {
           return;
         }
 
-        const completeFn = deps.completeFn ?? await loadCompatComplete();
         const summary = await generateSummaryWithLoader({ ctx: hctx, completeFn, resolved: resolved.resolved, messages, goal });
         if (summary === null) {
           hctx.ui.notify("Handoff cancelled.", "info");

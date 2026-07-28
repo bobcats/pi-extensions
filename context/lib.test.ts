@@ -2,7 +2,34 @@ import assert from "node:assert/strict";
 import os from "node:os";
 import path from "node:path";
 import { describe, it } from "node:test";
-import { estimateTokens, normalizeReadPath, shortenPath, sumSessionUsage } from "./lib.ts";
+import { commandsFromSource, estimateTokens, normalizeReadPath, shortenPath, sumSessionUsage } from "./lib.ts";
+
+describe("commandsFromSource", () => {
+	it("filters by SlashCommandInfo.source, not sourceInfo provenance", () => {
+		const commands = [
+			{
+				name: "ctx",
+				source: "extension",
+				// Provenance source is package/local/etc — not the command kind.
+				sourceInfo: { source: "local", path: "/ext/context.ts" },
+			},
+			{
+				name: "skill:verify",
+				source: "skill",
+				sourceInfo: { source: "local", path: "/skills/verify/SKILL.md" },
+			},
+			{
+				name: "zoom-out",
+				source: "prompt",
+				sourceInfo: { source: "@bobcats/pi-extensions", path: "/prompts/zoom-out.md" },
+			},
+		];
+
+		assert.deepEqual(commandsFromSource(commands, "skill"), [commands[1]]);
+		assert.deepEqual(commandsFromSource(commands, "extension"), [commands[0]]);
+		assert.deepEqual(commandsFromSource(commands, "prompt"), [commands[2]]);
+	});
+});
 
 describe("estimateTokens", () => {
 	it("returns 0 for empty string", () => {

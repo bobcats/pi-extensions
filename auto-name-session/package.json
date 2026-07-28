@@ -6,8 +6,6 @@
     "test": "tsx --test --test-timeout=5000 *.test.ts"
   },
   "devDependencies": {
-    "@earendil-works/pi-ai": "*",
-    "@earendil-works/pi-coding-agent": "*",
     "tsx": "^4.20.0"
   }
 }

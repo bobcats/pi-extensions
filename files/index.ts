@@ -27,6 +27,7 @@ import {
 	extractFileReferencesFromText,
 	extractPathsFromToolArgs,
 	formatDisplayPath,
+	isFileBrowserNavigationKey,
 	normalizeReferencePath,
 } from "./lib.ts";
 import {
@@ -110,7 +111,7 @@ const extractFileReferencesFromContent = (content: unknown): string[] => {
 };
 
 const extractFileReferencesFromEntry = (entry: SessionEntry): string[] => {
-	if (entry.type === "message") {
+	if (entry.type === "message" && "content" in entry.message) {
 		return extractFileReferencesFromContent(entry.message.content);
 	}
 
@@ -221,11 +222,12 @@ const collectSessionFileChanges = (entries: SessionEntry[], cwd: string): Map<st
 const buildFileEntries = async (pi: ExtensionAPI, ctx: ExtensionContext): Promise<{ files: FileEntry[]; gitRoot: string | null }> => {
 	const entries = ctx.sessionManager.getBranch();
 	const sessionChanges = collectSessionFileChanges(entries, ctx.cwd);
-	const gitRoot = await getGitRoot(pi, ctx.cwd);
+	const exec = pi.exec.bind(pi);
+	const gitRoot = await getGitRoot(exec, ctx.cwd);
 
 	const [statusMap, gitListing] = await Promise.all([
-		gitRoot ? getGitStatusMap(pi, gitRoot) : Promise.resolve(new Map<string, GitStatusEntry>()),
-		gitRoot ? getGitFiles(pi, gitRoot) : Promise.resolve({ tracked: new Set<string>(), files: [] as Array<{ canonicalPath: string; isDirectory: boolean }> }),
+		gitRoot ? getGitStatusMap(exec, gitRoot) : Promise.resolve(new Map<string, GitStatusEntry>()),
+		gitRoot ? getGitFiles(exec, gitRoot) : Promise.resolve({ tracked: new Set<string>(), files: [] as Array<{ canonicalPath: string; isDirectory: boolean }> }),
 	]);
 	const trackedSet = gitListing.tracked;
 	const gitFiles = gitListing.files;
@@ -703,15 +705,10 @@ const showFileSelector = async (
 					}
 				}
 
-				if (
-					keybindings.matches(data, "selectUp") ||
-					keybindings.matches(data, "selectDown") ||
-					keybindings.matches(data, "selectConfirm") ||
-					keybindings.matches(data, "selectCancel")
-				) {
+				if (isFileBrowserNavigationKey(data, keybindings)) {
 					if (selectList) {
 						selectList.handleInput(data);
-					} else if (keybindings.matches(data, "selectCancel")) {
+					} else if (keybindings.matches(data, "tui.select.cancel")) {
 						done(null);
 					}
 					tui.requestRender();

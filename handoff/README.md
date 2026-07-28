@@ -41,7 +41,7 @@ In non-interactive mode, the tool returns a clear error explaining that an inter
 
 ## Guardrails and error handling
 
-- `!ctx.hasUI` → `Handoff requires interactive mode.`
+- `ctx.mode !== "tui" || !ctx.hasUI` → `Handoff requires interactive mode.`
 - `!ctx.model` → `No model selected.`
 - empty goal → `Usage: /handoff <goal for new session>`
 - no meaningful conversation text → `No conversation to hand off.`

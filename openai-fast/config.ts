@@ -4,7 +4,12 @@ import { dirname, join } from "node:path";
 import { CONFIG_DIR_NAME } from "@earendil-works/pi-coding-agent";
 
 export const FAST_CONFIG_BASENAME = "openai-fast.json";
-export const DEFAULT_SUPPORTED_MODEL_KEYS = ["openai/gpt-5.4", "openai-codex/gpt-5.4", "openai-codex/gpt-5.5"] as const;
+export const DEFAULT_SUPPORTED_MODEL_KEYS = [
+  "openai-codex/gpt-5.6-sol",
+  "openai-codex/gpt-5.6-terra",
+  "openai-codex/gpt-5.6-luna",
+  "openai-codex/gpt-5.4-mini",
+] as const;
 
 export interface FastSupportedModel {
 	provider: string;

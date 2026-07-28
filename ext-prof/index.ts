@@ -58,25 +58,27 @@ function resolveRunnerModuleUrl(): string {
     return undefined;
   };
 
+  // Prefer ESM resolve: package exports are import-only, so require.resolve often fails.
+  try {
+    if (typeof import.meta.resolve === "function") {
+      const resolved = import.meta.resolve("@earendil-works/pi-coding-agent");
+      const pkgPath = toPath(resolved);
+      // import.meta.resolve returns .../dist/index.js → runner is sibling under dist/core/...
+      const found = addCandidate(path.join(path.dirname(pkgPath), "core", "extensions", "runner.js"));
+      if (found) return pathToFileURL(found).href;
+    }
+  } catch (error) {
+    void error;
+    // Fall through to filesystem probes when ESM resolution is unavailable.
+  }
+
   try {
     const pkgEntry = require.resolve("@earendil-works/pi-coding-agent");
     const found = addCandidate(path.join(path.dirname(pkgEntry), "core", "extensions", "runner.js"));
     if (found) return pathToFileURL(found).href;
   } catch (error) {
     void error;
-    // Fall through to the next resolver: Pi is installed in different layouts in dev vs packaged runs.
-  }
-
-  try {
-    if (typeof import.meta.resolve === "function") {
-      const resolved = import.meta.resolve("@earendil-works/pi-coding-agent");
-      const pkgPath = toPath(resolved);
-      const found = addCandidate(path.join(path.dirname(pkgPath), "core", "extensions", "runner.js"));
-      if (found) return pathToFileURL(found).href;
-    }
-  } catch (error) {
-    void error;
-    // Fall through to filesystem probes when ESM resolution is unavailable or points at package metadata.
+    // Fall through: CJS resolve fails when package exports omit a require condition.
   }
 
   const seedDirs = [
@@ -85,28 +87,22 @@ function resolveRunnerModuleUrl(): string {
     path.dirname(process.execPath),
   ].filter((value): value is string => typeof value === "string" && value.length > 0);
 
+  const scopes = ["@earendil-works", "@mariozechner"] as const;
+
   for (const seed of seedDirs) {
     for (const dir of walkUpDirectories(seed)) {
       let found: string | undefined;
-      for (const scope of ["@earendil-works", "@mariozechner"]) {
+      for (const scope of scopes) {
         found =
-          addCandidate(path.join(dir, "node_modules", scope, "pi-coding-agent", "dist", "core", "extensions", "runner.js")) ??
           addCandidate(
-            path.join(
-              dir,
-              "lib",
-              "node_modules",
-              scope,
-              "pi-coding-agent",
-              "dist",
-              "core",
-              "extensions",
-              "runner.js",
-            ),
+            path.join(dir, "node_modules", scope, "pi-coding-agent", "dist", "core", "extensions", "runner.js"),
+          ) ??
+          addCandidate(
+            path.join(dir, "lib", "node_modules", scope, "pi-coding-agent", "dist", "core", "extensions", "runner.js"),
           );
         if (found) break;
       }
-      found ??= addCandidate(path.join(dir, "dist", "core", "extensions", "runner.js"));
+      found = found ?? addCandidate(path.join(dir, "dist", "core", "extensions", "runner.js"));
 
       if (found) {
         return pathToFileURL(found).href;

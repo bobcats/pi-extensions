@@ -1,12 +1,12 @@
 {
-  "name": "pi-slop-scan",
+  "name": "pi-subagent",
   "private": true,
   "type": "module",
   "scripts": {
     "test": "tsx --test --test-timeout=5000 *.test.ts"
   },
   "dependencies": {
-    "slop-scan": "^0.3.0"
+    "effect": "^3.21.2"
   },
   "devDependencies": {
     "@sinclair/typebox": "*",

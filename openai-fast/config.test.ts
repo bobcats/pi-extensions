@@ -38,6 +38,32 @@ describe("openai-fast config", () => {
 		assert.deepEqual(config.supportedModels, [{ provider: "openai", id: "gpt-5.5" }]);
 	});
 
+	it("ignores project-supported models when the project is untrusted", () => {
+		const root = mkdtempSync(join(tmpdir(), "openai-fast-untrusted-"));
+		const cwd = join(root, "project");
+		const homeDir = join(root, "home");
+
+		mkdirSync(join(homeDir, ".config-pi", "agent"), { recursive: true });
+		mkdirSync(join(cwd, ".config-pi", "extensions"), { recursive: true });
+		writeFileSync(
+			join(homeDir, ".config-pi", "agent", "openai-fast.json"),
+			JSON.stringify({ supportedModels: ["openai/gpt-safe"] }),
+		);
+		writeFileSync(
+			join(cwd, ".config-pi", "extensions", "openai-fast.json"),
+			JSON.stringify({ supportedModels: ["openai/gpt-untrusted"] }),
+		);
+
+		const config = resolveFastConfig(cwd, homeDir, {
+			projectTrusted: false,
+			configDirName: ".config-pi",
+			agentDir: join(homeDir, ".config-pi", "agent"),
+		});
+
+		assert.deepEqual(config.supportedModels, [{ provider: "openai", id: "gpt-safe" }]);
+		assert.equal(config.configPath, join(homeDir, ".config-pi", "agent", "openai-fast.json"));
+	});
+
 	it("parses provider/model keys and rejects invalid entries", () => {
 		assert.deepEqual(parseSupportedModelKey("openai/gpt-5.4"), {
 			provider: "openai",
@@ -58,14 +84,20 @@ describe("openai-fast config", () => {
 
 		assert.equal(existsSync(globalConfigPath), true);
 		assert.deepEqual(config.supportedModels, [
-			{ provider: "openai", id: "gpt-5.4" },
-			{ provider: "openai-codex", id: "gpt-5.4" },
-			{ provider: "openai-codex", id: "gpt-5.5" },
+			{ provider: "openai-codex", id: "gpt-5.6-sol" },
+			{ provider: "openai-codex", id: "gpt-5.6-terra" },
+			{ provider: "openai-codex", id: "gpt-5.6-luna" },
+			{ provider: "openai-codex", id: "gpt-5.4-mini" },
 		]);
 		assert.deepEqual(JSON.parse(readFileSync(globalConfigPath, "utf8")), {
 			persistState: true,
 			active: false,
-			supportedModels: ["openai/gpt-5.4", "openai-codex/gpt-5.4", "openai-codex/gpt-5.5"],
+			supportedModels: [
+				"openai-codex/gpt-5.6-sol",
+				"openai-codex/gpt-5.6-terra",
+				"openai-codex/gpt-5.6-luna",
+				"openai-codex/gpt-5.4-mini",
+			],
 		});
 	});
 });

@@ -3,7 +3,7 @@ import { stat, realpath } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { Type } from "typebox";
+import { Type } from "@sinclair/typebox";
 
 export type ClaudeCodeTmuxParams = {
   task: string;
