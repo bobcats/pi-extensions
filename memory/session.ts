@@ -28,7 +28,7 @@ const ASSISTANT_TEXT_LIMIT = 800;
 const MIN_TEXT_LENGTH = 10;
 const MIN_FILE_SIZE = 500;
 
-export const MINER_AGENT_PATH = path.join(import.meta.dirname, "agents", "miner.md");
+export const MINER_PROMPT_PATH = path.join(import.meta.dirname, "prompts", "miner.md");
 export const SCRIPTS_DIR = path.join(import.meta.dirname, "scripts");
 
 export function encodeProjectSessionPath(cwd: string): string {
@@ -238,9 +238,10 @@ export function extractAndBatch(
 }
 
 export function buildRuminatePrompt(extraction: ExtractionResult, vaultDir: string): string {
-  const tasks = extraction.batches.map((manifestPath) =>
-    `{ "agent": "memory-miner", "task": "Read the batch manifest at ${manifestPath} — it lists conversation file paths, one per line. Read each conversation file. Also read the vault snapshot at ${extraction.snapshotPath} to see what knowledge is already captured. Return high-signal findings in markdown." }`
-  );
+  const minerPrompt = fs.readFileSync(MINER_PROMPT_PATH, "utf-8").trim();
+  const tasks = extraction.batches.map((manifestPath) => JSON.stringify({
+    task: `${minerPrompt}\n\n## Assigned batch\n\nRead the batch manifest at ${manifestPath}. It lists conversation file paths, one per line. Read each conversation file. Also read the vault snapshot at ${extraction.snapshotPath} to identify knowledge that is already captured. Return only the requested high-signal markdown findings.`,
+  }));
 
   return `# Ruminate
 

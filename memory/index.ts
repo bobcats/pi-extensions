@@ -14,18 +14,19 @@ import { CONFIG_DIR_NAME } from "@earendil-works/pi-coding-agent";
 import type {
   ExtensionAPI,
   ExtensionContext,
+  SessionStartEvent,
 } from "@earendil-works/pi-coding-agent";
 import { StringEnum } from "@earendil-works/pi-ai";
 import { Text, truncateToWidth, matchesKey } from "@earendil-works/pi-tui";
 import type { AutocompleteItem } from "@earendil-works/pi-tui";
-import { Type } from "typebox";
+import { Type } from "@sinclair/typebox";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import * as qmd from "./qmd.js";
 import { initGitRepo, getChangedFiles, commitVault, undoLastCommit, getGitLog } from "./git.js";
 import { OPERATIONS_FILE, readVaultIndex, listVaultFiles, countVaultFiles, initVault } from "./lib.js";
-import { MINER_AGENT_PATH, SCRIPTS_DIR, parseRuminateArgs, extractAndBatch, buildRuminatePrompt } from "./session.js";
+import { SCRIPTS_DIR, parseRuminateArgs, extractAndBatch, buildRuminatePrompt } from "./session.js";
 import { formatElapsed, formatRelativeTime, STATUS_ICONS, parseOperationsJSONL, renderDashboardLines } from "./dashboard.js";
 import { buildReflectPrompt, buildDreamPrompt, buildForgetPrompt } from "./prompts.js";
 import type { ForgetPromptCandidate } from "./prompts.js";
@@ -82,41 +83,6 @@ const SearchMemoryParams = Type.Object({
 });
 
 export default function memoryExtension(pi: ExtensionAPI) {
-  // Register miner agent with the subagent extension.
-  // Emit eagerly (works if subagent loaded first) and listen for
-  // subagent:discover (works if memory loaded first).
-  interface AgentConfig {
-    name: string;
-    description: string;
-    tools?: string[];
-    model?: string;
-    systemPrompt: string;
-    source: "bundled" | "user" | "project";
-    filePath: string;
-  }
-
-  let minerAgent: AgentConfig | null = null;
-  try {
-    const minerContent = fs.readFileSync(MINER_AGENT_PATH, "utf-8");
-    const fmMatch = minerContent.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
-    const systemPrompt = fmMatch ? fmMatch[2].trim() : minerContent;
-    minerAgent = {
-      name: "memory-miner",
-      description: "Mines conversation batches for uncaptured patterns",
-      tools: ["read", "bash"],
-      model: "openai-codex/gpt-5.4-mini",
-      systemPrompt,
-      source: "bundled",
-      filePath: MINER_AGENT_PATH,
-    };
-    pi.events.emit("subagent:register", [minerAgent]);
-  } catch {
-    // Agent file missing — ruminate will fail gracefully
-  }
-  pi.events.on("subagent:discover", () => {
-    if (minerAgent) pi.events.emit("subagent:register", [minerAgent]);
-  });
-
   let dashboardExpanded = false;
   let dreamMode = false;
   let memoryEnabled = true;
@@ -233,7 +199,7 @@ export default function memoryExtension(pi: ExtensionAPI) {
         const width = process.stdout.columns || 120;
         const lines: string[] = [];
 
-        const hintText = " ctrl+b collapse • ctrl+shift+b fullscreen ";
+        const hintText = " ctrl+shift+m collapse • ctrl+shift+b fullscreen ";
         const label = `🧠 memory (${brain.name})`;
         const fillLen = Math.max(0, width - 3 - 1 - label.length - 1 - hintText.length);
         lines.push(
@@ -274,7 +240,7 @@ export default function memoryExtension(pi: ExtensionAPI) {
           parts.push(theme.fg("warning", `dream cycle ${state.dreamCycle}`));
         }
 
-        parts.push(theme.fg("dim", "  (ctrl+b expand • ctrl+shift+b fullscreen)"));
+        parts.push(theme.fg("dim", "  (ctrl+shift+m expand • ctrl+shift+b fullscreen)"));
 
         return new Text(parts.join(""), 0, 0);
       });
@@ -324,10 +290,9 @@ export default function memoryExtension(pi: ExtensionAPI) {
     schedulePendingResume(ctx, pendingResumeMessage);
   };
 
-  pi.on("session_start", async (_e, ctx) => reconstructState(ctx));
-  pi.on("session_switch", async (_e, ctx) => reconstructState(ctx));
-  pi.on("session_fork", async (_e, ctx) => reconstructState(ctx));
-  pi.on("session_tree", async (_e, ctx) => reconstructState(ctx));
+  // Pi 0.82 removed session_switch/session_fork; replacements emit session_start with reason.
+  pi.on("session_start", async (_event: SessionStartEvent, ctx) => reconstructState(ctx));
+  pi.on("session_tree", async (_event, ctx) => reconstructState(ctx));
   pi.on("session_before_compact", async () => pausePendingResume());
   pi.on("session_compact", async (_e, ctx) => reschedulePendingResume(ctx));
 
@@ -664,10 +629,10 @@ export default function memoryExtension(pi: ExtensionAPI) {
   });
 
   // -----------------------------------------------------------------------
-  // Ctrl+R — toggle dashboard expand/collapse
+  // Ctrl+Shift+M — toggle dashboard expand/collapse
   // -----------------------------------------------------------------------
 
-  pi.registerShortcut("ctrl+b", {
+  pi.registerShortcut("ctrl+shift+m", {
     description: "Toggle memory dashboard",
     handler: async (ctx) => {
       const brain = getActiveBrain(ctx);
