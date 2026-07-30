@@ -1,6 +1,7 @@
 # @bobcats/pi-extensions
 
-Canonical Bobcats repository for Pi extensions, Pi prompt templates, shared agent skills, extension-owned skills, and flattened non-Pi skill installs.
+Canonical Bobcats repository for Pi extensions, Pi prompt templates, and
+extension-owned skills.
 
 ## What lives here
 
@@ -8,9 +9,10 @@ Canonical Bobcats repository for Pi extensions, Pi prompt templates, shared agen
 |--------|---------|
 | Top-level extension directories | Pi extensions loaded through `package.json` `pi.extensions` |
 | `prompts/*.md` | Pi-native slash-command prompt templates loaded through `pi.prompts` |
-| `skills/<bucket>/<skill>/` | Shared authored skills for Pi and flattened installs |
-| `memory/skills/memory-ingest/` | Extension-owned skill colocated with the memory extension |
-| `scripts/build.py` | Builds and safely installs flattened skills for non-Pi/global skill surfaces |
+| `memory/skills/*/` | Extension-owned skills colocated with the memory extension |
+
+General shared and Pi-only skills live in the parent
+[`bobcats/skills`](https://github.com/bobcats/skills) repository.
 
 ## Pi resources
 
@@ -21,7 +23,8 @@ pi install /path/to/pi-extensions
 pi update
 ```
 
-Pi discovers extensions, prompt templates, and authored skill roots from root `package.json`. Prompt templates remain canonical in `prompts/*.md`; generated prompt-skills are only build/install artifacts for other agents.
+Pi discovers extensions, prompt templates, and the memory extension's owned
+skill from root `package.json`.
 
 ## Extensions
 
@@ -44,69 +47,9 @@ Pi discovers extensions, prompt templates, and authored skill roots from root `p
 | [subagent](./subagent/) | Delegates tasks to isolated subagents — single, parallel, or chained |
 | [tldraw-desktop](./tldraw-desktop/) | Reads and manipulates tldraw desktop canvases |
 
-## Skills
-
-Shared skills use the bucketed source layout from `skills/`:
-
-```text
-skills/
-  engineering/
-  design/
-  review/
-  tools/
-  languages/
-  prototyping/
-  productivity/
-  deprecated/
-memory/skills/
-  memory-ingest/
-```
-
-`skills/deprecated/` is excluded from normal builds and used only for deprecated install cleanup. Extension-owned deprecated skills are not supported.
-
-## Prompt templates and generated prompt-skills
+## Prompt templates
 
 Pi prompt templates live in `prompts/*.md` and become slash commands such as `/zoom-out` and `/grill-me`.
-
-`make build` also generates manual prompt-skills named `prompt-<template-name>` under `build/skills/` for agents that support skills but not Pi prompt templates. These generated skills include `disable-model-invocation: true`, metadata pointing back to the source prompt, and wrapper text explaining `$ARGUMENTS`, `$@`, and `$1` as manual invocation input. Whether manual-only behavior is enforced depends on the consuming agent honoring `disable-model-invocation`.
-
-## Non-Pi/global skill install
-
-Build the flattened install tree:
-
-```bash
-make build
-```
-
-Install the Codex-compatible skills only to Codex:
-
-```bash
-make install-codex
-```
-
-`make install-codex` updates only `~/.codex/skills/`. Avoid installing the same skills into `~/.agents/skills/` on a machine that loads this repository as a Pi package: Pi scans both locations and reports duplicate skill names. The Pi package's `pi.skills` declaration remains the canonical source for Pi, and extension-owned `memory/skills` such as `memory-ingest` are intentionally excluded from Codex.
-
-Run installer tests:
-
-```bash
-make test
-```
-
-Install flattened skills for skill-only agents only when you intend to mutate global skill directories. Use `make install-codex` for Codex only, or `make install` only when you explicitly want the skill tree in all configured agent roots:
-
-```bash
-make install
-```
-
-Install targets for `make install`:
-
-- `~/.agents/skills/` for OpenCode, Pi, and other unified skill consumers
-- `~/.codex/skills/` for Codex (extension-owned skills are excluded)
-- `~/.claude/skills/` for Claude Code
-
-`make install-codex` selects only `~/.codex/skills/`. Target selection is also available as `python3 scripts/build.py install --target codex`.
-
-The installer tracks managed files in `$XDG_STATE_HOME/bobcats-skills/install-manifest.json` or `~/.local/state/bobcats-skills/install-manifest.json`, preserves unmanaged sibling files, removes stale managed files, and refuses to overwrite local edits unless bootstrapped with `make install FORCE=1`.
 
 ## Development
 
@@ -128,12 +71,6 @@ Import-smoke every extension listed in `package.json` `pi.extensions` against th
 
 ```bash
 npm run smoke
-```
-
-Run repository-level installer tests:
-
-```bash
-python3 -m unittest discover -s tests
 ```
 
 Run selected extension tests:

@@ -52,8 +52,6 @@
       "!prompts/README.md"
     ],
     "skills": [
-      "skills",
-      "!skills/deprecated/**",
       "memory/skills"
     ]
   },
